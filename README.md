@@ -2,9 +2,10 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**`S0-M0 — Bootstrap`과 `S0-M1 — Contract / Numeric / Identity`는 완료됐고,
-`S0-M2 — Command / Geometry / Structural Phase`를 구현 중이다.** Gate/Wire의 signal
-semantics는 아직 구현하지 않는다. 전체 엔진 완료 현황은
+**`S0-M0 — Bootstrap`, `S0-M1 — Contract / Numeric / Identity`,
+`S0-M2 — Command / Geometry / Structural Phase`까지 완료됐고,
+`S0-M3 — Signal Topology / Event Runtime`이 다음 구현 경계다.** Gate/Wire의 signal
+semantics는 아직 구현되지 않았다. 전체 엔진 완료 현황은
 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline
@@ -81,11 +82,15 @@ CI의 cross-host test는 0, 1, 100 tick에서 Headless loop와 실제 Bevy `Fixe
 ## Current API boundary
 
 현재 Core API는 versioned `SimulationContract`, 실제 Numeric/Physical/Balance Profile,
-fixed-point numeric/geometry, stable identity registry, `Simulation::new`, empty-only
-`Simulation::step`, render snapshot, canonical state hash까지 제공한다.
+fixed-point numeric/geometry, stable identity registry, canonical Stage 0 structural command,
+`Simulation::new`, transactional `Simulation::step`, render snapshot, canonical state hash까지
+제공한다.
 
 - Scenario/Profile schema `1`, semantics `aon-semantics-v1`, hash algorithm `blake3-v1`만
   현재 지원한다.
 - Profile hash와 state hash는 명시적인 v1 domain/encoder를 사용한다.
-- 아직 gameplay feature가 없는 empty World만 실행한다.
-- 실제 Command ordering과 12-phase structural runtime은 `S0-M2` 이후 구현한다.
+- artifact의 Initial World는 아직 Empty만 지원하지만, command로 Fixed Substrate, Gate, Wire,
+  Junction을 생성·바인드·제거할 수 있다.
+- Phase 0은 ordinal ordering, deterministic rejection, geometry validation, generation/revision,
+  fatal-overflow rollback을 구현한다.
+- 신호 graph/event runtime과 나머지 12-phase semantics는 `S0-M3` 이후 구현한다.

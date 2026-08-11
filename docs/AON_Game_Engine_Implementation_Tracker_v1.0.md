@@ -12,7 +12,7 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 
 - [x] S0-M0 — Bootstrap
 - [x] S0-M1 — Contract / Numeric / Identity
-- [ ] S0-M2 — Command / Geometry / Structural Phase
+- [x] S0-M2 — Command / Geometry / Structural Phase
 - [ ] S0-M3 — Signal Topology / Event Runtime
 - [ ] S0-M4 — Topology Sync / Path Certificate
 - [ ] S0-M5 — Feedback / Replay
@@ -94,14 +94,35 @@ S0-M1 completed on 2026-08-11 at commit `4a0d02c`. Its acceptance evidence is:
 - [x] Decoder/geometry fuzz harness replays its retained regression corpus without panic
 - [x] All workspace and clean-checkout quality gates pass offline without warnings
 
-## Current implementation slice — S0-M2
+## Completed slice — S0-M2
 
-- [ ] Command payload, port/node identity, created-ID return, duplicate ordinal, placement, and
+S0-M2 completed on 2026-08-12 at commit `f978b7e`. Its acceptance evidence is:
+
+- [x] Command payload, port/node identity, created-ID return, duplicate ordinal, placement, and
   geometry boundary decisions are versioned
-- [ ] `CommandEnvelope` and Stage 0 structural command types replace the placeholder
-- [ ] Gate, Wire, Junction, and Substrate canonical stores are implemented
-- [ ] Phase 0 validates commands in ordinal order without partial mutation
-- [ ] Geometry quantum, routing pitch, overlap, crossing, support, and endpoint rules are enforced
-- [ ] Accepted structural changes update connection generations and topology revision
-- [ ] Rejections are deterministic results rather than run-stopping errors
-- [ ] C-20, invalid-geometry no-panic, permutation, hash, and clean-checkout gates pass
+- [x] `CommandEnvelope` and Stage 0 structural command types replace the placeholder
+- [x] Gate, Wire, Junction, and Fixed Substrate canonical no-compaction stores are implemented
+- [x] Phase 0 validates commands in ordinal order on a clone and swaps only after fatal checks pass
+- [x] Geometry quantum, routing pitch, overlap, crossing, support, endpoint, and Gate-port rules are
+  enforced with exact full-range integer predicates
+- [x] Accepted structural changes update connection generations once per Phase and topology
+  revision once per topology-changing Phase
+- [x] Stable rejection precedence produces deterministic command results without partial mutation
+- [x] Single/multi-segment length, coordinate, Tick, EntityId, generation, and revision overflow
+  paths roll back Tick, hash, topology, and allocation state
+- [x] Canonical hash includes EntityId-ordered raw records and excludes SoA slot, capacity, arena
+  range, and derived-cache layout
+- [x] Stateful command fuzz mapping reaches effective bind/remove, tombstone, and wrong-kind paths;
+  retained corpus replay fails on encoder disagreement or invariant errors
+- [x] C-20, invalid-geometry no-panic, permutation, hash, strict Clippy, and clean-checkout offline
+  gates pass
+
+## Current implementation slice — S0-M3
+
+- [ ] S0-M3 signal/event representation and ordering decisions are versioned
+- [ ] Driver/Sink stores and Gate/Wire signal state are canonical
+- [ ] Signal adjacency and deterministic Driver-to-Sink routes compile from explicit bindings
+- [ ] Event Calendar orders DriverTransition and SignalArrival deterministically
+- [ ] Inertial generation tokens discard canceled arrivals and Sink resolution is deterministic
+- [ ] Scheduled events and signal state participate in canonical state hashing
+- [ ] C-01, C-02, C-03, replay, fuzz, and clean-checkout gates pass
