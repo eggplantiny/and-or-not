@@ -332,8 +332,14 @@ segmentLength = ceil_isqrt(dx² + dy²)
 Wire Length:
 
 ```text
-wireLength = Σ segmentLength
+consecutive same-direction collinear segments
+→ maximal collinear run
+
+wireLength = Σ segmentLength(maximal run)
 ```
+
+이 canonicalization은 Length 계산에만 적용한다. 저장된 vertex와 State Hash는 바꾸지 않는다.
+따라서 불필요한 collinear vertex가 segment별 ceiling을 중복 발생시키지 않는다.
 
 이 규칙은 다음에 공통으로 사용한다.
 

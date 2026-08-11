@@ -2,14 +2,15 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**Engine Bootstrap (`S0-M0`)은 완료됐다.** 다음 구현 단계는 `S0-M1 — Contract / Numeric / Identity`다. Gate, Wire, Signal 같은 gameplay semantics는 아직 구현하지 않는다.
+**Engine Bootstrap (`S0-M0`)은 완료됐고 `S0-M1 — Contract / Numeric / Identity`를 구현 중이다.** Gate, Wire, Signal 같은 gameplay semantics는 아직 구현하지 않는다. 전체 엔진 완료 현황은 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline
 
 - Product: `docs/prd-v.1.0.md` — v1.0 GO Candidate
 - Semantics: `docs/AON_Simulation_Semantics_Spec_v1.0.md` — v1.0 Draft
 - Architecture: `docs/AON_TRD_v1.0.md` — v1.0 Draft
-- Current milestones: `docs/AON_Engine_Bootstrap_Milestones_v1.0.md` — v1.0 Draft
+- Engine implementation tracker: `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`
+- Bootstrap milestone archive: `docs/AON_Engine_Bootstrap_Milestones_v1.0.md` — v1.0 Draft
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -36,6 +37,7 @@ sudo apt-get install build-essential pkg-config libxkbcommon-x11-0
 
 ```text
 crates/aon-sim     Pure Rust canonical simulation core
+crates/aon-fuzz-harness  Bounded decoder/geometry fuzz regression harness
 apps/aon-headless  Scenario runner and determinism oracle
 apps/aon-app       Bevy interactive host shell
 ```
@@ -67,15 +69,20 @@ cargo check --workspace --all-targets --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo test -p aon-sim --test conformance_stage0 --locked
+cargo test -p aon-fuzz-harness --locked
 ```
 
 CI의 cross-host test는 0, 1, 100 tick에서 Headless loop와 실제 Bevy `FixedUpdate` schedule의 전체 hash trace를 비교한다. Native window 실행은 display server가 필요한 수동 smoke gate다.
 
-## Bootstrap API boundary
+## Current API boundary
 
-현재 Core API는 `Simulation::new`, empty-only `Simulation::step`, render snapshot, state hash까지만 제공한다.
+현재 Core API는 versioned `SimulationContract`, 실제 Numeric/Physical/Balance Profile,
+fixed-point numeric/geometry, stable identity registry, `Simulation::new`, empty-only
+`Simulation::step`, render snapshot, canonical state hash까지 제공한다.
 
-- Bootstrap profile은 schema `0`과 `bootstrap-*` ID로 실제 Stage 0 profile과 구분한다.
-- Bootstrap state hash는 임시 domain/version을 사용한다.
-- 실제 Simulation Contract, numeric profile, fixed-point geometry와 identity는 `S0-M1`에서 구현한다.
+- Scenario/Profile schema `1`, semantics `aon-semantics-v1`, hash algorithm `blake3-v1`만
+  현재 지원한다.
+- Profile hash와 state hash는 명시적인 v1 domain/encoder를 사용한다.
+- 아직 gameplay feature가 없는 empty World만 실행한다.
 - 실제 Command ordering과 12-phase structural runtime은 `S0-M2` 이후 구현한다.

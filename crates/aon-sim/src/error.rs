@@ -1,4 +1,6 @@
-use crate::{ArtifactKind, ProfileKind};
+use crate::{
+    ArtifactKind, HashParseError, NumericError, ProfileHash, ProfileKind, ProfileValidationError,
+};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +45,12 @@ pub enum PackageError {
         actual: String,
     },
 
+    #[error("unsupported hash algorithm: expected {expected}, got {actual}")]
+    UnsupportedHashAlgorithm {
+        expected: &'static str,
+        actual: String,
+    },
+
     #[error("{artifact} field `{field}` must not be empty")]
     EmptyField {
         artifact: ArtifactKind,
@@ -61,13 +69,56 @@ pub enum PackageError {
         expected_id: String,
         actual_id: String,
     },
+
+    #[error("invalid declared {profile} profile hash: {error}")]
+    InvalidProfileHash {
+        profile: ProfileKind,
+        error: HashParseError,
+    },
+
+    #[error("invalid {profile} profile: {error}")]
+    InvalidProfile {
+        profile: ProfileKind,
+        error: ProfileValidationError,
+    },
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum SimulationError {
-    #[error("canonical tick overflow")]
-    TickOverflow,
+    #[error("canonical numeric overflow")]
+    NumericOverflow,
 
-    #[error("bootstrap simulation accepts only an empty command batch")]
+    #[error("canonical numeric divisor must be positive")]
+    InvalidNumericDivisor,
+
+    #[error("invalid simulation profile: {error}")]
+    InvalidProfile { error: ProfileValidationError },
+
+    #[error("{profile} profile hash mismatch: expected {expected}, got {actual}")]
+    ProfileHashMismatch {
+        profile: ProfileKind,
+        expected: ProfileHash,
+        actual: ProfileHash,
+    },
+
+    #[error("unsupported semantics version `{actual}`")]
+    UnsupportedSemanticsVersion { actual: String },
+
+    #[error("unsupported hash algorithm `{actual}`")]
+    UnsupportedHashAlgorithm { actual: String },
+
+    #[error("stage feature `{feature}` is not implemented by this engine build")]
+    UnsupportedStageFeature { feature: &'static str },
+
+    #[error("S0-M1 simulation accepts only an empty command batch")]
     CommandsUnsupported,
+}
+
+impl From<NumericError> for SimulationError {
+    fn from(error: NumericError) -> Self {
+        match error {
+            NumericError::Overflow => Self::NumericOverflow,
+            NumericError::NonPositiveDivisor => Self::InvalidNumericDivisor,
+        }
+    }
 }

@@ -1,6 +1,9 @@
 use aon_app::{embedded_empty_package, run_host_harness, run_paced_host_harness};
 use aon_headless::{load_package, run_scenario};
-use aon_sim::StateHash;
+use aon_sim::{
+    BalanceProfile, InitialWorld, NumericProfile, PhysicalScaleProfile, ProfileBundle,
+    SimulationContract, SimulationPackage, StageFeatureSet, StateHash,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -74,4 +77,33 @@ fn native_pacing_preserves_all_tick_debt_across_long_frames() {
     )
     .expect("paced Bevy host succeeds");
     assert_trace_equal(headless.checkpoints(), ten_short_frames.checkpoints());
+}
+
+#[test]
+fn native_pacing_uses_the_balance_profile_frequency() {
+    fn ten_hz_package() -> SimulationPackage {
+        let mut balance = BalanceProfile::stage0_alpha("balance-ten-hz");
+        balance.simulation_hz = 10;
+        let profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-v1"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-stage0"),
+            balance,
+        };
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        SimulationPackage::new(
+            "ten-hz-empty",
+            InitialWorld::Empty,
+            StageFeatureSet::none(),
+            contract,
+            profiles,
+        )
+    }
+
+    let one_second = run_paced_host_harness(ten_hz_package(), &[Duration::from_secs(1)])
+        .expect("10 Hz host succeeds");
+    let split_second = run_paced_host_harness(ten_hz_package(), &[Duration::from_millis(100); 10])
+        .expect("10 Hz split-frame host succeeds");
+
+    assert_eq!(one_second.checkpoints().len(), 11);
+    assert_eq!(one_second, split_second);
 }

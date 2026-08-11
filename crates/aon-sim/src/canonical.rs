@@ -1,139 +1,172 @@
-use crate::{InitialWorld, ProfileArtifact, ProfileHash, StateHash};
+use crate::{EntityLocation, EntityRegistry, Revision, SimulationContract, StateHash, Tick};
 
-const PROFILE_DOMAIN: &[u8] = b"AON\0PROFILE\0BOOTSTRAP\0";
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0BOOTSTRAP\0";
-const PROFILE_ENCODER_VERSION: u16 = 1;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V1\0";
 const STATE_ENCODER_VERSION: u16 = 1;
 const EMPTY_STORE_COUNT: usize = 8;
 
-pub(crate) fn profile_hash(profile: &ProfileArtifact) -> ProfileHash {
-    let mut encoder = CanonicalEncoder::new();
-    encoder.push_bytes(PROFILE_DOMAIN);
-    encoder.push_u16(PROFILE_ENCODER_VERSION);
-    encoder.push_u32(profile.schema_version());
-    encoder.push_u8(profile.kind().canonical_tag());
-    encoder.push_string(profile.profile_id());
-    ProfileHash::from_bytes(*blake3::hash(encoder.as_slice()).as_bytes())
-}
-
 pub(crate) fn state_hash(
-    semantics_version: &str,
-    numeric_profile: ProfileHash,
-    physical_scale_profile: ProfileHash,
-    balance_profile: ProfileHash,
-    initial_world: &InitialWorld,
-    next_tick: u64,
+    contract: &SimulationContract,
+    next_tick: Tick,
+    topology_revision: Revision,
+    entities: &EntityRegistry,
 ) -> StateHash {
-    let bytes = encode_state(
-        semantics_version,
-        numeric_profile,
-        physical_scale_profile,
-        balance_profile,
-        initial_world,
+    let mut hasher = blake3::Hasher::new();
+    encode_state(
+        contract,
         next_tick,
+        topology_revision,
+        entities,
+        &mut |bytes| {
+            hasher.update(bytes);
+        },
     );
-    StateHash::from_bytes(*blake3::hash(&bytes).as_bytes())
+    StateHash::from_bytes(*hasher.finalize().as_bytes())
 }
 
 fn encode_state(
-    semantics_version: &str,
-    numeric_profile: ProfileHash,
-    physical_scale_profile: ProfileHash,
-    balance_profile: ProfileHash,
-    initial_world: &InitialWorld,
-    next_tick: u64,
-) -> Vec<u8> {
-    let mut encoder = CanonicalEncoder::new();
-    encoder.push_bytes(STATE_DOMAIN);
-    encoder.push_u16(STATE_ENCODER_VERSION);
-    encoder.push_string(semantics_version);
-    encoder.push_bytes(numeric_profile.as_bytes());
-    encoder.push_bytes(physical_scale_profile.as_bytes());
-    encoder.push_bytes(balance_profile.as_bytes());
-    encoder.push_u8(initial_world.canonical_tag());
-    encoder.push_u64(next_tick);
+    contract: &SimulationContract,
+    next_tick: Tick,
+    topology_revision: Revision,
+    entities: &EntityRegistry,
+    write: &mut dyn FnMut(&[u8]),
+) {
+    write(STATE_DOMAIN);
+    write_u16(STATE_ENCODER_VERSION, write);
+    write_u8(contract.semantics_version.canonical_tag(), write);
+    write(contract.numeric_profile_hash.as_bytes());
+    write(contract.physical_scale_profile_hash.as_bytes());
+    write(contract.balance_profile_hash.as_bytes());
+    write_u64(next_tick.0, write);
+    write_u64(topology_revision.0, write);
+    write_u64(entities.next_id().0, write);
+    write_u64(entities.allocated_count(), write);
+    for (entity_id, location) in entities.canonical_slots() {
+        write_u64(entity_id.0, write);
+        match location {
+            Some(location) => {
+                write_u8(1, write);
+                write_u8(entity_kind_tag(location), write);
+            }
+            None => write_u8(0, write),
+        }
+    }
 
-    // Entity registry, gates, wires, junctions, fixed substrates, mobile
-    // substrates, scheduled events, and pending destructions are all empty.
+    // Gate, wire, junction, fixed substrate, mobile substrate, scheduled event,
+    // pending destruction, and path-certificate stores are introduced by S0-M2+.
     for _ in 0..EMPTY_STORE_COUNT {
-        encoder.push_u64(0);
+        write_u64(0, write);
     }
-
-    encoder.finish()
 }
 
-struct CanonicalEncoder {
-    bytes: Vec<u8>,
+const fn entity_kind_tag(location: EntityLocation) -> u8 {
+    match location {
+        EntityLocation::MainCore => 0,
+        EntityLocation::RelaySite(_) => 1,
+        EntityLocation::Gate(_) => 2,
+        EntityLocation::Wire(_) => 3,
+        EntityLocation::Junction(_) => 4,
+        EntityLocation::FixedSubstrate(_) => 5,
+        EntityLocation::MobileSubstrate(_) => 6,
+        EntityLocation::PowerSource(_) => 7,
+        EntityLocation::Quartz(_) => 8,
+        EntityLocation::Deposit(_) => 9,
+        EntityLocation::Enemy(_) => 10,
+        EntityLocation::ConstructionSite(_) => 11,
+    }
 }
 
-impl CanonicalEncoder {
-    fn new() -> Self {
-        Self { bytes: Vec::new() }
-    }
+fn write_u8(value: u8, write: &mut dyn FnMut(&[u8])) {
+    write(&[value]);
+}
 
-    fn push_bytes(&mut self, bytes: &[u8]) {
-        self.bytes.extend_from_slice(bytes);
-    }
+fn write_u16(value: u16, write: &mut dyn FnMut(&[u8])) {
+    write(&value.to_le_bytes());
+}
 
-    fn push_u8(&mut self, value: u8) {
-        self.bytes.push(value);
-    }
-
-    fn push_u16(&mut self, value: u16) {
-        self.push_bytes(&value.to_le_bytes());
-    }
-
-    fn push_u32(&mut self, value: u32) {
-        self.push_bytes(&value.to_le_bytes());
-    }
-
-    fn push_u64(&mut self, value: u64) {
-        self.push_bytes(&value.to_le_bytes());
-    }
-
-    fn push_string(&mut self, value: &str) {
-        let length = u32::try_from(value.len()).expect("bootstrap identifier length fits in u32");
-        self.push_u32(length);
-        self.push_bytes(value.as_bytes());
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    fn finish(self) -> Vec<u8> {
-        self.bytes
-    }
+fn write_u64(value: u64, write: &mut dyn FnMut(&[u8])) {
+    write(&value.to_le_bytes());
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{STATE_DOMAIN, STATE_ENCODER_VERSION, encode_state};
-    use crate::{InitialWorld, ProfileHash};
+    use super::*;
+    use crate::{EntityLocation, GateIndex, ProfileHash, WireIndex};
+
+    fn contract() -> SimulationContract {
+        SimulationContract {
+            semantics_version: crate::SemanticsVersion::AonV1,
+            numeric_profile_hash: ProfileHash::from_bytes([0x11; 32]),
+            physical_scale_profile_hash: ProfileHash::from_bytes([0x22; 32]),
+            balance_profile_hash: ProfileHash::from_bytes([0x33; 32]),
+        }
+    }
 
     #[test]
-    fn empty_encoding_has_exact_field_order_and_widths() {
-        let actual = encode_state(
-            "x",
-            ProfileHash::from_bytes([0x11; 32]),
-            ProfileHash::from_bytes([0x22; 32]),
-            ProfileHash::from_bytes([0x33; 32]),
-            &InitialWorld::Empty,
-            5,
-        );
+    fn state_encoding_has_exact_contract_tick_revision_and_identity_order() {
+        let mut entities = EntityRegistry::new();
+        entities
+            .allocate(EntityLocation::Gate(GateIndex(7)))
+            .expect("gate allocation succeeds");
+        let removed = entities
+            .allocate(EntityLocation::Wire(WireIndex(9)))
+            .expect("wire allocation succeeds");
+        entities.remove(removed).expect("wire removal succeeds");
+
+        let mut actual = Vec::new();
+        encode_state(&contract(), Tick(5), Revision(3), &entities, &mut |bytes| {
+            actual.extend_from_slice(bytes)
+        });
 
         let mut expected = Vec::new();
         expected.extend_from_slice(STATE_DOMAIN);
         expected.extend_from_slice(&STATE_ENCODER_VERSION.to_le_bytes());
-        expected.extend_from_slice(&1_u32.to_le_bytes());
-        expected.extend_from_slice(b"x");
+        expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
         expected.extend_from_slice(&[0x33; 32]);
-        expected.push(0);
         expected.extend_from_slice(&5_u64.to_le_bytes());
-        expected.extend_from_slice(&[0_u8; 8 * 8]);
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.push(1);
+        expected.push(2);
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&[0_u8; EMPTY_STORE_COUNT * 8]);
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn tombstones_and_allocation_frontier_change_state_hash() {
+        let empty = EntityRegistry::new();
+        let mut tombstone = EntityRegistry::new();
+        let id = tombstone
+            .allocate(EntityLocation::MainCore)
+            .expect("allocation succeeds");
+        tombstone.remove(id).expect("removal succeeds");
+
+        assert_ne!(
+            state_hash(&contract(), Tick(0), Revision(0), &empty),
+            state_hash(&contract(), Tick(0), Revision(0), &tombstone)
+        );
+    }
+
+    #[test]
+    fn dense_storage_compaction_does_not_change_state_hash() {
+        let mut first = EntityRegistry::new();
+        let id = first
+            .allocate(EntityLocation::Gate(GateIndex(7)))
+            .expect("allocation succeeds");
+        let mut compacted = first.clone();
+        compacted
+            .update_location(id, EntityLocation::Gate(GateIndex(0)))
+            .expect("live entity location updates");
+
+        assert_eq!(
+            state_hash(&contract(), Tick(0), Revision(0), &first),
+            state_hash(&contract(), Tick(0), Revision(0), &compacted)
+        );
     }
 }

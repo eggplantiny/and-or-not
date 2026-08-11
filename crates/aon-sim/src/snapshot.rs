@@ -1,9 +1,9 @@
-use crate::StateHash;
+use crate::{StateHash, Tick};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RenderSnapshot {
     scenario_id: String,
-    next_tick: u64,
+    next_tick: Tick,
     primitive_count: u64,
     state_hash: StateHash,
 }
@@ -13,7 +13,7 @@ impl RenderSnapshot {
         &self.scenario_id
     }
 
-    pub const fn next_tick(&self) -> u64 {
+    pub const fn next_tick(&self) -> Tick {
         self.next_tick
     }
 
@@ -25,7 +25,12 @@ impl RenderSnapshot {
         self.state_hash
     }
 
-    pub(crate) fn write_empty(&mut self, scenario_id: &str, next_tick: u64, state_hash: StateHash) {
+    pub(crate) fn write_empty(
+        &mut self,
+        scenario_id: &str,
+        next_tick: Tick,
+        state_hash: StateHash,
+    ) {
         self.scenario_id.clear();
         self.scenario_id.push_str(scenario_id);
         self.next_tick = next_tick;

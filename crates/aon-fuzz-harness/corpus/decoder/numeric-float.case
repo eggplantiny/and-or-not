@@ -1,0 +1,1 @@
+1{"schemaVersion":1,"profileId":"numeric-v1","kind":"numeric","fixedOne":65536.0,"overflowPolicy":"checked-error","division":"floor","geometryLength":"ceil-euclidean-fixed"}

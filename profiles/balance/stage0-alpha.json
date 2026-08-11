@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "profileId": "balance-stage0-alpha",
+  "kind": "balance",
+  "simulationHz": 20,
+  "gateBaseDelay": 1,
+  "senseDelay": 1,
+  "logicThreshold": 100,
+  "nominalGateDrive": 400,
+  "inputLoad": 1,
+  "wireLoadPerWU": { "numerator": 1, "denominator": 1 },
+  "fanoutFreeLoad": 4,
+  "fanoutStep": 4,
+  "wireLinearK": { "numerator": 1, "denominator": 10 },
+  "wireQuadraticK": { "numerator": 1, "denominator": 40 },
+  "logicOperateThreshold": { "numerator": 1, "denominator": 5 },
+  "brownoutDelayFloor": { "numerator": 1, "denominator": 5 },
+  "senseRadius": 81920,
+  "quartzPeriod": 8,
+  "radiationCellSize": 65536
+}

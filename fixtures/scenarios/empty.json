@@ -1,22 +1,36 @@
 {
-  "schemaVersion": 0,
+  "schemaVersion": 1,
   "scenarioId": "empty",
-  "semanticsVersion": "bootstrap-v0",
+  "semanticsVersion": "aon-semantics-v1",
+  "hashAlgorithm": "blake3-v1",
   "initialWorld": {
     "kind": "empty"
   },
+  "requiredFeatures": {
+    "signal": false,
+    "mobility": false,
+    "capacity": false,
+    "sensing": false,
+    "power": false,
+    "relay": false,
+    "payload": false,
+    "radiation": false
+  },
   "profiles": {
     "numeric": {
-      "path": "../../profiles/numeric/bootstrap-empty-v1.json",
-      "profileId": "bootstrap-empty-numeric-v1"
+      "path": "../../profiles/numeric/v1.json",
+      "profileId": "numeric-v1",
+      "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469"
     },
     "physicalScale": {
-      "path": "../../profiles/physical-scale/bootstrap-empty-v1.json",
-      "profileId": "bootstrap-empty-physical-scale-v1"
+      "path": "../../profiles/physical-scale/stage0-alpha.json",
+      "profileId": "physical-scale-stage0-alpha",
+      "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490"
     },
     "balance": {
-      "path": "../../profiles/balance/bootstrap-empty-v1.json",
-      "profileId": "bootstrap-empty-balance-v1"
+      "path": "../../profiles/balance/stage0-alpha.json",
+      "profileId": "balance-stage0-alpha",
+      "profileHash": "5eac16f9f91f442c2283009b69d164bdaa5b33557b402f33c1c581801c05bdee"
     }
   }
 }

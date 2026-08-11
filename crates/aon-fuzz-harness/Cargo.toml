@@ -1,0 +1,13 @@
+[package]
+name = "aon-fuzz-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+aon-sim = { path = "../aon-sim" }
+
+[lints]
+workspace = true

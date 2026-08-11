@@ -2,7 +2,7 @@
 
 use aon_sim::{
     ArtifactBytes, PackageError, RenderSnapshot, Simulation, SimulationError, SimulationPackage,
-    StateHash, decode_package,
+    StateHash, Tick, decode_package,
 };
 use bevy::prelude::*;
 use bevy::time::{TimeUpdateStrategy, Virtual};
@@ -10,23 +10,21 @@ use bevy::window::{PrimaryWindow, WindowPlugin};
 use std::time::Duration;
 use thiserror::Error;
 
-const SIMULATION_TICK_DURATION: Duration = Duration::from_millis(50);
-
 const EMPTY_SCENARIO: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/scenarios/empty.json"
 ));
 const EMPTY_NUMERIC_PROFILE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/numeric/bootstrap-empty-v1.json"
+    "/../../profiles/numeric/v1.json"
 ));
 const EMPTY_PHYSICAL_SCALE_PROFILE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/physical-scale/bootstrap-empty-v1.json"
+    "/../../profiles/physical-scale/stage0-alpha.json"
 ));
 const EMPTY_BALANCE_PROFILE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/balance/bootstrap-empty-v1.json"
+    "/../../profiles/balance/stage0-alpha.json"
 ));
 
 #[derive(Debug, Error)]
@@ -54,7 +52,7 @@ impl CanonicalSimulation {
         self.simulation.state_hash()
     }
 
-    pub const fn next_tick(&self) -> u64 {
+    pub const fn next_tick(&self) -> Tick {
         self.simulation.next_tick()
     }
 }
@@ -161,9 +159,10 @@ pub fn run_host_harness(
     presenter_enabled: bool,
 ) -> Result<HostTrace, HostError> {
     let simulation = Simulation::new(package)?;
+    let simulation_hz = simulation.profiles().balance().simulation_hz;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    configure_host_pacing(&mut app);
+    configure_host_pacing(&mut app, simulation_hz);
     install_simulation(
         &mut app,
         simulation,
@@ -194,9 +193,10 @@ pub fn run_paced_host_harness(
     frame_deltas: &[Duration],
 ) -> Result<HostTrace, HostError> {
     let simulation = Simulation::new(package)?;
+    let simulation_hz = simulation.profiles().balance().simulation_hz;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    configure_host_pacing(&mut app);
+    configure_host_pacing(&mut app, simulation_hz);
     install_simulation(&mut app, simulation, HostRunMode::Running, true);
 
     // Bevy's Real clock uses its first update to establish an origin and
@@ -223,6 +223,7 @@ pub fn run_paced_host_harness(
 pub fn run_native() -> Result<(), HostError> {
     let package = embedded_empty_package()?;
     let simulation = Simulation::new(package)?;
+    let simulation_hz = simulation.profiles().balance().simulation_hz;
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -232,14 +233,14 @@ pub fn run_native() -> Result<(), HostError> {
         }),
         ..default()
     }));
-    configure_host_pacing(&mut app);
+    configure_host_pacing(&mut app, simulation_hz);
     install_simulation(&mut app, simulation, HostRunMode::Running, true);
     app.run();
     Ok(())
 }
 
-fn configure_host_pacing(app: &mut App) {
-    app.insert_resource(Time::<Fixed>::from_duration(SIMULATION_TICK_DURATION));
+fn configure_host_pacing(app: &mut App, simulation_hz: u32) {
+    app.insert_resource(Time::<Fixed>::from_hz(f64::from(simulation_hz)));
 
     // Bevy clamps Virtual time to 250 ms by default. That clamp would silently
     // delete canonical tick debt after a long frame, which A/O/N forbids.
@@ -327,9 +328,10 @@ mod tests {
     fn presenter_projects_empty_snapshot_into_the_primary_window_title() {
         let package = embedded_empty_package().expect("embedded fixtures are valid");
         let simulation = Simulation::new(package).expect("bootstrap simulation is valid");
+        let simulation_hz = simulation.profiles().balance().simulation_hz;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        configure_host_pacing(&mut app);
+        configure_host_pacing(&mut app, simulation_hz);
         install_simulation(&mut app, simulation, HostRunMode::Running, true);
         let window_entity = app
             .world_mut()
@@ -348,7 +350,7 @@ mod tests {
 
     fn assert_primary_window_title(app: &App, window_entity: Entity, expected_tick: u64) {
         let snapshot = app.world().resource::<LatestRenderSnapshot>().get();
-        assert_eq!(snapshot.next_tick(), expected_tick);
+        assert_eq!(snapshot.next_tick(), Tick(expected_tick));
         let hash = snapshot.state_hash().to_string();
         let expected_title = format!(
             "A/O/N — Empty World | tick {} | hash {}",

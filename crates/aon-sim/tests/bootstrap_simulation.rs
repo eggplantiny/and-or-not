@@ -1,4 +1,4 @@
-use aon_sim::{ArtifactBytes, RenderSnapshot, Simulation, StateHash, decode_package};
+use aon_sim::{ArtifactBytes, RenderSnapshot, Simulation, StateHash, Tick, decode_package};
 
 const SCENARIO: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -6,15 +6,15 @@ const SCENARIO: &[u8] = include_bytes!(concat!(
 ));
 const NUMERIC: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/numeric/bootstrap-empty-v1.json"
+    "/../../profiles/numeric/v1.json"
 ));
 const PHYSICAL: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/physical-scale/bootstrap-empty-v1.json"
+    "/../../profiles/physical-scale/stage0-alpha.json"
 ));
 const BALANCE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../profiles/balance/bootstrap-empty-v1.json"
+    "/../../profiles/balance/stage0-alpha.json"
 ));
 
 fn package() -> aon_sim::SimulationPackage {
@@ -24,7 +24,7 @@ fn package() -> aon_sim::SimulationPackage {
         physical_scale_profile: PHYSICAL,
         balance_profile: BALANCE,
     })
-    .expect("bootstrap fixtures are valid")
+    .expect("S0-M1 reference fixtures are valid")
 }
 
 fn trace(ticks: u64, snapshots_per_tick: u32) -> Vec<StateHash> {
@@ -51,9 +51,9 @@ fn step_advances_exactly_one_tick_and_reports_post_step_hash() {
 
     let report = simulation.step(&[]).expect("empty step succeeds");
 
-    assert_eq!(report.completed_tick, 0);
-    assert_eq!(report.next_tick, 1);
-    assert_eq!(simulation.next_tick(), 1);
+    assert_eq!(report.completed_tick, Tick(0));
+    assert_eq!(report.next_tick, Tick(1));
+    assert_eq!(simulation.next_tick(), Tick(1));
     assert_eq!(report.state_hash, simulation.state_hash());
 }
 
@@ -64,13 +64,13 @@ fn every_step_reports_contiguous_tick_ids() {
     for completed_tick in 0..100 {
         let report = simulation.step(&[]).expect("empty step succeeds");
 
-        assert_eq!(report.completed_tick, completed_tick);
-        assert_eq!(report.next_tick, completed_tick + 1);
-        assert_eq!(simulation.next_tick(), completed_tick + 1);
+        assert_eq!(report.completed_tick, Tick(completed_tick));
+        assert_eq!(report.next_tick, Tick(completed_tick + 1));
+        assert_eq!(simulation.next_tick(), Tick(completed_tick + 1));
         assert_eq!(report.state_hash, simulation.state_hash());
     }
 
-    assert_eq!(simulation.next_tick(), 100);
+    assert_eq!(simulation.next_tick(), Tick(100));
 }
 
 #[test]
@@ -98,19 +98,19 @@ fn snapshot_is_an_empty_read_only_projection() {
     simulation.write_render_snapshot(&mut snapshot);
 
     assert_eq!(snapshot.scenario_id(), "empty");
-    assert_eq!(snapshot.next_tick(), 0);
+    assert_eq!(snapshot.next_tick(), Tick(0));
     assert_eq!(snapshot.primitive_count(), 0);
     assert_eq!(snapshot.state_hash(), before);
     assert_eq!(simulation.state_hash(), before);
 }
 
 #[test]
-fn bootstrap_hash_has_a_golden_value() {
+fn s0m1_empty_state_hash_has_a_golden_value() {
     let simulation = Simulation::new(package()).expect("simulation is valid");
 
-    // Updated only when the explicitly versioned bootstrap encoder changes.
+    // Updated only when the explicitly versioned canonical encoder changes.
     assert_eq!(
         simulation.state_hash().to_string(),
-        "cac904f8b2b462ba4ba76dc3a2db4293e39d626a9cd43b118f302919bdff2144"
+        "3ab5b0132646b92483379d9b70ffbbb0f91e42069b4a96a0594b4596d2e0f226"
     );
 }

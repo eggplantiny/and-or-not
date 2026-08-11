@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "profileId": "numeric-v1",
+  "kind": "numeric",
+  "fixedOne": 65536,
+  "overflow": "deterministic-error",
+  "division": "floor-ceil-nearest-even",
+  "geometryLength": "ceil-integer-euclidean-sqrt"
+}

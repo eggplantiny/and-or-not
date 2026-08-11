@@ -31,6 +31,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Stage 0 conformance
+        run: cargo test -p aon-sim --test conformance_stage0 --locked
+
+      - name: Deterministic fuzz regression corpus
+        run: cargo test -p aon-fuzz-harness --locked
+
       - name: Cross-host determinism
         run: cargo test -p aon-app --test cross_host_determinism --locked
 

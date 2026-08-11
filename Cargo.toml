@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/aon-sim",
+    "crates/aon-fuzz-harness",
     "apps/aon-app",
     "apps/aon-headless",
 ]

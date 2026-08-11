@@ -1,11 +1,14 @@
-use crate::canonical;
-pub use crate::error::PackageError;
+use crate::contract::{
+    HASH_ALGORITHM_ID_BLAKE3_V1, HashAlgorithmId, SEMANTICS_VERSION_V1, SemanticsVersion,
+};
+use crate::profile::{
+    BalanceProfile, NumericProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
+};
 use crate::{JsonErrorCategory, ProfileHash};
 use serde::Deserialize;
 use std::fmt;
 
-const BOOTSTRAP_SCHEMA_VERSION: u32 = 0;
-const BOOTSTRAP_SEMANTICS_VERSION: &str = "bootstrap-v0";
+const SCENARIO_SCHEMA_VERSION_V1: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -27,12 +30,11 @@ impl ProfileKind {
 
 impl fmt::Display for ProfileKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = match self {
+        formatter.write_str(match self {
             Self::Numeric => "numeric",
             Self::PhysicalScale => "physical-scale",
             Self::Balance => "balance",
-        };
-        formatter.write_str(value)
+        })
     }
 }
 
@@ -56,10 +58,52 @@ pub enum InitialWorld {
     Empty,
 }
 
-impl InitialWorld {
-    pub(crate) const fn canonical_tag(&self) -> u8 {
-        match self {
-            Self::Empty => 0,
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StageFeatureSet {
+    pub signal: bool,
+    pub mobility: bool,
+    pub capacity: bool,
+    pub sensing: bool,
+    pub power: bool,
+    pub relay: bool,
+    pub payload: bool,
+    pub radiation: bool,
+}
+
+impl StageFeatureSet {
+    pub const fn none() -> Self {
+        Self {
+            signal: false,
+            mobility: false,
+            capacity: false,
+            sensing: false,
+            power: false,
+            relay: false,
+            payload: false,
+            radiation: false,
+        }
+    }
+
+    pub(crate) const fn first_enabled(self) -> Option<&'static str> {
+        if self.signal {
+            Some("signal")
+        } else if self.mobility {
+            Some("mobility")
+        } else if self.capacity {
+            Some("capacity")
+        } else if self.sensing {
+            Some("sensing")
+        } else if self.power {
+            Some("power")
+        } else if self.relay {
+            Some("relay")
+        } else if self.payload {
+            Some("payload")
+        } else if self.radiation {
+            Some("radiation")
+        } else {
+            None
         }
     }
 }
@@ -68,6 +112,7 @@ impl InitialWorld {
 pub struct ProfileReference {
     path: String,
     profile_id: String,
+    profile_hash: ProfileHash,
 }
 
 impl ProfileReference {
@@ -77,6 +122,10 @@ impl ProfileReference {
 
     pub fn profile_id(&self) -> &str {
         &self.profile_id
+    }
+
+    pub const fn profile_hash(&self) -> ProfileHash {
+        self.profile_hash
     }
 }
 
@@ -105,8 +154,10 @@ impl ProfileReferences {
 pub struct ScenarioManifest {
     schema_version: u32,
     scenario_id: String,
-    semantics_version: String,
+    semantics_version: SemanticsVersion,
+    hash_algorithm: HashAlgorithmId,
     initial_world: InitialWorld,
+    required_features: StageFeatureSet,
     profiles: ProfileReferences,
 }
 
@@ -119,62 +170,24 @@ impl ScenarioManifest {
         &self.scenario_id
     }
 
-    pub fn semantics_version(&self) -> &str {
-        &self.semantics_version
+    pub const fn semantics_version(&self) -> SemanticsVersion {
+        self.semantics_version
+    }
+
+    pub const fn hash_algorithm(&self) -> HashAlgorithmId {
+        self.hash_algorithm
     }
 
     pub(crate) fn initial_world(&self) -> &InitialWorld {
         &self.initial_world
     }
 
+    pub const fn required_features(&self) -> StageFeatureSet {
+        self.required_features
+    }
+
     pub fn profiles(&self) -> &ProfileReferences {
         &self.profiles
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProfileArtifact {
-    schema_version: u32,
-    profile_id: String,
-    kind: ProfileKind,
-}
-
-impl ProfileArtifact {
-    pub const fn schema_version(&self) -> u32 {
-        self.schema_version
-    }
-
-    pub fn profile_id(&self) -> &str {
-        &self.profile_id
-    }
-
-    pub const fn kind(&self) -> ProfileKind {
-        self.kind
-    }
-
-    pub fn canonical_hash(&self) -> ProfileHash {
-        canonical::profile_hash(self)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProfileBundle {
-    numeric: ProfileArtifact,
-    physical_scale: ProfileArtifact,
-    balance: ProfileArtifact,
-}
-
-impl ProfileBundle {
-    pub fn numeric(&self) -> &ProfileArtifact {
-        &self.numeric
-    }
-
-    pub fn physical_scale(&self) -> &ProfileArtifact {
-        &self.physical_scale
-    }
-
-    pub fn balance(&self) -> &ProfileArtifact {
-        &self.balance
     }
 }
 
@@ -192,7 +205,9 @@ struct ScenarioWire {
     schema_version: u32,
     scenario_id: String,
     semantics_version: String,
+    hash_algorithm: String,
     initial_world: InitialWorldWire,
+    required_features: StageFeatureSet,
     profiles: ProfileReferencesWire,
 }
 
@@ -215,96 +230,79 @@ struct ProfileReferencesWire {
 struct ProfileReferenceWire {
     path: String,
     profile_id: String,
+    profile_hash: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProfileWire {
-    schema_version: u32,
-    profile_id: String,
-    kind: ProfileKind,
-}
-
-pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, PackageError> {
+pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, crate::PackageError> {
     let wire: ScenarioWire = decode_json(bytes, ArtifactKind::Scenario)?;
-    validate_schema(ArtifactKind::Scenario, wire.schema_version)?;
+    validate_schema(
+        ArtifactKind::Scenario,
+        SCENARIO_SCHEMA_VERSION_V1,
+        wire.schema_version,
+    )?;
     validate_non_empty(ArtifactKind::Scenario, "scenarioId", &wire.scenario_id)?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "semanticsVersion",
-        &wire.semantics_version,
-    )?;
-    if wire.semantics_version != BOOTSTRAP_SEMANTICS_VERSION {
-        return Err(PackageError::UnsupportedSemanticsVersion {
-            expected: BOOTSTRAP_SEMANTICS_VERSION,
-            actual: wire.semantics_version,
-        });
-    }
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.numeric.path",
-        &wire.profiles.numeric.path,
-    )?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.numeric.profileId",
-        &wire.profiles.numeric.profile_id,
-    )?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.physicalScale.path",
-        &wire.profiles.physical_scale.path,
-    )?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.physicalScale.profileId",
-        &wire.profiles.physical_scale.profile_id,
-    )?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.balance.path",
-        &wire.profiles.balance.path,
-    )?;
-    validate_non_empty(
-        ArtifactKind::Scenario,
-        "profiles.balance.profileId",
-        &wire.profiles.balance.profile_id,
-    )?;
+
+    let semantics_version = SemanticsVersion::parse(&wire.semantics_version).map_err(|_| {
+        crate::PackageError::UnsupportedSemanticsVersion {
+            expected: SEMANTICS_VERSION_V1,
+            actual: wire.semantics_version.clone(),
+        }
+    })?;
+    let hash_algorithm = HashAlgorithmId::parse(&wire.hash_algorithm).map_err(|_| {
+        crate::PackageError::UnsupportedHashAlgorithm {
+            expected: HASH_ALGORITHM_ID_BLAKE3_V1,
+            actual: wire.hash_algorithm.clone(),
+        }
+    })?;
 
     Ok(ScenarioManifest {
         schema_version: wire.schema_version,
         scenario_id: wire.scenario_id,
-        semantics_version: wire.semantics_version,
+        semantics_version,
+        hash_algorithm,
         initial_world: match wire.initial_world {
             InitialWorldWire::Empty => InitialWorld::Empty,
         },
+        required_features: wire.required_features,
         profiles: ProfileReferences {
-            numeric: ProfileReference {
-                path: wire.profiles.numeric.path,
-                profile_id: wire.profiles.numeric.profile_id,
-            },
-            physical_scale: ProfileReference {
-                path: wire.profiles.physical_scale.path,
-                profile_id: wire.profiles.physical_scale.profile_id,
-            },
-            balance: ProfileReference {
-                path: wire.profiles.balance.path,
-                profile_id: wire.profiles.balance.profile_id,
-            },
+            numeric: decode_profile_reference(wire.profiles.numeric, ProfileKind::Numeric)?,
+            physical_scale: decode_profile_reference(
+                wire.profiles.physical_scale,
+                ProfileKind::PhysicalScale,
+            )?,
+            balance: decode_profile_reference(wire.profiles.balance, ProfileKind::Balance)?,
         },
     })
 }
 
-pub fn decode_package(bytes: ArtifactBytes<'_>) -> Result<crate::SimulationPackage, PackageError> {
+pub fn decode_package(
+    bytes: ArtifactBytes<'_>,
+) -> Result<crate::SimulationPackage, crate::PackageError> {
     let scenario = decode_scenario_manifest(bytes.scenario)?;
-    let numeric = decode_profile(bytes.numeric_profile, ProfileKind::Numeric)?;
-    let physical_scale = decode_profile(bytes.physical_scale_profile, ProfileKind::PhysicalScale)?;
-    let balance = decode_profile(bytes.balance_profile, ProfileKind::Balance)?;
-    validate_profile_reference(scenario.profiles().numeric(), &numeric)?;
-    validate_profile_reference(scenario.profiles().physical_scale(), &physical_scale)?;
-    validate_profile_reference(scenario.profiles().balance(), &balance)?;
+    let numeric: NumericProfile =
+        decode_typed_profile(bytes.numeric_profile, ProfileKind::Numeric)?;
+    let physical_scale: PhysicalScaleProfile =
+        decode_typed_profile(bytes.physical_scale_profile, ProfileKind::PhysicalScale)?;
+    let balance: BalanceProfile =
+        decode_typed_profile(bytes.balance_profile, ProfileKind::Balance)?;
 
-    Ok(crate::SimulationPackage::from_bootstrap_artifacts(
+    validate_profile_reference(
+        scenario.profiles().numeric(),
+        &numeric.profile_id,
+        ProfileKind::Numeric,
+    )?;
+    validate_profile_reference(
+        scenario.profiles().physical_scale(),
+        &physical_scale.profile_id,
+        ProfileKind::PhysicalScale,
+    )?;
+    validate_profile_reference(
+        scenario.profiles().balance(),
+        &balance.profile_id,
+        ProfileKind::Balance,
+    )?;
+
+    Ok(crate::SimulationPackage::from_artifacts(
         scenario,
         ProfileBundle {
             numeric,
@@ -314,45 +312,76 @@ pub fn decode_package(bytes: ArtifactBytes<'_>) -> Result<crate::SimulationPacka
     ))
 }
 
+fn decode_profile_reference(
+    wire: ProfileReferenceWire,
+    profile: ProfileKind,
+) -> Result<ProfileReference, crate::PackageError> {
+    let artifact = ArtifactKind::Scenario;
+    validate_non_empty(artifact, profile_path_field(profile), &wire.path)?;
+    validate_non_empty(artifact, profile_id_field(profile), &wire.profile_id)?;
+    let profile_hash = ProfileHash::from_hex(&wire.profile_hash)
+        .map_err(|error| crate::PackageError::InvalidProfileHash { profile, error })?;
+    Ok(ProfileReference {
+        path: wire.path,
+        profile_id: wire.profile_id,
+        profile_hash,
+    })
+}
+
+fn decode_typed_profile<T>(bytes: &[u8], profile: ProfileKind) -> Result<T, crate::PackageError>
+where
+    T: for<'de> Deserialize<'de> + ValidateProfile,
+{
+    let value: T = decode_json(bytes, ArtifactKind::Profile(profile))?;
+    value
+        .validate_profile()
+        .map_err(|error| crate::PackageError::InvalidProfile { profile, error })?;
+    Ok(value)
+}
+
+trait ValidateProfile {
+    fn validate_profile(&self) -> Result<(), ProfileValidationError>;
+}
+
+impl ValidateProfile for NumericProfile {
+    fn validate_profile(&self) -> Result<(), ProfileValidationError> {
+        self.validate()
+    }
+}
+
+impl ValidateProfile for PhysicalScaleProfile {
+    fn validate_profile(&self) -> Result<(), ProfileValidationError> {
+        self.validate()
+    }
+}
+
+impl ValidateProfile for BalanceProfile {
+    fn validate_profile(&self) -> Result<(), ProfileValidationError> {
+        self.validate()
+    }
+}
+
 fn validate_profile_reference(
     reference: &ProfileReference,
-    profile: &ProfileArtifact,
-) -> Result<(), PackageError> {
-    if reference.profile_id() == profile.profile_id() {
+    actual_id: &str,
+    profile: ProfileKind,
+) -> Result<(), crate::PackageError> {
+    if reference.profile_id() == actual_id {
         Ok(())
     } else {
-        Err(PackageError::ProfileReferenceMismatch {
-            profile: profile.kind(),
+        Err(crate::PackageError::ProfileReferenceMismatch {
+            profile,
             expected_id: reference.profile_id().to_owned(),
-            actual_id: profile.profile_id().to_owned(),
+            actual_id: actual_id.to_owned(),
         })
     }
 }
 
-fn decode_profile(bytes: &[u8], expected: ProfileKind) -> Result<ProfileArtifact, PackageError> {
-    let artifact = ArtifactKind::Profile(expected);
-    let wire: ProfileWire = decode_json(bytes, artifact)?;
-    validate_schema(artifact, wire.schema_version)?;
-    validate_non_empty(artifact, "profileId", &wire.profile_id)?;
-    if wire.kind != expected {
-        return Err(PackageError::ProfileKindMismatch {
-            expected,
-            actual: wire.kind,
-        });
-    }
-
-    Ok(ProfileArtifact {
-        schema_version: wire.schema_version,
-        profile_id: wire.profile_id,
-        kind: wire.kind,
-    })
-}
-
-fn decode_json<T>(bytes: &[u8], artifact: ArtifactKind) -> Result<T, PackageError>
+fn decode_json<T>(bytes: &[u8], artifact: ArtifactKind) -> Result<T, crate::PackageError>
 where
     T: for<'de> Deserialize<'de>,
 {
-    serde_json::from_slice(bytes).map_err(|error| PackageError::InvalidJson {
+    serde_json::from_slice(bytes).map_err(|error| crate::PackageError::InvalidJson {
         artifact,
         category: JsonErrorCategory::from(error.classify()),
         line: error.line(),
@@ -360,13 +389,17 @@ where
     })
 }
 
-fn validate_schema(artifact: ArtifactKind, actual: u32) -> Result<(), PackageError> {
-    if actual == BOOTSTRAP_SCHEMA_VERSION {
+fn validate_schema(
+    artifact: ArtifactKind,
+    expected: u32,
+    actual: u32,
+) -> Result<(), crate::PackageError> {
+    if actual == expected {
         Ok(())
     } else {
-        Err(PackageError::UnsupportedSchema {
+        Err(crate::PackageError::UnsupportedSchema {
             artifact,
-            expected: BOOTSTRAP_SCHEMA_VERSION,
+            expected,
             actual,
         })
     }
@@ -376,10 +409,26 @@ fn validate_non_empty(
     artifact: ArtifactKind,
     field: &'static str,
     value: &str,
-) -> Result<(), PackageError> {
+) -> Result<(), crate::PackageError> {
     if value.trim().is_empty() {
-        Err(PackageError::EmptyField { artifact, field })
+        Err(crate::PackageError::EmptyField { artifact, field })
     } else {
         Ok(())
+    }
+}
+
+const fn profile_path_field(profile: ProfileKind) -> &'static str {
+    match profile {
+        ProfileKind::Numeric => "profiles.numeric.path",
+        ProfileKind::PhysicalScale => "profiles.physicalScale.path",
+        ProfileKind::Balance => "profiles.balance.path",
+    }
+}
+
+const fn profile_id_field(profile: ProfileKind) -> &'static str {
+    match profile {
+        ProfileKind::Numeric => "profiles.numeric.profileId",
+        ProfileKind::PhysicalScale => "profiles.physicalScale.profileId",
+        ProfileKind::Balance => "profiles.balance.profileId",
     }
 }

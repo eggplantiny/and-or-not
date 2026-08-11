@@ -138,6 +138,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aon-fuzz-harness"
+version = "0.1.0"
+dependencies = [
+ "aon-sim",
+]
+
+[[package]]
 name = "aon-headless"
 version = "0.1.0"
 dependencies = [

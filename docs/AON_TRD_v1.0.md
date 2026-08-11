@@ -1065,8 +1065,15 @@ pub fn segment_length(
 Polyline Length:
 
 ```text
-wireLength = Σ segmentLength
+consecutive same-direction collinear segments
+→ maximal collinear run
+
+wireLength = Σ segmentLength(maximal run)
 ```
+
+이 canonicalization은 Length 계산에만 적용한다. 저장된 vertex는 변경하지 않으며 State Hash는
+실제로 저장된 Geometry를 반영한다. 따라서 불필요한 collinear vertex가 segment별 ceiling을
+중복 발생시키지 않는다.
 
 같은 함수 결과를 다음에 재사용한다.
 
