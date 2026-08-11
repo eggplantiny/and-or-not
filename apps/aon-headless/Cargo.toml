@@ -1,0 +1,13 @@
+[package]
+name = "aon-headless"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aon-sim = { path = "../../crates/aon-sim" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

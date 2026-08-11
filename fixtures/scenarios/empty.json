@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 0,
+  "scenarioId": "empty",
+  "semanticsVersion": "bootstrap-v0",
+  "initialWorld": {
+    "kind": "empty"
+  },
+  "profiles": {
+    "numeric": {
+      "path": "../../profiles/numeric/bootstrap-empty-v1.json",
+      "profileId": "bootstrap-empty-numeric-v1"
+    },
+    "physicalScale": {
+      "path": "../../profiles/physical-scale/bootstrap-empty-v1.json",
+      "profileId": "bootstrap-empty-physical-scale-v1"
+    },
+    "balance": {
+      "path": "../../profiles/balance/bootstrap-empty-v1.json",
+      "profileId": "bootstrap-empty-balance-v1"
+    }
+  }
+}

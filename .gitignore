@@ -1,0 +1,6 @@
+/target/
+**/*.rs.bk
+*:Zone.Identifier
+.DS_Store
+.idea/
+.vscode/
