@@ -188,3 +188,14 @@ executable evidence:
 S0-M4 owns Route Diff, Driver Revision, TopologySyncArrival, Sink Slot revision comparison,
 PathCertificateArena, connection-generation validation, and stale-arrival rejection after an
 in-flight topology edit.
+
+Implementation authority: `docs/AON_S0_M4_Canonical_Decisions_v1.0.md`.
+
+- [x] Route identity, Revision, synchronization, Certificate, V3 encoder, and completion decisions
+  are versioned
+- [ ] Driver Revision and revision-aware Sink Slots are implemented
+- [ ] Added/Removed/Retained/Replaced Route Diff and TopologySync are implemented
+- [ ] PathCertificateArena allocation, canonical staging, consumption, and validation are
+  implemented
+- [ ] V3 canonical bytes/hash and invariants are fixed
+- [ ] C-18, C-19, destroy/rebuild invalidation, fuzz, and clean-checkout gates pass
