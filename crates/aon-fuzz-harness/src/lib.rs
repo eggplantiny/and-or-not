@@ -15,7 +15,7 @@ use aon_sim::{
     PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
     RemoveEntityCommand, RoutingDomain, SetExternalDriverCommand, Simulation, SimulationError,
     StateHash, StepReport, Tick, WireEnd, WireId, WireSignalSnapshot, decode_package,
-    decode_scenario_manifest, polyline_length, validate_quantized,
+    decode_replay_artifact, decode_scenario_manifest, polyline_length, validate_quantized,
 };
 
 const REFERENCE_SCENARIO: &[u8] = include_bytes!("../../../fixtures/scenarios/empty.json");
@@ -43,6 +43,9 @@ const SIGNAL_SETTLE_TICKS: usize = 8;
 
 /// Maximum number of bytes interpreted by one decoder invocation.
 pub const MAX_DECODER_INPUT_BYTES: usize = 16 * 1024;
+
+/// Maximum number of bytes interpreted by one Replay decoder invocation.
+pub const MAX_REPLAY_INPUT_BYTES: usize = MAX_DECODER_INPUT_BYTES;
 
 /// Maximum number of bytes interpreted by one geometry invocation.
 pub const MAX_GEOMETRY_INPUT_BYTES: usize = 4 * 1024;
@@ -76,6 +79,21 @@ pub struct DecoderObservation {
     pub target: DecoderTarget,
     pub payload_len: usize,
     pub result: Result<(), PackageError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplayDecoderObservation {
+    pub payload_len: usize,
+    pub result: Result<(), aon_sim::ReplayError>,
+}
+
+/// Supplies a bounded arbitrary byte stream to the strict Replay v1 decoder.
+pub fn exercise_replay_decoder(input: &[u8]) -> ReplayDecoderObservation {
+    let bounded = &input[..input.len().min(MAX_REPLAY_INPUT_BYTES)];
+    ReplayDecoderObservation {
+        payload_len: bounded.len(),
+        result: decode_replay_artifact(bounded).map(|_| ()),
+    }
 }
 
 /// Interprets an arbitrary byte stream as one of the four public artifact decode paths.
@@ -1554,12 +1572,13 @@ impl<'a> CyclicBytes<'a> {
 mod tests {
     use super::{
         CommandExecutionObservation, DecoderTarget, MAX_COMMAND_INPUT_BYTES,
-        MAX_DECODER_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
-        REFERENCE_BALANCE_PROFILE, REFERENCE_NUMERIC_PROFILE, REFERENCE_PHYSICAL_SCALE_PROFILE,
-        REFERENCE_SCENARIO, STATEFUL_BATCH_TICK, STATEFUL_GATE_ID, STATEFUL_JUNCTION_ID,
-        STATEFUL_TOMBSTONE_ID, STATEFUL_WIRE_ID, SignalRuntimeExecutionObservation,
-        StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation,
-        exercise_commands, exercise_decoder, exercise_geometry, exercise_signal_runtime,
+        MAX_DECODER_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES,
+        MAX_SIGNAL_RUNTIME_INPUT_BYTES, REFERENCE_BALANCE_PROFILE, REFERENCE_NUMERIC_PROFILE,
+        REFERENCE_PHYSICAL_SCALE_PROFILE, REFERENCE_SCENARIO, STATEFUL_BATCH_TICK,
+        STATEFUL_GATE_ID, STATEFUL_JUNCTION_ID, STATEFUL_TOMBSTONE_ID, STATEFUL_WIRE_ID,
+        SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
+        TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder,
+        exercise_geometry, exercise_replay_decoder, exercise_signal_runtime,
         exercise_stateful_commands, exercise_topology_runtime, stateful_envelope,
         stateful_prefix_batches,
     };
@@ -1787,6 +1806,11 @@ mod tests {
         decoder.extend_from_slice(b"ignored decoder suffix");
         assert_eq!(exercise_decoder(&decoder), expected_decoder);
 
+        let mut replay = vec![b'{'; MAX_REPLAY_INPUT_BYTES];
+        let expected_replay = exercise_replay_decoder(&replay);
+        replay.extend_from_slice(b"ignored Replay suffix");
+        assert_eq!(exercise_replay_decoder(&replay), expected_replay);
+
         let mut geometry = vec![0xa5; MAX_GEOMETRY_INPUT_BYTES];
         let expected_geometry = exercise_geometry(&geometry);
         geometry.extend_from_slice(b"ignored geometry suffix");
@@ -1825,6 +1849,12 @@ mod tests {
             assert!(
                 decoder.is_ok(),
                 "decoder panicked for generated case {case_index}"
+            );
+
+            let replay = catch_unwind(AssertUnwindSafe(|| exercise_replay_decoder(&bytes)));
+            assert!(
+                replay.is_ok(),
+                "Replay decoder panicked for generated case {case_index}"
             );
 
             let geometry = catch_unwind(AssertUnwindSafe(|| exercise_geometry(&bytes)));

@@ -9,6 +9,11 @@ scale profile, or balance profile decoding. At most 16 KiB is interpreted. Profi
 only the selected profile in an otherwise valid reference package, ensuring that the selected
 typed decoder is reached.
 
+The `replay` target supplies at most 16 KiB directly to the strict Replay v1 JSON decoder. Its
+retained corpus includes a valid Empty-world Replay plus truncated and unknown-field artifacts, so
+CI preserves both the accepted path and stable rejection paths without treating typed decode
+errors as harness failures.
+
 The geometry target maps at most 4 KiB to no more than 64 points. It derives a positive power-of-two
 quantum and signed 32-bit coordinate multiples from the input, then runs every point through
 `validate_quantized` and the complete polyline through `polyline_length`. Short inputs cycle their
@@ -71,6 +76,7 @@ Replay an arbitrary stream from standard input with:
 
 ```sh
 cargo run -p aon-fuzz-harness --locked -- decoder < input.bin
+cargo run -p aon-fuzz-harness --locked -- replay < input.bin
 cargo run -p aon-fuzz-harness --locked -- geometry < input.bin
 cargo run -p aon-fuzz-harness --locked -- commands < input.bin
 cargo run -p aon-fuzz-harness --locked -- signal < input.bin
@@ -82,6 +88,7 @@ Normal typed decoder errors and checked numeric-overflow outcomes in the geometr
 command targets are accepted. The signal and topology targets treat every simulation run error as
 a failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
 disagreement between the two command encoders fails CI and CLI replay. Add every minimized
-reproducer under `corpus/decoder`, `corpus/geometry`, `corpus/command`, `corpus/signal-runtime`, or
-`corpus/topology-runtime` and register it in `tests/regression_corpus.rs` so CI replays it
+reproducer under `corpus/decoder`, `corpus/replay`, `corpus/geometry`, `corpus/command`,
+`corpus/signal-runtime`, or `corpus/topology-runtime` and register it in
+`tests/regression_corpus.rs` so CI replays it
 permanently.

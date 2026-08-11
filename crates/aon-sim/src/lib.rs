@@ -12,6 +12,7 @@ mod identity;
 mod numeric;
 mod path_certificate;
 mod profile;
+mod replay;
 mod signal;
 mod signal_topology;
 mod simulation;
@@ -66,6 +67,12 @@ pub use profile::{
     ProfileBundle, ProfileHashes, ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH,
     REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM,
     REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
+};
+pub use replay::{
+    HashCheckpoint, REPLAY_FORMAT_VERSION_V1, Replay, ReplayArtifact, ReplayContractField,
+    ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3, Seed, SeedParseError,
+    StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1, WorldGeneratorVersion, WorldInputEvent,
+    decode_replay_artifact, encode_replay_artifact,
 };
 pub use signal::{
     DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,

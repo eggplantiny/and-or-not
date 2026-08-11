@@ -10,7 +10,7 @@ use crate::{
 };
 
 const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V3\0";
-const STATE_ENCODER_VERSION: u16 = 3;
+pub(crate) const STATE_ENCODER_VERSION: u16 = 3;
 const RESERVED_EMPTY_STORE_COUNT: usize = 4;
 
 #[derive(Clone, Copy)]

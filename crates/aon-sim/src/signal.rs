@@ -1013,6 +1013,44 @@ mod tests {
     }
 
     #[test]
+    fn every_gate_type_activates_with_the_frozen_quiescent_signal_state() {
+        let mut world = SignalWorld::new();
+
+        for (raw_gate, gate_type, activation_tick) in [
+            (1, GateType::And, Tick(7)),
+            (2, GateType::Or, Tick(11)),
+            (3, GateType::Not, Tick(13)),
+        ] {
+            let gate = gate(raw_gate);
+            let ports = world
+                .activate_gate(gate, gate_type, activation_tick)
+                .expect("Gate activates");
+            let state = world
+                .gate_snapshot(gate)
+                .expect("the just-activated Gate is observable");
+
+            assert_eq!(state.ports, ports);
+            assert_eq!(state.current_output, LogicLevel::Low);
+            assert_eq!(state.desired_output, LogicLevel::Low);
+            assert_eq!(state.pending_generation, 0);
+            assert_eq!(state.pending_due_tick, None);
+            assert_eq!(state.pending_level, None);
+            assert_eq!(state.pending_switch_energy, None);
+            assert_eq!(state.cancelled_switching_heat, HeatEnergy(0));
+            assert_eq!(
+                world.driver_sample(ports.output),
+                Some(DriverSample {
+                    level: LogicLevel::Low,
+                    strength: DriveStrength(0),
+                    revision: Revision(0),
+                    emitted_at: activation_tick,
+                    driver_id: ports.output,
+                })
+            );
+        }
+    }
+
+    #[test]
     fn removed_endpoints_are_tombstones_and_never_reused() {
         let mut world = SignalWorld::new();
         let first = world

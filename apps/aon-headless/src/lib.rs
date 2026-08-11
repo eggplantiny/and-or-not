@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use aon_sim::{
-    ArtifactBytes, PackageError, Simulation, SimulationError, SimulationPackage, StateHash,
-    decode_package, decode_scenario_manifest,
+    ArtifactBytes, PackageError, Replay, ReplayArtifact, ReplayError, Simulation, SimulationError,
+    SimulationPackage, StateHash, decode_package, decode_replay_artifact, decode_scenario_manifest,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,9 @@ impl From<std::io::ErrorKind> for FileErrorKind {
 
 #[derive(Debug, Error)]
 pub enum HeadlessError {
-    #[error("usage: aon-headless scenario <scenario-path> --ticks <non-negative-integer>")]
+    #[error(
+        "usage: aon-headless scenario <scenario-path> --ticks <non-negative-integer>\n       aon-headless replay <replay-path>"
+    )]
     Usage,
 
     #[error("unable to read {artifact} `{path}`: {kind:?}")]
@@ -44,6 +46,9 @@ pub enum HeadlessError {
 
     #[error(transparent)]
     Simulation(#[from] SimulationError),
+
+    #[error(transparent)]
+    Replay(#[from] ReplayError),
 }
 
 impl HeadlessError {
@@ -52,6 +57,7 @@ impl HeadlessError {
             Self::Usage => 2,
             Self::File { .. } | Self::Package(_) => 3,
             Self::Simulation(_) => 4,
+            Self::Replay(_) => 5,
         }
     }
 }
@@ -129,12 +135,84 @@ pub fn run_package(package: SimulationPackage, ticks: u64) -> Result<RunTrace, H
     })
 }
 
+/// Reads and strictly decodes a Replay artifact without loading its referenced Scenario.
+pub fn load_replay(replay_path: impl AsRef<Path>) -> Result<ReplayArtifact, HeadlessError> {
+    let replay_bytes = read_artifact(replay_path.as_ref(), "replay")?;
+    decode_replay_artifact(&replay_bytes).map_err(HeadlessError::from)
+}
+
+/// Runs a decoded Replay against a package in a new, privately owned Simulation.
+pub fn run_replay(package: SimulationPackage, replay: &Replay) -> Result<RunTrace, HeadlessError> {
+    let mut simulation = Simulation::new(package)?;
+    replay.validate_against(&simulation)?;
+
+    let scenario_id = simulation.scenario_id().to_owned();
+    let final_next_tick = replay.final_next_tick();
+    let mut trace = Vec::new();
+    trace.push(simulation.state_hash());
+
+    let mut checkpoint_index = 0;
+    verify_current_checkpoint(replay, &simulation, &mut checkpoint_index)?;
+
+    while simulation.next_tick() < final_next_tick {
+        let commands = replay
+            .commands_for_tick(simulation.next_tick())
+            .cloned()
+            .collect::<Vec<_>>();
+        let report = simulation.step(&commands)?;
+        trace.push(report.state_hash);
+        verify_current_checkpoint(replay, &simulation, &mut checkpoint_index)?;
+    }
+
+    replay.verify_trace(&trace)?;
+    Ok(RunTrace {
+        scenario_id,
+        completed_ticks: final_next_tick.0,
+        checkpoints: trace,
+    })
+}
+
+/// Loads a Replay and its Scenario (relative to the Replay file), then executes it.
+pub fn run_replay_file(replay_path: impl AsRef<Path>) -> Result<RunTrace, HeadlessError> {
+    let replay_path = replay_path.as_ref();
+    let artifact = load_replay(replay_path)?;
+    let base_directory = replay_path.parent().unwrap_or_else(|| Path::new("."));
+    let scenario_path = base_directory.join(artifact.scenario_path());
+    let package = load_package(scenario_path)?;
+    run_replay(package, artifact.replay())
+}
+
 pub fn run_scenario(
     scenario_path: impl AsRef<Path>,
     ticks: u64,
 ) -> Result<RunTrace, HeadlessError> {
     let package = load_package(scenario_path)?;
     run_package(package, ticks)
+}
+
+fn verify_current_checkpoint(
+    replay: &Replay,
+    simulation: &Simulation,
+    checkpoint_index: &mut usize,
+) -> Result<(), HeadlessError> {
+    let Some(checkpoint) = replay.checkpoints().get(*checkpoint_index) else {
+        return Ok(());
+    };
+    if checkpoint.next_tick != simulation.next_tick() {
+        return Ok(());
+    }
+
+    let actual = simulation.state_hash();
+    if actual != checkpoint.state_hash {
+        return Err(ReplayError::CheckpointDivergence {
+            next_tick: checkpoint.next_tick,
+            expected: checkpoint.state_hash,
+            actual,
+        }
+        .into());
+    }
+    *checkpoint_index += 1;
+    Ok(())
 }
 
 fn read_artifact(path: &Path, artifact: &'static str) -> Result<Vec<u8>, HeadlessError> {

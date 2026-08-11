@@ -15,7 +15,7 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 - [x] S0-M2 — Command / Geometry / Structural Phase
 - [x] S0-M3 — Signal Topology / Event Runtime
 - [x] S0-M4 — Topology Sync / Path Certificate
-- [ ] S0-M5 — Feedback / Replay
+- [x] S0-M5 — Feedback / Replay
 - [ ] S0-M6 — Bevy ASCII Probe
 - [ ] S0-M7 — Mobility
 - [ ] Stage 0 technical gate
@@ -71,7 +71,7 @@ repeat it in a Stage DoD list.
 
 - [ ] C-01 through C-25 have executable fixtures and assertions
 - [ ] Headless and Bevy produce the same per-Tick hashes
-- [ ] Golden replay and 100,000-Tick Stage 0 fixture pass
+- [x] Golden replay and 100,000-Tick Stage 0 fixture pass
 - [ ] Same replay passes on the supported cross-platform matrix
 - [ ] Profile hash, state hash, module, replay, and migration compatibility are versioned
 - [ ] Numeric and ordering properties pass deterministic property tests
@@ -281,6 +281,75 @@ The 21 completion gates have the following executable evidence.
     `cargo test --workspace --locked --offline`, the canonical-core dependency boundary check,
     and the same commands from a fresh clean checkout of the final commit.
 
-Passing these gates completes only S0-M4. **The next implementation slice is S0-M5 — Feedback /
-Replay**; S0-M5 and the remaining Stage 0 milestones are still mandatory before the Stage 0
-technical gate.
+Passing these gates completes only S0-M4. S0-M5 completion evidence follows below; the remaining
+Stage 0 milestones and gates are still mandatory.
+
+## Completed slice — S0-M5
+
+S0-M5 completed on 2026-08-12. Completion authority is
+`docs/AON_S0_M5_Canonical_Decisions_v1.0.md`. This completes only the feedback/replay slice; it does
+not complete Stage 0 or the game engine.
+
+The 18 completion gates have the following executable evidence.
+
+1. Feedback-capable Gate startup is Low/zero-strength/Revision-zero with no preexisting Event in
+   `crates/aon-sim/src/signal.rs` (`every_gate_type_activates_with_the_frozen_quiescent_signal_state`);
+   ordinary Phase 3/6 delayed activation is asserted by C-05 in
+   `crates/aon-sim/tests/feedback_conformance.rs`.
+2. Cycles compile through ordinary Driver/Route/Arrival and Path Certificate state with no
+   feedback or Latch canonical type: `crates/aon-sim/tests/feedback_conformance.rs` and
+   `crates/aon-sim/src/simulation.rs`.
+3. C-05 proves the one-NOT self-loop's exact rising/falling `2D=4` period and retained edges in
+   `crates/aon-sim/tests/feedback_conformance.rs`.
+4. C-06 proves exchange-symmetric two-NOT startup across reversed command slices without choosing
+   a complementary EntityId branch in `crates/aon-sim/tests/feedback_conformance.rs`.
+5. Set, release, hold, Reset, release, and clear emerge from OR/NOT/Wire only in
+   `crates/aon-sim/tests/feedback_conformance.rs`
+   (`explicit_nor_style_set_reset_emerges_from_only_or_not_and_wire`).
+6. Replay Header immutably binds format, semantics, three Profile Hashes, State Hash version,
+   generator, zero Seed, initial hash, and algorithm in `crates/aon-sim/src/replay.rs`,
+   `crates/aon-sim/src/simulation.rs`, and their Replay unit tests.
+7. Strict JSON canonical round-trip and typed rejection of unknown fields, numeric width/float,
+   invalid hash/Seed, unsupported versions, nonzero Empty seed, and World Inputs are covered by
+   `crates/aon-sim/src/replay.rs` tests and `crates/aon-sim/tests/replay_golden.rs`.
+8. All eight Stage 0 Command variants round-trip with extreme coordinates, typed IDs, domains,
+   endpoints, ports, and levels in `crates/aon-sim/src/replay.rs`
+   (`command_json_round_trips_all_stage_zero_variants`).
+9. Reversed typed/JSON arrays, duplicate ordinals, canonical byte normalization, Tick batches,
+   reports, rejections, and hashes are invariant in `crates/aon-sim/src/replay.rs`
+   (`duplicate_ordinal_replay_normalization_is_input_json_and_execution_invariant`).
+10. Checkpoint zero, strict duplicate/descending rejection, sparse success, final boundary,
+    `u64::MAX` trace preflight, and exact first divergence are covered by Replay unit tests and
+    `apps/aon-headless/tests/replay_cli.rs`.
+11. Unsupported semantics, State Hash version, generator, Seed, and hash algorithm are typed
+    strict-decode rejections; the three Profile Hashes and initial hash return their exact
+    `ContractMismatch` field before Tick 0 without mutation in `crates/aon-sim/src/replay.rs`
+    (`profile_and_initial_hash_mismatches_report_exact_fields_without_mutation` and the decoder
+    rejection matrix).
+12. `fixtures/replays/feedback-ring-v1.json` is exact canonical encoder output and its complete
+    retained trace/checkpoints run headlessly in `crates/aon-sim/tests/replay_golden.rs` and
+    `apps/aon-app/tests/replay_host.rs`.
+13. That retained feedback Replay produces identical Headless and Bevy `FixedUpdate` traces with
+    presenter on/off and 0/1/7 presentation updates in `apps/aon-app/tests/replay_host.rs`.
+14. One long frame carrying Tick debt and 21 fixed frames preserve the same retained trace in
+    `apps/aon-app/tests/replay_host.rs`
+    (`retained_feedback_replay_preserves_trace_across_frame_partitioning`).
+15. `fixtures/replays/stage0-100k-v1.json` runs 100,000 Ticks, matches its final golden, and compares
+    all 100,001 Headless/Bevy hashes in `apps/aon-app/tests/replay_host.rs`
+    (`retained_stage0_100k_replay_matches_headless_and_bevy_complete_trace`); the final workspace
+    run passed in 207.65 seconds.
+16. Bounded no-panic Replay decode fuzzing and retained valid/truncated/unknown-field cases live in
+    `crates/aon-fuzz-harness/src/lib.rs`, `crates/aon-fuzz-harness/tests/regression_corpus.rs`, and
+    `crates/aon-fuzz-harness/corpus/replay/`.
+17. Replay/Header/Command/checkpoint/report and public observation reads preserve State Hash and
+    Tick in `crates/aon-sim/src/replay.rs`
+    (`replay_report_and_public_observation_reads_do_not_mutate_simulation`).
+18. Final-workspace metadata, format, all-target check, workspace strict Clippy, workspace tests,
+    canonical-core dependency boundary, and repository-zone checks pass offline; the independent
+    audit reports P0/P1 findings 0 and the trace-length overflow P2 is fixed. The final-commit fresh
+    clean-checkout rerun is executed after the completion commit is created and recorded on this
+    evidence line.
+
+Passing these gates completes only S0-M5. **The next implementation slice is S0-M6 — Bevy ASCII
+Probe**; S0-M7, both Stage 0 gates, Stages 1–2, and the MVP remain mandatory before the game engine
+is complete.

@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use aon_sim::{
-    ArtifactBytes, PackageError, RenderSnapshot, Simulation, SimulationError, SimulationPackage,
-    StateHash, Tick, decode_package,
+    ArtifactBytes, CommandEnvelope, PackageError, RenderSnapshot, Replay, ReplayError, Simulation,
+    SimulationError, SimulationPackage, StateHash, Tick, decode_package,
 };
 use bevy::prelude::*;
 use bevy::time::{TimeUpdateStrategy, Virtual};
@@ -34,6 +34,9 @@ pub enum HostError {
 
     #[error(transparent)]
     Simulation(#[from] SimulationError),
+
+    #[error(transparent)]
+    Replay(#[from] ReplayError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,9 +91,14 @@ struct HostTraceResource {
     checkpoints: Vec<StateHash>,
 }
 
+#[derive(Resource)]
+struct ReplayCommandSchedule {
+    replay: Replay,
+}
+
 #[derive(Resource, Default)]
 struct HostFault {
-    error: Option<SimulationError>,
+    error: Option<HostError>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,8 +184,8 @@ pub fn run_host_harness(
         run_presentation_updates(&mut app, presentation_updates);
     }
 
-    if let Some(error) = app.world_mut().resource_mut::<HostFault>().error.take() {
-        return Err(HostError::Simulation(error));
+    if let Some(error) = take_host_fault(&mut app) {
+        return Err(error);
     }
 
     let checkpoints = app
@@ -186,6 +194,33 @@ pub fn run_host_harness(
         .checkpoints
         .clone();
     Ok(HostTrace { checkpoints })
+}
+
+pub fn run_replay_host_harness(
+    package: SimulationPackage,
+    replay: Replay,
+    presentation_updates: u32,
+    presenter_enabled: bool,
+) -> Result<HostTrace, HostError> {
+    let simulation = Simulation::new(package)?;
+    replay.validate_against(&simulation)?;
+    let simulation_hz = simulation.profiles().balance().simulation_hz;
+    let final_next_tick = replay.final_next_tick();
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    configure_host_pacing(&mut app, simulation_hz);
+    install_replay_simulation(&mut app, simulation, replay, presenter_enabled);
+
+    run_presentation_updates(&mut app, presentation_updates);
+    for _ in 0..final_next_tick.0 {
+        app.world_mut().run_schedule(FixedUpdate);
+        if host_has_fault(&app) {
+            break;
+        }
+        run_presentation_updates(&mut app, presentation_updates);
+    }
+
+    finish_replay_host(&mut app)
 }
 
 pub fn run_paced_host_harness(
@@ -208,8 +243,8 @@ pub fn run_paced_host_harness(
         app.update();
     }
 
-    if let Some(error) = app.world_mut().resource_mut::<HostFault>().error.take() {
-        return Err(HostError::Simulation(error));
+    if let Some(error) = take_host_fault(&mut app) {
+        return Err(error);
     }
 
     let checkpoints = app
@@ -218,6 +253,34 @@ pub fn run_paced_host_harness(
         .checkpoints
         .clone();
     Ok(HostTrace { checkpoints })
+}
+
+pub fn run_paced_replay_host_harness(
+    package: SimulationPackage,
+    replay: Replay,
+    frame_deltas: &[Duration],
+) -> Result<HostTrace, HostError> {
+    let simulation = Simulation::new(package)?;
+    replay.validate_against(&simulation)?;
+    let simulation_hz = simulation.profiles().balance().simulation_hz;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    configure_host_pacing(&mut app, simulation_hz);
+    install_replay_simulation(&mut app, simulation, replay, true);
+
+    // Bevy's Real clock uses its first update to establish an origin and
+    // intentionally reports a zero delta for that update.
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+    app.update();
+    for frame_delta in frame_deltas {
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(*frame_delta));
+        app.update();
+        if host_has_fault(&app) {
+            break;
+        }
+    }
+
+    finish_replay_host(&mut app)
 }
 
 pub fn run_native() -> Result<(), HostError> {
@@ -274,9 +337,20 @@ fn install_simulation(
     }
 }
 
+fn install_replay_simulation(
+    app: &mut App,
+    simulation: Simulation,
+    replay: Replay,
+    presenter_enabled: bool,
+) {
+    install_simulation(app, simulation, HostRunMode::Running, presenter_enabled);
+    app.insert_resource(ReplayCommandSchedule { replay });
+}
+
 fn advance_canonical_simulation(
     mut canonical: ResMut<CanonicalSimulation>,
     host_state: Res<SimulationHostState>,
+    replay_schedule: Option<Res<ReplayCommandSchedule>>,
     mut trace: ResMut<HostTraceResource>,
     mut fault: ResMut<HostFault>,
 ) {
@@ -284,10 +358,47 @@ fn advance_canonical_simulation(
         return;
     }
 
-    match canonical.simulation.step(&[]) {
-        Ok(report) => trace.checkpoints.push(report.state_hash),
-        Err(error) => fault.error = Some(error),
+    let next_tick = canonical.simulation.next_tick();
+    let commands = if let Some(schedule) = replay_schedule.as_ref() {
+        if next_tick >= schedule.replay.final_next_tick() {
+            return;
+        }
+        replay_commands_for_tick(&schedule.replay, next_tick)
+    } else {
+        &[]
+    };
+
+    match canonical.simulation.step(commands) {
+        Ok(report) => {
+            trace.checkpoints.push(report.state_hash);
+            if let Some(schedule) = replay_schedule.as_ref()
+                && let Some(expected) = replay_checkpoint(&schedule.replay, report.next_tick)
+                && expected != report.state_hash
+            {
+                fault.error = Some(HostError::Replay(ReplayError::CheckpointDivergence {
+                    next_tick: report.next_tick,
+                    expected,
+                    actual: report.state_hash,
+                }));
+            }
+        }
+        Err(error) => fault.error = Some(HostError::Simulation(error)),
     }
+}
+
+fn replay_commands_for_tick(replay: &Replay, tick: Tick) -> &[CommandEnvelope] {
+    let commands = replay.commands();
+    let start = commands.partition_point(|command| command.target_tick < tick);
+    let end = commands.partition_point(|command| command.target_tick <= tick);
+    &commands[start..end]
+}
+
+fn replay_checkpoint(replay: &Replay, next_tick: Tick) -> Option<StateHash> {
+    replay
+        .checkpoints()
+        .binary_search_by_key(&next_tick, |checkpoint| checkpoint.next_tick)
+        .ok()
+        .map(|index| replay.checkpoints()[index].state_hash)
 }
 
 fn refresh_render_snapshot(
@@ -318,6 +429,33 @@ fn run_presentation_updates(app: &mut App, count: u32) {
     for _ in 0..count {
         app.world_mut().run_schedule(Update);
     }
+}
+
+fn take_host_fault(app: &mut App) -> Option<HostError> {
+    app.world_mut().resource_mut::<HostFault>().error.take()
+}
+
+fn host_has_fault(app: &App) -> bool {
+    app.world().resource::<HostFault>().error.is_some()
+}
+
+fn finish_replay_host(app: &mut App) -> Result<HostTrace, HostError> {
+    if let Some(error) = take_host_fault(app) {
+        return Err(error);
+    }
+
+    let trace = HostTrace {
+        checkpoints: app
+            .world()
+            .resource::<HostTraceResource>()
+            .checkpoints
+            .clone(),
+    };
+    app.world()
+        .resource::<ReplayCommandSchedule>()
+        .replay
+        .verify_trace(trace.checkpoints())?;
+    Ok(trace)
 }
 
 #[cfg(test)]

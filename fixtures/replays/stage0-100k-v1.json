@@ -1,0 +1,204 @@
+{
+  "scenarioPath": "../scenarios/empty.json",
+  "header": {
+    "formatVersion": 1,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
+    "stateHashVersion": "aon-state-v3",
+    "worldGeneratorVersion": "aon-empty-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": { "x": 0, "y": 0 },
+        "routingArea": {
+          "min": { "x": -2097152, "y": -2097152 },
+          "max": { "x": 2097152, "y": 2097152 }
+        },
+        "footprint": {
+          "min": { "x": -2097152, "y": -2097152 },
+          "max": { "x": 2097152, "y": 2097152 }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-gate",
+        "gateType": "or",
+        "origin": { "x": 0, "y": -65536 },
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 1,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": { "x": 65536, "y": -65536 },
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 2,
+      "command": {
+        "type": "place-gate",
+        "gateType": "or",
+        "origin": { "x": 0, "y": 65536 },
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 3,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": { "x": 65536, "y": 65536 },
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 },
+        "points": [
+          { "x": 16384, "y": -65536 },
+          { "x": 49152, "y": -65536 }
+        ],
+        "endpointA": { "kind": "gate-port", "gate": 2, "port": "output" },
+        "endpointB": { "kind": "gate-port", "gate": 3, "port": "input-a" }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 },
+        "points": [
+          { "x": 16384, "y": 65536 },
+          { "x": 49152, "y": 65536 }
+        ],
+        "endpointA": { "kind": "gate-port", "gate": 4, "port": "output" },
+        "endpointB": { "kind": "gate-port", "gate": 5, "port": "input-a" }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 2,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 },
+        "points": [
+          { "x": 81920, "y": -65536 },
+          { "x": 98304, "y": -65536 },
+          { "x": 98304, "y": 114688 },
+          { "x": -32768, "y": 114688 },
+          { "x": -32768, "y": 65536 },
+          { "x": -16384, "y": 57344 }
+        ],
+        "endpointA": { "kind": "gate-port", "gate": 3, "port": "output" },
+        "endpointB": { "kind": "gate-port", "gate": 4, "port": "input-a" }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 3,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": { "kind": "fixed-substrate", "substrate": 1 },
+        "points": [
+          { "x": 81920, "y": 65536 },
+          { "x": 114688, "y": 65536 },
+          { "x": 114688, "y": -98304 },
+          { "x": -32768, "y": -98304 },
+          { "x": -32768, "y": -65536 },
+          { "x": -16384, "y": -57344 }
+        ],
+        "endpointA": { "kind": "gate-port", "gate": 5, "port": "output" },
+        "endpointB": { "kind": "gate-port", "gate": 2, "port": "input-b" }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 4,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 7,
+        "level": "high",
+        "strength": 100
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 0,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 7,
+        "level": "low",
+        "strength": 0
+      }
+    },
+    {
+      "targetTick": 20,
+      "ordinal": 0,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 1,
+        "level": "high",
+        "strength": 100
+      }
+    },
+    {
+      "targetTick": 33,
+      "ordinal": 0,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 1,
+        "level": "low",
+        "strength": 0
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276"
+    },
+    {
+      "nextTick": 15,
+      "stateHash": "e2be0533bb1661fb9e24740579182cd9d5ccd371f708eae9db49380a75155d57"
+    },
+    {
+      "nextTick": 20,
+      "stateHash": "cbc35ff2656184d4d6e70401d5a42289dee2cebb1b7abbb7f53d7b7887f0a558"
+    },
+    {
+      "nextTick": 33,
+      "stateHash": "6049d9a1147eb9dc9f0eedc7b0ac701fc69ade9b6f6992fad0036dce22c319fd"
+    },
+    {
+      "nextTick": 46,
+      "stateHash": "2802905914bea5379409c3249f4f41a82dcfb05fd7c3f41b50794b29a0f6de28"
+    },
+    {
+      "nextTick": 100000,
+      "stateHash": "f2c4e36eaf2cd301dc26792ee06d78beaceb93cacbb9c98910bb2c85b468ad4d"
+    }
+  ]
+}

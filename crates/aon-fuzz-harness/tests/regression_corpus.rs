@@ -1,7 +1,7 @@
 use aon_fuzz_harness::{
     SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
-    exercise_decoder, exercise_geometry, exercise_signal_runtime, exercise_stateful_commands,
-    exercise_topology_runtime,
+    exercise_decoder, exercise_geometry, exercise_replay_decoder, exercise_signal_runtime,
+    exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -40,6 +40,24 @@ const GEOMETRY_CORPUS: &[(&str, &[u8])] = &[
     (
         "large-coordinates",
         include_bytes!("../corpus/geometry/large-coordinates.case"),
+    ),
+];
+
+const REPLAY_CORPUS: &[(&str, &[u8], bool)] = &[
+    (
+        "valid-empty",
+        include_bytes!("../corpus/replay/valid-empty.case"),
+        true,
+    ),
+    (
+        "truncated",
+        include_bytes!("../corpus/replay/truncated.case"),
+        false,
+    ),
+    (
+        "unknown-field",
+        include_bytes!("../corpus/replay/unknown-field.case"),
+        false,
     ),
 ];
 
@@ -99,6 +117,22 @@ fn geometry_regression_corpus_never_panics_and_is_quantized() {
         assert!(
             observation.validation_results.iter().all(Result::is_ok),
             "geometry regression case `{name}` produced an unquantized point"
+        );
+    }
+}
+
+#[test]
+fn replay_regression_corpus_never_panics_and_preserves_acceptance_class() {
+    for &(name, bytes, expected_acceptance) in REPLAY_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_replay_decoder(bytes)));
+        let Ok(observation) = result else {
+            panic!("Replay regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.result.is_ok(),
+            expected_acceptance,
+            "Replay regression case `{name}` changed acceptance class: {:?}",
+            observation.result
         );
     }
 }

@@ -2,10 +2,11 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**`S0-M0 — Bootstrap`부터 `S0-M4 — Topology Sync / Path Certificate`까지 완료됐고,
-다음 구현 경계는 `S0-M5 — Feedback / Replay`다.** S0-M4는 Driver/Sink revision,
-Route Diff·TopologySync, in-flight Path Certificate, stale-arrival 분류, V3 state encoding과
-fresh clean-checkout 검증을 포함한다. Stage 0과 전체 엔진은 아직 완료되지 않았으며 현황은
+**`S0-M0 — Bootstrap`부터 `S0-M5 — Feedback / Replay`까지 완료됐다.** S0-M5는 C-05/C-06과
+명시적 Set/Reset 피드백 회로, Replay format v1, strict decoder/encoder, Headless/Bevy Replay,
+retained bounded feedback 및 100,000-Tick 전체 cross-host trace, Replay decoder fuzz corpus를
+포함한다. 최종 workspace 품질·의존성·zone gate와 독립 감사를 통과했다. 다음 구현 경계는
+`S0-M6 — Bevy ASCII Probe`다. Stage 0과 전체 엔진은 아직 완료되지 않았으며 현황은
 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline
@@ -15,6 +16,7 @@ fresh clean-checkout 검증을 포함한다. Stage 0과 전체 엔진은 아직 
 - Architecture: `docs/AON_TRD_v1.0.md` — v1.0 Draft
 - Engine implementation tracker: `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`
 - Bootstrap milestone archive: `docs/AON_Engine_Bootstrap_Milestones_v1.0.md` — v1.0 Draft
+- S0-M5 implementation authority: `docs/AON_S0_M5_Canonical_Decisions_v1.0.md`
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -57,6 +59,20 @@ cargo run -p aon-headless -- \
   scenario fixtures/scenarios/empty.json --ticks 1
 ```
 
+Headless bounded feedback Replay:
+
+```bash
+cargo run -p aon-headless -- \
+  replay fixtures/replays/feedback-ring-v1.json
+```
+
+Retained 100,000-Tick Stage 0 Replay:
+
+```bash
+cargo run -p aon-headless -- \
+  replay fixtures/replays/stage0-100k-v1.json
+```
+
 Native Bevy host:
 
 ```bash
@@ -75,17 +91,25 @@ cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo test --workspace --locked --offline
 cargo test -p aon-sim --test conformance_stage0 --locked --offline
 cargo test -p aon-sim --test signal_conformance --locked --offline
+cargo test -p aon-sim --test feedback_conformance --locked --offline
+cargo test -p aon-sim --test replay_golden --locked --offline
+cargo test -p aon-sim replay::tests --locked --offline
+cargo test -p aon-headless --test replay_cli --locked --offline
+cargo test -p aon-app --test replay_host --locked --offline
 cargo test -p aon-fuzz-harness --locked --offline
 ```
 
-CI의 cross-host test는 0, 1, 100 tick에서 Headless loop와 실제 Bevy `FixedUpdate` schedule의 전체 hash trace를 비교한다. Native window 실행은 display server가 필요한 수동 smoke gate다.
+cross-host test는 0, 1, 100 Tick의 기본 loop와 retained feedback 및 100,000-Tick Replay에서
+Headless와 실제 Bevy `FixedUpdate`의 전체 hash trace를 비교한다. presentation update 수,
+presenter 유무와 frame-delta partition도 Replay 결과를 바꾸지 않는다. Native window 실행은
+display server가 필요한 수동 smoke gate다.
 
 ## Current API boundary
 
 현재 Core API는 versioned `SimulationContract`, 실제 Numeric/Physical/Balance Profile,
 fixed-point numeric/geometry, stable identity registry, canonical Stage 0 structural command,
 Driver/Sink signal state, deterministic event calendar, `Simulation::new`, transactional
-`Simulation::step`, render snapshot, canonical state hash까지 제공한다.
+`Simulation::step`, render snapshot, canonical state hash와 Replay v1까지 제공한다.
 
 - Scenario, Numeric, Physical schema `1`과 Balance schema `2`, semantics
   `aon-semantics-v1`, hash algorithm `blake3-v1`을 현재 지원한다.
@@ -100,3 +124,7 @@ Driver/Sink signal state, deterministic event calendar, `Simulation::new`, trans
 - in-flight topology edit는 stamped Path Certificate로 검증한다. Route Diff가 만든 sync와
   propagation은 revision-aware slot comparison으로 합쳐지고, 제거된 route는 passive Low를
   즉시 재해결한다.
+- Replay v1은 immutable initial-state Header, zero Seed/empty generator, 여덟 Stage 0
+  Command variant, strict JSON, normalized Tick scheduling, sparse hash checkpoint를 제공한다.
+- Headless는 `replay <path>`로 artifact 기준 상대 Scenario를 로드하고, Bevy harness는 같은
+  Command Log를 canonical Tick 기준 `FixedUpdate`에 제출한다.

@@ -6,6 +6,9 @@ use crate::event::{
 };
 use crate::path_certificate::{PathCertificateArena, PathCertificateError};
 use crate::profile::{ProfileBundle, ProfileValidationError};
+use crate::replay::{
+    ReplayFormatVersion, ReplayHeader, Seed, StateHashVersion, WorldGeneratorVersion,
+};
 use crate::signal::{
     DriverChangeRecord, DriverRole, GateSignalPorts, GateSignalSnapshot, SignalChangeRecord,
     SignalError, SignalStepCounters, SignalWorld, SinkRole, SlotApplyOutcome, WireSignalSnapshot,
@@ -130,6 +133,7 @@ pub struct Simulation {
     scenario_id: String,
     canonical: CanonicalWorld,
     profiles: ProfileBundle,
+    initial_state_hash: StateHash,
 }
 
 impl Simulation {
@@ -148,23 +152,25 @@ impl Simulation {
             InitialWorld::Empty => StructuralWorld::new(),
         };
 
-        let simulation = Self {
-            scenario_id: package.scenario_id,
-            canonical: CanonicalWorld {
-                next_tick: Tick(0),
-                topology_revision: Revision(0),
-                contract: package.contract,
-                structural,
-                signal: SignalWorld::new(),
-                event_payloads: EventPayloadAllocator::new(),
-                driver_events: EventCalendar::new(),
-                signal_events: EventCalendar::new(),
-                path_certificates: PathCertificateArena::new(),
-            },
-            profiles: package.profiles,
+        let canonical = CanonicalWorld {
+            next_tick: Tick(0),
+            topology_revision: Revision(0),
+            contract: package.contract,
+            structural,
+            signal: SignalWorld::new(),
+            event_payloads: EventPayloadAllocator::new(),
+            driver_events: EventCalendar::new(),
+            signal_events: EventCalendar::new(),
+            path_certificates: PathCertificateArena::new(),
         };
-        validate_canonical_world(&simulation.canonical)?;
-        Ok(simulation)
+        validate_canonical_world(&canonical)?;
+        let initial_state_hash = canonical::state_hash(canonical.state_view());
+        Ok(Self {
+            scenario_id: package.scenario_id,
+            canonical,
+            profiles: package.profiles,
+            initial_state_hash,
+        })
     }
 
     pub fn step(&mut self, commands: &[CommandEnvelope]) -> Result<StepReport, SimulationError> {
@@ -265,6 +271,21 @@ impl Simulation {
 
     pub const fn contract(&self) -> &SimulationContract {
         &self.canonical.contract
+    }
+
+    pub fn replay_header(&self) -> ReplayHeader {
+        ReplayHeader {
+            format_version: ReplayFormatVersion::V1,
+            semantics_version: self.canonical.contract.semantics_version,
+            numeric_profile_hash: self.canonical.contract.numeric_profile_hash,
+            physical_scale_profile_hash: self.canonical.contract.physical_scale_profile_hash,
+            balance_profile_hash: self.canonical.contract.balance_profile_hash,
+            state_hash_version: StateHashVersion::current(),
+            world_generator_version: WorldGeneratorVersion::EmptyV1,
+            seed: Seed::ZERO,
+            initial_state_hash: self.initial_state_hash,
+            hash_algorithm_id: self.canonical.contract.hash_algorithm_id(),
+        }
     }
 
     pub const fn profiles(&self) -> &ProfileBundle {
@@ -1478,6 +1499,7 @@ mod tests {
             scenario_id: simulation.scenario_id.clone(),
             canonical: simulation.canonical.clone(),
             profiles: simulation.profiles.clone(),
+            initial_state_hash: simulation.initial_state_hash,
         };
         let before_hash = simulation.state_hash();
         let before_driver = simulation

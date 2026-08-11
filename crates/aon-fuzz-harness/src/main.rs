@@ -1,9 +1,10 @@
 use aon_fuzz_harness::{
     CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
-    MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
-    SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
-    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
-    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
+    MAX_GEOMETRY_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
+    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, SignalRuntimeExecutionObservation,
+    StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
+    exercise_decoder, exercise_geometry, exercise_replay_decoder, exercise_signal_runtime,
+    exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::io::Read;
 
@@ -13,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| String::from("both"));
     let input_limit = MAX_DECODER_INPUT_BYTES
         .max(MAX_GEOMETRY_INPUT_BYTES)
+        .max(MAX_REPLAY_INPUT_BYTES)
         .max(MAX_COMMAND_INPUT_BYTES)
         .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
         .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES);
@@ -24,12 +26,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match mode.as_str() {
         "decoder" => print_decoder(&input),
         "geometry" => print_geometry(&input),
+        "replay" => print_replay(&input),
         "commands" => print_commands(&input)?,
         "signal" => print_signal_runtime(&input)?,
         "topology" => print_topology_runtime(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
+            print_replay(&input);
         }
         "all" => {
             print_decoder(&input);
@@ -40,12 +44,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, geometry, commands, signal, topology, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, geometry, commands, signal, topology, both, or all"
             )
             .into());
         }
     }
     Ok(())
+}
+
+fn print_replay(input: &[u8]) {
+    let observation = exercise_replay_decoder(input);
+    match observation.result {
+        Ok(()) => println!(
+            "replay payload_bytes={} result=accepted",
+            observation.payload_len
+        ),
+        Err(error) => println!(
+            "replay payload_bytes={} result=rejected error={error}",
+            observation.payload_len
+        ),
+    }
 }
 
 fn print_topology_runtime(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {

@@ -1,0 +1,202 @@
+{
+  "scenarioPath": "../scenarios/empty.json",
+  "header": {
+    "formatVersion": 1,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
+    "stateHashVersion": "aon-state-v3",
+    "worldGeneratorVersion": "aon-empty-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -2097152,
+            "y": -2097152
+          },
+          "max": {
+            "x": 2097152,
+            "y": 2097152
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -2097152,
+            "y": -2097152
+          },
+          "max": {
+            "x": 2097152,
+            "y": 2097152
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 1
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 1
+        },
+        "points": [
+          {
+            "x": 16384,
+            "y": 0
+          },
+          {
+            "x": 32768,
+            "y": 0
+          },
+          {
+            "x": 32768,
+            "y": 32768
+          },
+          {
+            "x": -32768,
+            "y": 32768
+          },
+          {
+            "x": -32768,
+            "y": 0
+          },
+          {
+            "x": -16384,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 2,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 2,
+          "port": "input-a"
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "ead5821d6b826045b775be67cac9679550016dd2757e8983e8fc4130594b334d"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "cb0e48f1d201bd368143e889b028760b97f4cc9cbd59ec02318ef4852a7737cf"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "aec55c48e5dd08b8cf7b42cf7c2da7588fe8906d703e11a91b0c909996ff2a82"
+    },
+    {
+      "nextTick": 4,
+      "stateHash": "ad6919563de02e2cd9e7fded83e561632e90e1a0067a923eb91d0bcaa6de29eb"
+    },
+    {
+      "nextTick": 5,
+      "stateHash": "28c4fb229eaebf74d8c08c65c9ab63d79b78821682c35f7e0bd8170665ea1328"
+    },
+    {
+      "nextTick": 6,
+      "stateHash": "44a16f3cd171841b4e2d46312d49a951e825c92900b75c6e234dc46e2f94f636"
+    },
+    {
+      "nextTick": 7,
+      "stateHash": "6d6aa36090ab216727736d1691566e50701bdb2db28d7a881fdcf9df31e56c72"
+    },
+    {
+      "nextTick": 8,
+      "stateHash": "f32ed84f5a96dc7420377604219345eeddf5c91df45c5cd27f6e85e7de756592"
+    },
+    {
+      "nextTick": 9,
+      "stateHash": "f1791dfa6aaee4d8b0ef0c054941e056eb944ba30013556b6caae07a17753b2b"
+    },
+    {
+      "nextTick": 10,
+      "stateHash": "1ded50272d943faeea5f422a6bc838d6ce7f7d6aaa818518b927803a7738cb02"
+    },
+    {
+      "nextTick": 11,
+      "stateHash": "b472e6320bd7d2c23c1f0282689747a9854c16a9cfd12f41b29a03ee4500855f"
+    },
+    {
+      "nextTick": 12,
+      "stateHash": "8bf8336462c211454bdde0de49a1d4b086d90ed2c1f2b1aeb8732aeb8d70d619"
+    },
+    {
+      "nextTick": 13,
+      "stateHash": "6cee919d752850a16898f1e2387e6d5e9c30516bbea3e67b00a67d83c66168bc"
+    },
+    {
+      "nextTick": 14,
+      "stateHash": "a4a676d7624b055f90136cb4e662575f4010a1e630b87532837e10a5436947ef"
+    },
+    {
+      "nextTick": 15,
+      "stateHash": "4a6cff759bc3cab309c3029aa6c28128e44e7bcce7c3843e53d1de05f7c8c61b"
+    },
+    {
+      "nextTick": 16,
+      "stateHash": "a517bb1089f1efed342f5498b3cf17fc9fa958b01134d24ef27efb072dcce40d"
+    },
+    {
+      "nextTick": 17,
+      "stateHash": "d9038eb9a69af2a24b26cadf2bd90e6c2d267fe97a4a1b3b2cac1f97e8444b98"
+    },
+    {
+      "nextTick": 18,
+      "stateHash": "aad4e57c96a99af4c4b0139091c5253d22e8a3710e6ffb656b185718a30199db"
+    },
+    {
+      "nextTick": 19,
+      "stateHash": "12bf2fc8ef833438bd938504a823b49f8d990d7c451323da809dcdac5c1be897"
+    },
+    {
+      "nextTick": 20,
+      "stateHash": "7e4e8df81352b32192f22ac0b655c2e6b5be92c53b99eb159aca7477e84ff256"
+    },
+    {
+      "nextTick": 21,
+      "stateHash": "a911cf4dc5a9e53da337fe3abd6fad0b0a74eff6af6519af4f269b6bfd389a29"
+    }
+  ]
+}
