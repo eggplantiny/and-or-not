@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod topology_runtime;
+
+pub use topology_runtime::{
+    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, TopologyRuntimeCoverage, TopologyRuntimeExecutionObservation,
+    TopologyRuntimeObservation, TopologyRuntimeScenario, exercise_topology_runtime,
+};
+
 use aon_sim::{
     ArtifactBytes, BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength,
     DriverId, DriverSample, EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId,
@@ -1551,8 +1558,9 @@ mod tests {
         REFERENCE_BALANCE_PROFILE, REFERENCE_NUMERIC_PROFILE, REFERENCE_PHYSICAL_SCALE_PROFILE,
         REFERENCE_SCENARIO, STATEFUL_BATCH_TICK, STATEFUL_GATE_ID, STATEFUL_JUNCTION_ID,
         STATEFUL_TOMBSTONE_ID, STATEFUL_WIRE_ID, SignalRuntimeExecutionObservation,
-        StatefulCommandExecutionObservation, exercise_commands, exercise_decoder,
-        exercise_geometry, exercise_signal_runtime, exercise_stateful_commands, stateful_envelope,
+        StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation,
+        exercise_commands, exercise_decoder, exercise_geometry, exercise_signal_runtime,
+        exercise_stateful_commands, exercise_topology_runtime, stateful_envelope,
         stateful_prefix_batches,
     };
     use aon_sim::{
@@ -1861,6 +1869,24 @@ mod tests {
                     signal_runtime.invariant_failure(),
                     None,
                     "signal runtime violated a harness invariant for generated case {case_index}"
+                );
+            }
+
+            if case_index < 64 {
+                let topology_runtime =
+                    catch_unwind(AssertUnwindSafe(|| exercise_topology_runtime(&bytes)));
+                let Ok(topology_runtime) = topology_runtime else {
+                    panic!("topology runtime panicked for generated case {case_index}");
+                };
+                assert_eq!(
+                    topology_runtime.execution,
+                    TopologyRuntimeExecutionObservation::Completed,
+                    "topology runtime did not complete for generated case {case_index}"
+                );
+                assert_eq!(
+                    topology_runtime.invariant_failure(),
+                    None,
+                    "topology runtime violated a harness invariant for generated case {case_index}"
                 );
             }
         }

@@ -1,3 +1,4 @@
+use crate::path_certificate::PathElementStamp;
 use crate::profile::Rational;
 use crate::signal::{DriveVector, DriverRole, SignalWorld, SinkRole};
 use crate::structural::StructuralWorld;
@@ -22,6 +23,26 @@ pub(crate) enum RoutePathElement {
     Junction(JunctionId),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct DriverSinkPair {
+    pub driver: DriverId,
+    pub sink: SinkId,
+}
+
+impl DriverSinkPair {
+    pub const fn new(driver: DriverId, sink: SinkId) -> Self {
+        Self { driver, sink }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct RouteFingerprint {
+    pub path_stamps: Vec<PathElementStamp>,
+    pub total_length: Fixed,
+    pub segment_count: u64,
+    pub delay: Tick,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CompiledRoute {
     pub driver: DriverId,
@@ -29,8 +50,44 @@ pub(crate) struct CompiledRoute {
     pub total_length: Fixed,
     pub segment_count: u64,
     pub path_key: Vec<RoutePathElement>,
+    pub path_stamps: Vec<PathElementStamp>,
     pub wires: Vec<WireId>,
     pub delay: Tick,
+}
+
+impl CompiledRoute {
+    pub fn pair(&self) -> DriverSinkPair {
+        DriverSinkPair::new(self.driver, self.sink)
+    }
+
+    pub fn fingerprint(&self) -> RouteFingerprint {
+        RouteFingerprint {
+            path_stamps: self.path_stamps.clone(),
+            total_length: self.total_length,
+            segment_count: self.segment_count,
+            delay: self.delay,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RouteDiff {
+    pub added: Vec<DriverSinkPair>,
+    pub removed: Vec<DriverSinkPair>,
+    pub retained: Vec<DriverSinkPair>,
+    pub replaced: Vec<DriverSinkPair>,
+}
+
+impl RouteDiff {
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.added.len() + self.removed.len() + self.retained.len() + self.replaced.len()
+    }
+
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +100,7 @@ pub(crate) struct DriverLoad {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CompiledSignalTopology {
-    routes: BTreeMap<(DriverId, SinkId), CompiledRoute>,
+    routes: BTreeMap<DriverSinkPair, CompiledRoute>,
     driver_nodes: BTreeMap<DriverId, SignalNodeKey>,
     sink_nodes: BTreeMap<SinkId, SignalNodeKey>,
     node_components: BTreeMap<SignalNodeKey, u64>,
@@ -100,6 +157,29 @@ impl CompiledSignalTopology {
                         RoutePathElement::Junction(_) => None,
                     })
                     .collect();
+                let path_stamps = priority
+                    .path_key
+                    .iter()
+                    .map(|element| match element {
+                        RoutePathElement::Wire(id) => {
+                            graph.wire_generations.get(id).copied().map(|generation| {
+                                PathElementStamp::Wire {
+                                    id: *id,
+                                    generation,
+                                }
+                            })
+                        }
+                        RoutePathElement::Junction(id) => graph
+                            .junction_generations
+                            .get(id)
+                            .copied()
+                            .map(|generation| PathElementStamp::Junction {
+                                id: *id,
+                                generation,
+                            }),
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or(SignalTopologyError::InvalidCanonicalState)?;
                 let delay = if wires.is_empty() {
                     Tick(0)
                 } else {
@@ -111,10 +191,12 @@ impl CompiledSignalTopology {
                     total_length: priority.total_length,
                     segment_count: priority.segment_count,
                     path_key: priority.path_key.clone(),
+                    path_stamps,
                     wires,
                     delay,
                 };
-                if compiled.routes.insert((driver, sink), route).is_some() {
+                let pair = DriverSinkPair::new(driver, sink);
+                if route.pair() != pair || compiled.routes.insert(pair, route).is_some() {
                     return Err(SignalTopologyError::InvalidCanonicalState);
                 }
             }
@@ -123,7 +205,7 @@ impl CompiledSignalTopology {
                 compiled
                     .routes
                     .keys()
-                    .filter(|(route_driver, _)| *route_driver == driver)
+                    .filter(|pair| pair.driver == driver)
                     .count(),
             )
             .map_err(|_| SignalTopologyError::NumericOverflow)?;
@@ -193,8 +275,45 @@ impl CompiledSignalTopology {
 
     pub fn routes_from(&self, driver: DriverId) -> impl Iterator<Item = &CompiledRoute> + '_ {
         self.routes
-            .range((driver, SinkId(EntityId(0)))..=(driver, SinkId(EntityId(u64::MAX))))
+            .range(
+                DriverSinkPair::new(driver, SinkId(EntityId(0)))
+                    ..=DriverSinkPair::new(driver, SinkId(EntityId(u64::MAX))),
+            )
             .map(|(_, route)| route)
+    }
+
+    pub fn route(&self, pair: DriverSinkPair) -> Option<&CompiledRoute> {
+        self.routes.get(&pair)
+    }
+
+    #[cfg(test)]
+    pub fn canonical_routes(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (DriverSinkPair, &CompiledRoute)> + ExactSizeIterator + '_
+    {
+        self.routes.iter().map(|(pair, route)| (*pair, route))
+    }
+
+    pub fn route_diff(&self, newer: &Self) -> RouteDiff {
+        let pairs: BTreeSet<_> = self
+            .routes
+            .keys()
+            .chain(newer.routes.keys())
+            .copied()
+            .collect();
+        let mut diff = RouteDiff::default();
+        for pair in pairs {
+            match (self.routes.get(&pair), newer.routes.get(&pair)) {
+                (None, Some(_)) => diff.added.push(pair),
+                (Some(_), None) => diff.removed.push(pair),
+                (Some(old), Some(new)) if old.fingerprint() == new.fingerprint() => {
+                    diff.retained.push(pair);
+                }
+                (Some(_), Some(_)) => diff.replaced.push(pair),
+                (None, None) => {}
+            }
+        }
+        diff
     }
 
     pub fn driver_load(&self, driver: DriverId) -> Option<DriverLoad> {
@@ -229,6 +348,9 @@ impl CompiledSignalTopology {
                     crate::signal::SignalError::InvalidCanonicalState => {
                         SignalTopologyError::InvalidCanonicalState
                     }
+                    crate::signal::SignalError::DriverRevisionInvariantViolation => {
+                        SignalTopologyError::InvalidCanonicalState
+                    }
                 })?;
         }
         let mut result = BTreeMap::new();
@@ -257,6 +379,8 @@ struct SignalGraph {
     driver_nodes: BTreeMap<DriverId, SignalNodeKey>,
     sink_nodes: BTreeMap<SinkId, SignalNodeKey>,
     wire_lengths: BTreeMap<WireId, Fixed>,
+    wire_generations: BTreeMap<WireId, crate::ConnectionGeneration>,
+    junction_generations: BTreeMap<JunctionId, crate::ConnectionGeneration>,
 }
 
 impl SignalGraph {
@@ -314,6 +438,13 @@ impl SignalGraph {
 
         for (_, junction) in structural.junctions().iter_alive() {
             graph.ensure_node(SignalNodeKey::Junction(junction.id));
+            if graph
+                .junction_generations
+                .insert(junction.id, junction.connection_generation)
+                .is_some()
+            {
+                return Err(SignalTopologyError::InvalidCanonicalState);
+            }
         }
         for (_, wire) in structural.wires().iter_alive() {
             let node_a = signal_node_for_endpoint(wire.id, WireEnd::A, wire.endpoint_a);
@@ -330,6 +461,13 @@ impl SignalGraph {
             )
             .map_err(|_| SignalTopologyError::NumericOverflow)?;
             if graph.wire_lengths.insert(wire.id, length).is_some() {
+                return Err(SignalTopologyError::InvalidCanonicalState);
+            }
+            if graph
+                .wire_generations
+                .insert(wire.id, wire.connection_generation)
+                .is_some()
+            {
                 return Err(SignalTopologyError::InvalidCanonicalState);
             }
             graph.add_edge(node_a, node_b, wire.id, length, segment_count);
@@ -873,6 +1011,174 @@ mod tests {
         }
     }
 
+    fn synthetic_route(
+        pair: DriverSinkPair,
+        path_key: Vec<RoutePathElement>,
+        path_stamps: Vec<PathElementStamp>,
+    ) -> CompiledRoute {
+        let wires = path_key
+            .iter()
+            .filter_map(|element| match element {
+                RoutePathElement::Wire(wire) => Some(*wire),
+                RoutePathElement::Junction(_) => None,
+            })
+            .collect();
+        CompiledRoute {
+            driver: pair.driver,
+            sink: pair.sink,
+            total_length: Fixed(10),
+            segment_count: 1,
+            path_key,
+            path_stamps,
+            wires,
+            delay: Tick(1),
+        }
+    }
+
+    fn synthetic_topology(routes: Vec<CompiledRoute>) -> CompiledSignalTopology {
+        let mut topology = CompiledSignalTopology::default();
+        for route in routes {
+            assert!(topology.routes.insert(route.pair(), route).is_none());
+        }
+        topology
+    }
+
+    #[test]
+    fn compiled_certificates_cover_empty_single_and_adjacent_gate_port_wires_exactly() {
+        let physical = PhysicalScaleProfile::stage0_alpha("certificate-shapes");
+        let balance = crate::BalanceProfile::stage0_alpha("certificate-shapes");
+        let mut structural = StructuralWorld::new();
+        let mut signal = SignalWorld::new();
+        let bounds = FixedAabb::new(route_fixture_point(-16, -16), route_fixture_point(16, 16));
+        apply_route_fixture_phase(
+            &mut structural,
+            &mut signal,
+            0,
+            vec![Command::PlaceFixedSubstrate(PlaceFixedSubstrateCommand {
+                origin: route_fixture_point(0, 0),
+                routing_area: bounds,
+                footprint: bounds,
+            })],
+            false,
+            &physical,
+        );
+        let domain = RoutingDomain::FixedSubstrate(EntityId(1));
+        apply_route_fixture_phase(
+            &mut structural,
+            &mut signal,
+            1,
+            vec![
+                Command::PlaceGate(PlaceGateCommand {
+                    gate_type: GateType::Not,
+                    origin: route_fixture_point(-4, 0),
+                    routing_domain: domain,
+                }),
+                Command::PlaceGate(PlaceGateCommand {
+                    gate_type: GateType::Not,
+                    origin: route_fixture_point(0, 0),
+                    routing_domain: domain,
+                }),
+                Command::PlaceGate(PlaceGateCommand {
+                    gate_type: GateType::Not,
+                    origin: route_fixture_point(0, 4),
+                    routing_domain: domain,
+                }),
+            ],
+            false,
+            &physical,
+        );
+        let source = GateId(EntityId(2));
+        let bridge = GateId(EntityId(3));
+        let target = GateId(EntityId(4));
+        apply_route_fixture_phase(
+            &mut structural,
+            &mut signal,
+            2,
+            vec![
+                Command::PlaceWire(PlaceWireCommand {
+                    routing_domain: domain,
+                    points: vec![route_fixture_point(-3, 0), route_fixture_point(-1, 0)],
+                    endpoint_a: EndpointTarget::GatePort(GatePortRef {
+                        gate: source,
+                        port: GatePort::Output,
+                    }),
+                    endpoint_b: EndpointTarget::GatePort(GatePortRef {
+                        gate: bridge,
+                        port: GatePort::InputA,
+                    }),
+                }),
+                Command::PlaceWire(PlaceWireCommand {
+                    routing_domain: domain,
+                    points: vec![
+                        route_fixture_point(-1, 0),
+                        route_fixture_point(-2, 1),
+                        route_fixture_point(-2, 3),
+                        route_fixture_point(-1, 4),
+                    ],
+                    endpoint_a: EndpointTarget::GatePort(GatePortRef {
+                        gate: bridge,
+                        port: GatePort::InputA,
+                    }),
+                    endpoint_b: EndpointTarget::GatePort(GatePortRef {
+                        gate: target,
+                        port: GatePort::InputA,
+                    }),
+                }),
+            ],
+            false,
+            &physical,
+        );
+
+        let compiled = CompiledSignalTopology::compile(&structural, &signal, &balance)
+            .expect("certificate-shape topology compiles");
+        let source_ports = signal.gate_ports(source).expect("source ports exist");
+        let bridge_ports = signal.gate_ports(bridge).expect("bridge ports exist");
+        let target_ports = signal.gate_ports(target).expect("target ports exist");
+
+        let local = compiled
+            .route(DriverSinkPair::new(
+                bridge_ports.input_a.external_driver,
+                bridge_ports.input_a.sink,
+            ))
+            .expect("local Driver reaches its co-located Sink");
+        assert!(local.path_stamps.is_empty());
+        assert_eq!(local.delay, Tick(0));
+
+        let single = compiled
+            .route(DriverSinkPair::new(
+                source_ports.output,
+                bridge_ports.input_a.sink,
+            ))
+            .expect("source reaches the bridge over one Wire");
+        assert_eq!(
+            single.path_stamps,
+            vec![PathElementStamp::Wire {
+                id: WireId(EntityId(5)),
+                generation: crate::ConnectionGeneration(0),
+            }]
+        );
+
+        let adjacent = compiled
+            .route(DriverSinkPair::new(
+                source_ports.output,
+                target_ports.input_a.sink,
+            ))
+            .expect("source reaches the target through two Wires sharing one GatePort");
+        assert_eq!(
+            adjacent.path_stamps,
+            vec![
+                PathElementStamp::Wire {
+                    id: WireId(EntityId(5)),
+                    generation: crate::ConnectionGeneration(0),
+                },
+                PathElementStamp::Wire {
+                    id: WireId(EntityId(6)),
+                    generation: crate::ConnectionGeneration(0),
+                },
+            ]
+        );
+    }
+
     #[test]
     fn exact_wire_delay_matches_c01_and_c03_lengths() {
         let balance = crate::BalanceProfile::stage0_alpha("signal-topology-delay");
@@ -1057,6 +1363,17 @@ mod tests {
             CompiledSignalTopology::compile(&reordered_structural, &reordered_signal, &balance)
                 .expect("reordered topology compiles");
         assert_eq!(compiled, reordered);
+        let layout_diff = compiled.route_diff(&reordered);
+        assert!(layout_diff.added.is_empty());
+        assert!(layout_diff.removed.is_empty());
+        assert!(layout_diff.replaced.is_empty());
+        assert_eq!(
+            layout_diff.retained,
+            compiled
+                .canonical_routes()
+                .map(|(pair, _)| pair)
+                .collect::<Vec<_>>()
+        );
 
         let long_low_key = actual_route_priority(
             &baseline_structural,
@@ -1095,7 +1412,7 @@ mod tests {
 
         let selected = compiled
             .routes
-            .get(&(driver, sink))
+            .get(&DriverSinkPair::new(driver, sink))
             .expect("source output reaches target input");
         assert_eq!(selected.total_length, expected.total_length);
         assert_eq!(selected.segment_count, expected.segment_count);
@@ -1104,6 +1421,140 @@ mod tests {
             selected.wires,
             vec![WireId(EntityId(8)), WireId(EntityId(9))]
         );
+        assert_eq!(
+            selected.path_stamps,
+            vec![
+                PathElementStamp::Wire {
+                    id: WireId(EntityId(8)),
+                    generation: crate::ConnectionGeneration(0),
+                },
+                PathElementStamp::Junction {
+                    id: JunctionId(EntityId(4)),
+                    generation: crate::ConnectionGeneration(1),
+                },
+                PathElementStamp::Wire {
+                    id: WireId(EntityId(9)),
+                    generation: crate::ConnectionGeneration(0),
+                },
+            ],
+            "selected paths are stamped after the Phase 0-coalesced generation advance"
+        );
+    }
+
+    #[test]
+    fn route_diff_is_four_way_pair_ordered_and_generation_sensitive() {
+        let retained = DriverSinkPair::new(DriverId(EntityId(1)), SinkId(EntityId(1)));
+        let removed = DriverSinkPair::new(DriverId(EntityId(1)), SinkId(EntityId(2)));
+        let added = DriverSinkPair::new(DriverId(EntityId(2)), SinkId(EntityId(1)));
+        let generation_replaced = DriverSinkPair::new(DriverId(EntityId(2)), SinkId(EntityId(2)));
+        let path_replaced = DriverSinkPair::new(DriverId(EntityId(3)), SinkId(EntityId(1)));
+
+        let wire = |id, generation| PathElementStamp::Wire {
+            id: WireId(EntityId(id)),
+            generation: crate::ConnectionGeneration(generation),
+        };
+        let old = synthetic_topology(vec![
+            synthetic_route(
+                retained,
+                vec![RoutePathElement::Wire(WireId(EntityId(10)))],
+                vec![wire(10, 0)],
+            ),
+            synthetic_route(
+                removed,
+                vec![RoutePathElement::Wire(WireId(EntityId(20)))],
+                vec![wire(20, 0)],
+            ),
+            synthetic_route(
+                generation_replaced,
+                vec![RoutePathElement::Wire(WireId(EntityId(30)))],
+                vec![wire(30, 0)],
+            ),
+            synthetic_route(
+                path_replaced,
+                vec![RoutePathElement::Wire(WireId(EntityId(40)))],
+                vec![wire(40, 0)],
+            ),
+        ]);
+        let new = synthetic_topology(vec![
+            synthetic_route(
+                retained,
+                vec![RoutePathElement::Wire(WireId(EntityId(10)))],
+                vec![wire(10, 0)],
+            ),
+            synthetic_route(
+                added,
+                vec![RoutePathElement::Wire(WireId(EntityId(25)))],
+                vec![wire(25, 0)],
+            ),
+            synthetic_route(
+                generation_replaced,
+                vec![RoutePathElement::Wire(WireId(EntityId(30)))],
+                vec![wire(30, 1)],
+            ),
+            synthetic_route(
+                path_replaced,
+                vec![RoutePathElement::Wire(WireId(EntityId(41)))],
+                vec![wire(41, 0)],
+            ),
+        ]);
+
+        let diff = old.route_diff(&new);
+        assert_eq!(diff.added, vec![added]);
+        assert_eq!(diff.removed, vec![removed]);
+        assert_eq!(diff.retained, vec![retained]);
+        assert_eq!(diff.replaced, vec![generation_replaced, path_replaced]);
+        assert_eq!(diff.len(), 5);
+        assert!(!diff.is_empty());
+
+        let canonical_pairs: Vec<_> = new
+            .canonical_routes()
+            .map(|(pair, route)| {
+                assert_eq!(route.pair(), pair);
+                assert_eq!(new.route(pair), Some(route));
+                pair
+            })
+            .collect();
+        assert_eq!(
+            canonical_pairs,
+            vec![retained, added, generation_replaced, path_replaced]
+        );
+        assert!(
+            CompiledSignalTopology::default()
+                .route_diff(&CompiledSignalTopology::default())
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn route_fingerprint_covers_stamps_length_segments_and_delay() {
+        let pair = DriverSinkPair::new(DriverId(EntityId(1)), SinkId(EntityId(1)));
+        let mut route = synthetic_route(
+            pair,
+            vec![RoutePathElement::Wire(WireId(EntityId(10)))],
+            vec![PathElementStamp::Wire {
+                id: WireId(EntityId(10)),
+                generation: crate::ConnectionGeneration(0),
+            }],
+        );
+        let baseline = route.fingerprint();
+
+        route.path_stamps[0] = PathElementStamp::Wire {
+            id: WireId(EntityId(10)),
+            generation: crate::ConnectionGeneration(1),
+        };
+        assert_ne!(route.fingerprint(), baseline);
+        route.path_stamps = baseline.path_stamps.clone();
+
+        route.total_length = Fixed(11);
+        assert_ne!(route.fingerprint(), baseline);
+        route.total_length = baseline.total_length;
+
+        route.segment_count = 2;
+        assert_ne!(route.fingerprint(), baseline);
+        route.segment_count = baseline.segment_count;
+
+        route.delay = Tick(2);
+        assert_ne!(route.fingerprint(), baseline);
     }
 
     #[test]

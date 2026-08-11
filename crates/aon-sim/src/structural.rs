@@ -9,6 +9,7 @@ use crate::identity::{
     EntityLocation, EntityRegistry, EntityRegistryError, GateId, GateIndex, JunctionId,
     JunctionIndex, WireId, WireIndex,
 };
+use crate::path_certificate::PathElementStamp;
 use crate::profile::{GateFootprint, PhysicalScaleProfile, PortAnchor};
 use crate::signal::{ExternalDriverStatus, SignalError, SignalWorld};
 use crate::structural_geometry::{
@@ -70,7 +71,9 @@ impl From<SignalError> for StructuralError {
     fn from(error: SignalError) -> Self {
         match error {
             SignalError::NumericOverflow => Self::NumericOverflow,
-            SignalError::InvalidCanonicalState => Self::InvalidCanonicalState,
+            SignalError::InvalidCanonicalState | SignalError::DriverRevisionInvariantViolation => {
+                Self::InvalidCanonicalState
+            }
         }
     }
 }
@@ -304,6 +307,24 @@ impl StructuralWorld {
         &self.fixed_substrates
     }
 
+    pub(crate) fn path_element_is_current(&self, stamp: PathElementStamp) -> bool {
+        let entity = stamp.entity_id();
+        match (stamp, self.entities.location(entity).copied()) {
+            (PathElementStamp::Wire { id, generation }, Some(EntityLocation::Wire(index))) => {
+                self.wires.get(index).is_some_and(|record| {
+                    record.id == id && record.connection_generation == generation
+                })
+            }
+            (
+                PathElementStamp::Junction { id, generation },
+                Some(EntityLocation::Junction(index)),
+            ) => self.junctions.get(index).is_some_and(|record| {
+                record.id == id && record.connection_generation == generation
+            }),
+            _ => false,
+        }
+    }
+
     pub fn live_primitive_count(&self) -> u64 {
         self.gates.live_count()
             + self.wires.live_count()
@@ -371,6 +392,34 @@ impl StructuralWorld {
             return Err(StructuralError::InvalidCanonicalState);
         }
         self.wires.swap_slots_for_test(first, second)?;
+        self.entities
+            .update_location(first_id.entity_id(), EntityLocation::Wire(second))?;
+        self.entities
+            .update_location(second_id.entity_id(), EntityLocation::Wire(first))?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn swap_wire_registry_locations_for_test(
+        &mut self,
+        first: WireIndex,
+        second: WireIndex,
+    ) -> Result<(), StructuralError> {
+        let first_id = self
+            .wires
+            .get(first)
+            .ok_or(StructuralError::InvalidCanonicalState)?
+            .id;
+        let second_id = self
+            .wires
+            .get(second)
+            .ok_or(StructuralError::InvalidCanonicalState)?
+            .id;
+        if self.entities.location(first_id.entity_id()) != Some(&EntityLocation::Wire(first))
+            || self.entities.location(second_id.entity_id()) != Some(&EntityLocation::Wire(second))
+        {
+            return Err(StructuralError::InvalidCanonicalState);
+        }
         self.entities
             .update_location(first_id.entity_id(), EntityLocation::Wire(second))?;
         self.entities

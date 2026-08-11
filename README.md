@@ -2,11 +2,11 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**`S0-M0 — Bootstrap`부터 `S0-M3 — Signal Topology / Event Runtime`까지 완료됐고,
-`S0-M4 — Topology Sync / Path Certificate`가 다음 구현 경계다.** 정적 topology의
-Gate/Wire signal runtime은 구현됐지만, in-flight topology edit의 stale-arrival 처리와
-path certificate는 아직 구현되지 않았다. Stage 0과 전체 엔진은 아직 완료되지 않았으며
-현황은 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
+**`S0-M0 — Bootstrap`부터 `S0-M4 — Topology Sync / Path Certificate`까지 완료됐고,
+다음 구현 경계는 `S0-M5 — Feedback / Replay`다.** S0-M4는 Driver/Sink revision,
+Route Diff·TopologySync, in-flight Path Certificate, stale-arrival 분류, V3 state encoding과
+fresh clean-checkout 검증을 포함한다. Stage 0과 전체 엔진은 아직 완료되지 않았으며 현황은
+`docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline
 
@@ -89,13 +89,14 @@ Driver/Sink signal state, deterministic event calendar, `Simulation::new`, trans
 
 - Scenario, Numeric, Physical schema `1`과 Balance schema `2`, semantics
   `aon-semantics-v1`, hash algorithm `blake3-v1`을 현재 지원한다.
-- Profile hash는 versioned canonical encoding을, state hash는 signal/event sections를 포함한
-  `AON\0STATE\0V2\0` encoder를 사용한다.
+- Profile hash는 versioned canonical encoding을, state hash는 Path Certificate section을
+  포함한 `AON\0STATE\0V3\0` encoder를 사용한다.
 - artifact의 Initial World는 아직 Empty만 지원하지만, command로 Fixed Substrate, Gate, Wire,
   Junction을 생성·바인드·제거할 수 있다.
 - Phase 0은 ordinal ordering, deterministic rejection, geometry validation, generation/revision,
   fatal-overflow rollback을 구현한다.
-- Phase 2/3/6은 DriverTransition, SignalArrival, simultaneous Sink resolution, Gate truth table,
-  inertial cancellation, transport delay를 구현한다.
-- `S0-M4`가 topology-sync event, Driver/Sink revision, path certificate, in-flight topology
-  edit의 stale-arrival rejection을 이어서 구현한다.
+- Phase 2/3/6은 DriverTransition, SignalArrival/TopologySync, simultaneous Sink resolution,
+  Gate truth table, inertial cancellation, transport delay를 구현한다.
+- in-flight topology edit는 stamped Path Certificate로 검증한다. Route Diff가 만든 sync와
+  propagation은 revision-aware slot comparison으로 합쳐지고, 제거된 route는 passive Low를
+  즉시 재해결한다.

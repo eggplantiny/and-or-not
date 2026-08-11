@@ -1,6 +1,7 @@
 use crate::event::{
     DriverSample, DriverTransition, EventCalendar, EventKey, EventPayloadAllocator, SignalArrival,
 };
+use crate::path_certificate::{PathCertificateArena, PathElementStamp};
 use crate::signal::{DriveVector, SignalWorld};
 use crate::structural::StructuralWorld;
 use crate::{
@@ -8,9 +9,9 @@ use crate::{
     RoutingDomain, SimulationContract, StateHash, Tick,
 };
 
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V2\0";
-const STATE_ENCODER_VERSION: u16 = 2;
-const FUTURE_EMPTY_STORE_COUNT: usize = 5;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V3\0";
+const STATE_ENCODER_VERSION: u16 = 3;
+const RESERVED_EMPTY_STORE_COUNT: usize = 4;
 
 #[derive(Clone, Copy)]
 pub(crate) struct StateView<'a> {
@@ -22,6 +23,7 @@ pub(crate) struct StateView<'a> {
     pub event_payloads: &'a EventPayloadAllocator,
     pub driver_events: &'a EventCalendar<DriverTransition>,
     pub signal_events: &'a EventCalendar<SignalArrival>,
+    pub path_certificates: &'a PathCertificateArena,
 }
 
 #[derive(Clone, Copy)]
@@ -35,6 +37,7 @@ struct StateComponents<'a> {
     event_payloads: &'a EventPayloadAllocator,
     driver_events: &'a EventCalendar<DriverTransition>,
     signal_events: &'a EventCalendar<SignalArrival>,
+    path_certificates: &'a PathCertificateArena,
 }
 
 pub(crate) fn state_hash(state: StateView<'_>) -> StateHash {
@@ -57,6 +60,7 @@ fn encode_state(state: StateView<'_>, write: &mut dyn FnMut(&[u8])) {
             event_payloads: state.event_payloads,
             driver_events: state.driver_events,
             signal_events: state.signal_events,
+            path_certificates: state.path_certificates,
         },
         write,
     );
@@ -97,12 +101,40 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     encode_driver_events(state.driver_events, write);
     encode_signal_events(state.signal_events, write);
 
-    // Mobile substrate, destruction, radiation, relay, and path-certificate sections are
-    // introduced by later milestones. Their fixed empty section markers keep the V2 layout
-    // unambiguous without making their derived or scratch representations canonical early.
-    for _ in 0..FUTURE_EMPTY_STORE_COUNT {
+    // Mobile substrate, destruction, radiation, and relay stores remain reserved in V3.
+    for _ in 0..RESERVED_EMPTY_STORE_COUNT {
         write_u64(0, write);
     }
+    encode_path_certificates(state.path_certificates, write);
+}
+
+fn encode_path_certificates(certificates: &PathCertificateArena, write: &mut dyn FnMut(&[u8])) {
+    write_u64(certificates.frontier().0, write);
+    write_u64(certificates.allocated_count(), write);
+    for (id, certificate) in certificates.canonical_slots() {
+        write_u64(id.0, write);
+        match certificate {
+            Some(_) => {
+                write_u8(1, write);
+                let elements = certificates
+                    .elements(id)
+                    .expect("canonical state requires a valid live Path Certificate range");
+                let element_count = u32::try_from(elements.len())
+                    .expect("Path Certificate arena guarantees u32 element ranges");
+                write_u32(element_count, write);
+                for &element in elements {
+                    encode_path_element_stamp(element, write);
+                }
+            }
+            None => write_u8(0, write),
+        }
+    }
+}
+
+fn encode_path_element_stamp(element: PathElementStamp, write: &mut dyn FnMut(&[u8])) {
+    write_u8(element.canonical_tag(), write);
+    write_u64(element.entity_id().0, write);
+    write_u64(element.generation().0, write);
 }
 
 fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
@@ -403,11 +435,13 @@ fn write_i64(value: i64, write: &mut dyn FnMut(&[u8])) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{UncertifiedSignalArrival, stage_signal_arrivals};
     use crate::{
-        Command, CommandEnvelope, EndpointTarget, EntityId, EntityLocation, Fixed, FixedAabb,
-        FixedSubstrateIndex, GateId, GateIndex, GatePort, GatePortRef, GateType, JunctionId,
-        JunctionIndex, PhysicalScaleProfile, PlaceFixedSubstrateCommand, PlaceGateCommand,
-        PlaceJunctionCommand, PlaceWireCommand, ProfileHash, RoutingDomain, WireIndex,
+        Command, CommandEnvelope, ConnectionGeneration, EndpointTarget, EntityId, EntityLocation,
+        Fixed, FixedAabb, FixedSubstrateIndex, GateId, GateIndex, GatePort, GatePortRef, GateType,
+        JunctionId, JunctionIndex, PhysicalScaleProfile, PlaceFixedSubstrateCommand,
+        PlaceGateCommand, PlaceJunctionCommand, PlaceWireCommand, ProfileHash, RoutingDomain,
+        WireId, WireIndex,
     };
 
     fn contract() -> SimulationContract {
@@ -424,6 +458,7 @@ mod tests {
         payloads: EventPayloadAllocator,
         driver_events: EventCalendar<DriverTransition>,
         signal_events: EventCalendar<SignalArrival>,
+        path_certificates: PathCertificateArena,
     }
 
     impl TestRuntime {
@@ -433,6 +468,7 @@ mod tests {
                 payloads: EventPayloadAllocator::new(),
                 driver_events: EventCalendar::new(),
                 signal_events: EventCalendar::new(),
+                path_certificates: PathCertificateArena::new(),
             }
         }
 
@@ -452,6 +488,7 @@ mod tests {
                 event_payloads: &self.payloads,
                 driver_events: &self.driver_events,
                 signal_events: &self.signal_events,
+                path_certificates: &self.path_certificates,
             }
         }
     }
@@ -470,6 +507,7 @@ mod tests {
                 event_payloads: &runtime.payloads,
                 driver_events: &runtime.driver_events,
                 signal_events: &runtime.signal_events,
+                path_certificates: &runtime.path_certificates,
             },
             &mut |bytes| {
                 hasher.update(bytes);
@@ -490,8 +528,22 @@ mod tests {
         }
     }
 
+    const fn wire_stamp(id: u64, generation: u64) -> PathElementStamp {
+        PathElementStamp::Wire {
+            id: WireId(EntityId(id)),
+            generation: ConnectionGeneration(generation),
+        }
+    }
+
+    const fn junction_stamp(id: u64, generation: u64) -> PathElementStamp {
+        PathElementStamp::Junction {
+            id: JunctionId(EntityId(id)),
+            generation: ConnectionGeneration(generation),
+        }
+    }
+
     #[test]
-    fn state_encoding_has_exact_contract_tick_revision_and_identity_order() {
+    fn state_encoding_v3_has_exact_contract_tick_revision_and_identity_order() {
         let mut entities = EntityRegistry::new();
         entities
             .allocate(EntityLocation::Gate(GateIndex(7)))
@@ -514,13 +566,14 @@ mod tests {
                 event_payloads: &runtime.payloads,
                 driver_events: &runtime.driver_events,
                 signal_events: &runtime.signal_events,
+                path_certificates: &runtime.path_certificates,
             },
             &mut |bytes| actual.extend_from_slice(bytes),
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(STATE_DOMAIN);
-        expected.extend_from_slice(&STATE_ENCODER_VERSION.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V3\0");
+        expected.extend_from_slice(&3_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -777,8 +830,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(STATE_DOMAIN);
-        expected.extend_from_slice(&STATE_ENCODER_VERSION.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V3\0");
+        expected.extend_from_slice(&3_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -829,7 +882,124 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(
             state_hash(runtime.view(&contract, Tick(3), Revision(2), &world)).to_string(),
-            "5bcdc86b023dcefa76ba84fdc9125332e002b9962ea447651e61d43711587867"
+            "0cea384b0e845419bf243164dc2c85b4fbf85adc4dc81fb6ef8ed8283565387c"
+        );
+    }
+
+    #[test]
+    fn populated_path_certificate_section_has_exact_v3_bytes() {
+        let mut certificates = PathCertificateArena::new();
+        let consumed_path = [wire_stamp(7, 11), junction_stamp(8, 13)];
+        let allocated = certificates
+            .allocate_batch(&[consumed_path.as_slice(), &[]])
+            .expect("initial Path Certificates allocate");
+        certificates
+            .consume(allocated[0])
+            .expect("first Path Certificate consumes");
+        let retained_path = [junction_stamp(9, 17), wire_stamp(10, 19)];
+        certificates
+            .allocate_batch(&[retained_path.as_slice()])
+            .expect("retained Path Certificate allocates");
+
+        let actual = certificate_bytes(&certificates);
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&4_u64.to_le_bytes());
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&0_u32.to_le_bytes());
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&9_u64.to_le_bytes());
+        expected.extend_from_slice(&17_u64.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&10_u64.to_le_bytes());
+        expected.extend_from_slice(&19_u64.to_le_bytes());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn path_certificate_fields_frontier_and_tombstones_are_hash_sensitive() {
+        let arena = |elements: &[PathElementStamp]| {
+            let mut certificates = PathCertificateArena::new();
+            certificates
+                .allocate_batch(&[elements])
+                .expect("Path Certificate allocates");
+            certificates
+        };
+        let baseline = arena(&[wire_stamp(7, 11), junction_stamp(8, 13)]);
+        let baseline_hash = path_certificate_state_hash(&baseline);
+
+        for changed in [
+            arena(&[wire_stamp(7, 12), junction_stamp(8, 13)]),
+            arena(&[wire_stamp(17, 11), junction_stamp(8, 13)]),
+            arena(&[junction_stamp(7, 11), junction_stamp(8, 13)]),
+            arena(&[junction_stamp(8, 13), wire_stamp(7, 11)]),
+            arena(&[wire_stamp(7, 11)]),
+        ] {
+            assert_ne!(path_certificate_state_hash(&changed), baseline_hash);
+        }
+
+        let mut tombstoned = baseline.clone();
+        tombstoned
+            .consume(crate::PathCertificateId(1))
+            .expect("Path Certificate consumes");
+        assert_ne!(path_certificate_state_hash(&tombstoned), baseline_hash);
+
+        let empty = PathCertificateArena::new();
+        let mut allocated_tombstone = PathCertificateArena::new();
+        let id = allocated_tombstone
+            .allocate_batch(&[&[]])
+            .expect("empty Path Certificate allocates")[0];
+        allocated_tombstone
+            .consume(id)
+            .expect("empty Path Certificate consumes");
+        assert_ne!(
+            path_certificate_state_hash(&allocated_tombstone),
+            path_certificate_state_hash(&empty),
+            "the monotonic frontier and tombstone slot are canonical"
+        );
+    }
+
+    #[test]
+    fn path_certificate_raw_ranges_orphan_bytes_and_capacity_are_not_canonical() {
+        let retained_path = [wire_stamp(31, 37), junction_stamp(41, 43)];
+        let discarded_prefix = (0_u64..128)
+            .map(|offset| wire_stamp(100 + offset, 200 + offset))
+            .collect::<Vec<_>>();
+
+        let mut larger_raw_arena = PathCertificateArena::new();
+        let larger_ids = larger_raw_arena
+            .allocate_batch(&[discarded_prefix.as_slice(), retained_path.as_slice()])
+            .expect("larger raw arena allocates");
+        larger_raw_arena
+            .consume(larger_ids[0])
+            .expect("larger orphan prefix consumes");
+
+        let mut smaller_raw_arena = PathCertificateArena::new();
+        let smaller_ids = smaller_raw_arena
+            .allocate_batch(&[&[], retained_path.as_slice()])
+            .expect("smaller raw arena allocates");
+        smaller_raw_arena
+            .consume(smaller_ids[0])
+            .expect("empty orphan prefix consumes");
+
+        assert_ne!(
+            larger_raw_arena, smaller_raw_arena,
+            "raw offsets, orphan elements, and backing allocations differ"
+        );
+        assert_eq!(
+            certificate_bytes(&larger_raw_arena),
+            certificate_bytes(&smaller_raw_arena)
+        );
+        assert_eq!(
+            path_certificate_state_hash(&larger_raw_arena),
+            path_certificate_state_hash(&smaller_raw_arena)
         );
     }
 
@@ -841,6 +1011,7 @@ mod tests {
         let mut payloads = EventPayloadAllocator::new();
         let mut driver_events = EventCalendar::new();
         let mut signal_events = EventCalendar::new();
+        let mut path_certificates = PathCertificateArena::new();
         driver_events
             .stage(
                 &mut payloads,
@@ -854,23 +1025,25 @@ mod tests {
                 )],
             )
             .expect("Driver event stages");
-        signal_events
-            .stage(
-                &mut payloads,
-                [SignalArrival::s0m3_propagation(
-                    Tick(19),
-                    source,
-                    sink,
-                    DriverSample {
-                        level: LogicLevel::High,
-                        strength: crate::DriveStrength(23),
-                        revision: Revision(0),
-                        emitted_at: Tick(5),
-                        driver_id: source,
-                    },
-                )],
-            )
-            .expect("Signal event stages");
+        stage_signal_arrivals(
+            &mut signal_events,
+            &mut payloads,
+            &mut path_certificates,
+            [UncertifiedSignalArrival::propagation(
+                Tick(19),
+                source,
+                sink,
+                DriverSample {
+                    level: LogicLevel::High,
+                    strength: crate::DriveStrength(23),
+                    revision: Revision(0),
+                    emitted_at: Tick(5),
+                    driver_id: source,
+                },
+                Vec::new(),
+            )],
+        )
+        .expect("certified Signal event stages");
 
         let mut actual = Vec::new();
         write_u64(payloads.next_payload_order(), &mut |bytes| {
@@ -898,7 +1071,8 @@ mod tests {
         expected.extend_from_slice(&0_u64.to_le_bytes());
         expected.extend_from_slice(&5_u64.to_le_bytes());
         expected.extend_from_slice(&8_u64.to_le_bytes());
-        expected.push(0);
+        expected.push(1);
+        expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.push(0);
 
         assert_eq!(actual, expected);
@@ -937,6 +1111,7 @@ mod tests {
             .stage(&mut right_payloads, [first, second])
             .expect("right events stage");
         let signal_events = EventCalendar::new();
+        let path_certificates = PathCertificateArena::new();
 
         let left = state_hash(StateView {
             contract: &contract,
@@ -947,6 +1122,7 @@ mod tests {
             event_payloads: &left_payloads,
             driver_events: &left_events,
             signal_events: &signal_events,
+            path_certificates: &path_certificates,
         });
         let right = state_hash(StateView {
             event_payloads: &right_payloads,
@@ -960,6 +1136,7 @@ mod tests {
                 event_payloads: &left_payloads,
                 driver_events: &left_events,
                 signal_events: &signal_events,
+                path_certificates: &path_certificates,
             }
         });
         assert_eq!(left, right);
@@ -980,6 +1157,7 @@ mod tests {
                 event_payloads: &left_payloads,
                 driver_events: &left_events,
                 signal_events: &signal_events,
+                path_certificates: &path_certificates,
             }
         });
         let fresh_payloads = EventPayloadAllocator::new();
@@ -993,6 +1171,7 @@ mod tests {
             event_payloads: &fresh_payloads,
             driver_events: &fresh_events,
             signal_events: &signal_events,
+            path_certificates: &path_certificates,
         });
         assert_ne!(drained, fresh, "the payload frontier preserves drained IDs");
     }
@@ -1098,12 +1277,40 @@ mod tests {
         bytes
     }
 
+    fn certificate_bytes(certificates: &PathCertificateArena) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        encode_path_certificates(certificates, &mut |part| bytes.extend_from_slice(part));
+        bytes
+    }
+
+    fn path_certificate_state_hash(certificates: &PathCertificateArena) -> StateHash {
+        let contract = contract();
+        let structural = StructuralWorld::new();
+        let signal = SignalWorld::new();
+        let payloads = EventPayloadAllocator::new();
+        let driver_events = EventCalendar::new();
+        let signal_events = EventCalendar::new();
+        state_hash(StateView {
+            contract: &contract,
+            next_tick: Tick(0),
+            topology_revision: Revision(0),
+            structural: &structural,
+            signal: &signal,
+            event_payloads: &payloads,
+            driver_events: &driver_events,
+            signal_events: &signal_events,
+            path_certificates: certificates,
+        })
+    }
+
     fn append_empty_signal_and_events(output: &mut Vec<u8>) {
         for value in [1_u64, 0, 1, 0, 0, 0, 0, 1, 0, 0] {
             output.extend_from_slice(&value.to_le_bytes());
         }
-        for _ in 0..FUTURE_EMPTY_STORE_COUNT {
+        for _ in 0..RESERVED_EMPTY_STORE_COUNT {
             output.extend_from_slice(&0_u64.to_le_bytes());
         }
+        output.extend_from_slice(&1_u64.to_le_bytes());
+        output.extend_from_slice(&0_u64.to_le_bytes());
     }
 }

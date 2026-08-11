@@ -113,10 +113,25 @@ pub struct SignalChangeRecord {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SignalStepCounters {
+    pub routes_added: u64,
+    pub routes_removed: u64,
+    pub routes_retained: u64,
+    pub routes_replaced: u64,
     pub driver_transitions_applied: u64,
     pub stale_driver_transitions: u64,
     pub signal_arrivals_applied: u64,
+    pub topology_sync_arrivals_staged: u64,
+    pub stale_revision_arrivals: u64,
+    pub invalid_path_arrivals: u64,
+    pub idempotent_signal_arrivals: u64,
     pub sinks_resolved: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SlotApplyOutcome {
+    Applied,
+    Idempotent,
+    Stale,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -126,6 +141,9 @@ pub(crate) enum SignalError {
 
     #[error("canonical signal state invariant violated")]
     InvalidCanonicalState,
+
+    #[error("canonical Driver Revision invariant violated")]
+    DriverRevisionInvariantViolation,
 }
 
 impl From<NumericError> for SignalError {
@@ -170,6 +188,16 @@ impl SinkDriverSlot {
             strength: sample.strength,
             revision: sample.revision,
             emitted_at: sample.emitted_at,
+        }
+    }
+
+    pub const fn sample(self) -> DriverSample {
+        DriverSample {
+            level: self.level,
+            strength: self.strength,
+            revision: self.revision,
+            emitted_at: self.emitted_at,
+            driver_id: self.driver,
         }
     }
 }
@@ -519,6 +547,13 @@ impl SignalWorld {
         self.sinks.record(sink).map(|record| record.resolved_level)
     }
 
+    pub fn sink_driver_sample(&self, sink: SinkId, driver: DriverId) -> Option<DriverSample> {
+        self.slots
+            .get(&(sink, driver))
+            .copied()
+            .map(SinkDriverSlot::sample)
+    }
+
     pub fn gate_ports(&self, gate: GateId) -> Option<GateSignalPorts> {
         self.gates.get(&gate).map(|record| record.ports)
     }
@@ -569,10 +604,11 @@ impl SignalWorld {
         if previous.level == level && previous.strength == strength {
             return Ok(None);
         }
+        let revision = previous.revision.checked_add(Revision(1))?;
         let current = DriverSample {
             level,
             strength,
-            revision: previous.revision,
+            revision,
             emitted_at,
             driver_id: driver,
         };
@@ -595,21 +631,54 @@ impl SignalWorld {
         &mut self,
         sink: SinkId,
         sample: DriverSample,
-    ) -> Result<bool, SignalError> {
+    ) -> Result<SlotApplyOutcome, SignalError> {
         if self.sinks.record(sink).is_none() || self.drivers.record(sample.driver_id).is_none() {
             return Err(SignalError::InvalidCanonicalState);
         }
         let key = (sink, sample.driver_id);
         let incoming = SinkDriverSlot::from_sample(sink, sample);
-        if self.slots.get(&key) == Some(&incoming) {
-            return Ok(false);
+        if let Some(existing) = self.slots.get(&key).copied() {
+            return match incoming.revision.cmp(&existing.revision) {
+                std::cmp::Ordering::Less => Ok(SlotApplyOutcome::Stale),
+                std::cmp::Ordering::Equal if incoming == existing => {
+                    Ok(SlotApplyOutcome::Idempotent)
+                }
+                std::cmp::Ordering::Equal => Err(SignalError::DriverRevisionInvariantViolation),
+                std::cmp::Ordering::Greater => {
+                    self.slots.insert(key, incoming);
+                    self.sinks
+                        .record_mut(sink)
+                        .ok_or(SignalError::InvalidCanonicalState)?
+                        .dirty = true;
+                    Ok(SlotApplyOutcome::Applied)
+                }
+            };
         }
         self.slots.insert(key, incoming);
         self.sinks
             .record_mut(sink)
             .ok_or(SignalError::InvalidCanonicalState)?
             .dirty = true;
-        Ok(true)
+        Ok(SlotApplyOutcome::Applied)
+    }
+
+    pub fn remove_route_slot(
+        &mut self,
+        sink: SinkId,
+        driver: DriverId,
+    ) -> Result<bool, SignalError> {
+        if self.sinks.record(sink).is_none() {
+            if self.slots.contains_key(&(sink, driver)) {
+                return Err(SignalError::InvalidCanonicalState);
+            }
+            return Ok(false);
+        }
+        let removed = self.slots.remove(&(sink, driver)).is_some();
+        self.sinks
+            .record_mut(sink)
+            .ok_or(SignalError::InvalidCanonicalState)?
+            .dirty = true;
+        Ok(removed)
     }
 
     pub fn resolve_dirty(
@@ -739,6 +808,20 @@ impl SignalWorld {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn force_driver_revision_for_test(
+        &mut self,
+        driver: DriverId,
+        revision: Revision,
+    ) -> Result<(), SignalError> {
+        self.drivers
+            .record_mut(driver)
+            .ok_or(SignalError::InvalidCanonicalState)?
+            .sample
+            .revision = revision;
+        Ok(())
+    }
+
     pub fn clear_pending(&mut self, gate: GateId) -> Result<(), SignalError> {
         let record = self
             .gates
@@ -771,12 +854,52 @@ impl SignalWorld {
         self.gates.values().copied()
     }
 
+    pub fn iter_gate_entries(&self) -> impl Iterator<Item = (GateId, GateSignalRecord)> + '_ {
+        self.gates.iter().map(|(key, gate)| (*key, *gate))
+    }
+
+    #[cfg(test)]
+    pub fn move_gate_key_for_test(&mut self, from: GateId, to: GateId) -> Result<(), SignalError> {
+        if self.gates.contains_key(&to) {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        let gate = self
+            .gates
+            .remove(&from)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        self.gates.insert(to, gate);
+        Ok(())
+    }
+
     pub fn iter_wires(&self) -> impl Iterator<Item = (WireId, WireSignalSnapshot)> + '_ {
         self.wires.iter().map(|(id, state)| (*id, *state))
     }
 
     pub fn iter_slots(&self) -> impl Iterator<Item = SinkDriverSlot> + '_ {
         self.slots.values().copied()
+    }
+
+    pub fn iter_slot_entries(
+        &self,
+    ) -> impl Iterator<Item = ((SinkId, DriverId), SinkDriverSlot)> + '_ {
+        self.slots.iter().map(|(key, slot)| (*key, *slot))
+    }
+
+    #[cfg(test)]
+    pub fn move_slot_key_for_test(
+        &mut self,
+        from: (SinkId, DriverId),
+        to: (SinkId, DriverId),
+    ) -> Result<(), SignalError> {
+        if self.slots.contains_key(&to) {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        let slot = self
+            .slots
+            .remove(&from)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        self.slots.insert(to, slot);
+        Ok(())
     }
 
     pub fn canonical_driver_slots(
@@ -1072,6 +1195,102 @@ mod tests {
     }
 
     #[test]
+    fn driver_revision_advances_only_for_a_real_sample_change() {
+        let mut world = SignalWorld::new();
+        let ports = world
+            .activate_gate(gate(1), GateType::Not, Tick(4))
+            .expect("Gate activates");
+        let driver = ports.input_a.external_driver;
+        let initial = world.driver_sample(driver).expect("Driver is live");
+        assert_eq!(initial.revision, Revision(0));
+        assert_eq!(initial.emitted_at, Tick(4));
+
+        assert_eq!(
+            world.apply_driver_sample(driver, LogicLevel::Low, DriveStrength(0), Tick(9)),
+            Ok(None)
+        );
+        assert_eq!(world.driver_sample(driver), Some(initial));
+
+        let change = world
+            .apply_driver_sample(driver, LogicLevel::High, DriveStrength(100), Tick(9))
+            .expect("changed Sample applies")
+            .expect("changed Sample is observable");
+        assert_eq!(change.previous, initial);
+        assert_eq!(change.current.revision, Revision(1));
+        assert_eq!(change.current.emitted_at, Tick(9));
+
+        assert_eq!(
+            world.apply_driver_sample(driver, LogicLevel::High, DriveStrength(100), Tick(10)),
+            Ok(None)
+        );
+        assert_eq!(world.driver_sample(driver), Some(change.current));
+
+        world
+            .force_driver_revision_for_test(driver, Revision(u64::MAX))
+            .expect("test revision seed succeeds");
+        let before = world.driver_sample(driver).expect("Driver remains live");
+        assert_eq!(
+            world.apply_driver_sample(driver, LogicLevel::Low, DriveStrength(100), Tick(11)),
+            Err(SignalError::NumericOverflow)
+        );
+        assert_eq!(world.driver_sample(driver), Some(before));
+    }
+
+    #[test]
+    fn slot_revision_table_is_applied_without_partial_mutation() {
+        let mut world = SignalWorld::new();
+        let ports = world
+            .activate_gate(gate(1), GateType::Not, Tick(0))
+            .expect("Gate activates");
+        let driver = ports.input_a.external_driver;
+        let sink = ports.input_a.sink;
+        let initial = world.driver_sample(driver).expect("Driver is live");
+        assert_eq!(
+            world.apply_slot_sample(sink, initial),
+            Ok(SlotApplyOutcome::Applied)
+        );
+        assert_eq!(world.sink_driver_sample(sink, driver), Some(initial));
+
+        let revision_one = world
+            .apply_driver_sample(driver, LogicLevel::High, DriveStrength(100), Tick(1))
+            .expect("revision one applies")
+            .expect("revision one changes")
+            .current;
+        assert_eq!(
+            world.apply_slot_sample(sink, revision_one),
+            Ok(SlotApplyOutcome::Applied)
+        );
+        let revision_two = world
+            .apply_driver_sample(driver, LogicLevel::X, DriveStrength(100), Tick(2))
+            .expect("revision two applies")
+            .expect("revision two changes")
+            .current;
+        assert_eq!(
+            world.apply_slot_sample(sink, revision_two),
+            Ok(SlotApplyOutcome::Applied)
+        );
+        assert_eq!(
+            world.apply_slot_sample(sink, revision_one),
+            Ok(SlotApplyOutcome::Stale)
+        );
+        assert_eq!(world.sink_driver_sample(sink, driver), Some(revision_two));
+        assert_eq!(
+            world.apply_slot_sample(sink, revision_two),
+            Ok(SlotApplyOutcome::Idempotent)
+        );
+
+        let conflict = DriverSample {
+            strength: DriveStrength(101),
+            ..revision_two
+        };
+        assert_eq!(
+            world.apply_slot_sample(sink, conflict),
+            Err(SignalError::DriverRevisionInvariantViolation)
+        );
+        assert_eq!(world.sink_driver_sample(sink, driver), Some(revision_two));
+    }
+
+    #[test]
     fn applying_slots_resolves_each_dirty_sink_and_updates_gate_input() {
         let mut world = SignalWorld::new();
         let ports = world
@@ -1086,7 +1305,7 @@ mod tests {
         };
         assert_eq!(
             world.apply_slot_sample(ports.input_a.sink, sample),
-            Ok(true)
+            Ok(SlotApplyOutcome::Applied)
         );
         let (changes, resolved) = world.resolve_dirty(100).expect("resolve succeeds");
         assert_eq!(changes.len(), 1);

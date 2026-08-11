@@ -2,14 +2,17 @@ use crate::contract::{ContractValidationError, SimulationContract};
 use crate::event::{
     DRIVER_TRANSITION_KIND_ORDER, DriverTransition, DriverTransitionCause, EventCalendar,
     EventCalendarError, EventPayloadAllocator, SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival,
-    SignalArrivalKind,
+    SignalArrivalKind, SignalArrivalStagingError, UncertifiedSignalArrival, stage_signal_arrivals,
 };
+use crate::path_certificate::{PathCertificateArena, PathCertificateError};
 use crate::profile::{ProfileBundle, ProfileValidationError};
 use crate::signal::{
     DriverChangeRecord, DriverRole, GateSignalPorts, GateSignalSnapshot, SignalChangeRecord,
-    SignalError, SignalStepCounters, SignalWorld, SinkRole, WireSignalSnapshot,
+    SignalError, SignalStepCounters, SignalWorld, SinkRole, SlotApplyOutcome, WireSignalSnapshot,
 };
-use crate::signal_topology::{CompiledSignalTopology, SignalTopologyError, switch_energy};
+use crate::signal_topology::{
+    CompiledSignalTopology, RouteDiff, SignalTopologyError, switch_energy,
+};
 use crate::structural::{StructuralError, StructuralWorld};
 use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
@@ -104,6 +107,7 @@ struct CanonicalWorld {
     event_payloads: EventPayloadAllocator,
     driver_events: EventCalendar<DriverTransition>,
     signal_events: EventCalendar<SignalArrival>,
+    path_certificates: PathCertificateArena,
 }
 
 impl CanonicalWorld {
@@ -117,6 +121,7 @@ impl CanonicalWorld {
             event_payloads: &self.event_payloads,
             driver_events: &self.driver_events,
             signal_events: &self.signal_events,
+            path_certificates: &self.path_certificates,
         }
     }
 }
@@ -154,6 +159,7 @@ impl Simulation {
                 event_payloads: EventPayloadAllocator::new(),
                 driver_events: EventCalendar::new(),
                 signal_events: EventCalendar::new(),
+                path_certificates: PathCertificateArena::new(),
             },
             profiles: package.profiles,
         };
@@ -165,6 +171,11 @@ impl Simulation {
         let mut candidate = self.canonical.clone();
         let completed_tick = candidate.next_tick;
         let next_tick = completed_tick.checked_add(Tick(1))?;
+        let old_topology = CompiledSignalTopology::compile(
+            &candidate.structural,
+            &candidate.signal,
+            &self.profiles.balance,
+        )?;
         let phase = candidate.structural.apply_phase0_with_signal(
             &mut candidate.signal,
             completed_tick,
@@ -183,16 +194,27 @@ impl Simulation {
             &candidate.signal,
             &self.profiles.balance,
         )?;
+        let mut signal_counters = if phase.topology_changed {
+            apply_route_diff(
+                &mut candidate,
+                &old_topology.route_diff(&topology),
+                &topology,
+                completed_tick,
+            )?
+        } else {
+            SignalStepCounters::default()
+        };
         stage_external_driver_updates(
             &mut candidate,
             &phase.external_driver_updates,
             completed_tick,
         )?;
-        let (driver_changes, signal_changes, signal_counters) = run_phase2(
+        let (driver_changes, signal_changes) = run_phase2(
             &mut candidate,
             &topology,
             completed_tick,
             self.profiles.balance.logic_threshold,
+            &mut signal_counters,
         )?;
         run_phase3(&mut candidate)?;
         run_phase6(
@@ -265,6 +287,10 @@ impl Simulation {
         self.canonical.signal.sink_level(sink)
     }
 
+    pub fn sink_driver_sample(&self, sink: SinkId, driver: DriverId) -> Option<DriverSample> {
+        self.canonical.signal.sink_driver_sample(sink, driver)
+    }
+
     pub fn gate_signal_state(&self, gate: GateId) -> Option<GateSignalSnapshot> {
         self.canonical.signal.gate_snapshot(gate)
     }
@@ -275,6 +301,7 @@ impl Simulation {
 }
 
 fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationError> {
+    validate_structural_registry_links(&world.structural)?;
     let signal = &world.signal;
     let driver_frontier = signal.driver_frontier().entity_id().0;
     let sink_frontier = signal.sink_frontier().entity_id().0;
@@ -309,14 +336,14 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
         }
     }
 
-    let signal_gates: Vec<_> = signal.iter_gates().collect();
+    let signal_gates: Vec<_> = signal.iter_gate_entries().collect();
     if signal_gates.len() != structural_gates.len() {
         return Err(SimulationError::InvalidCanonicalState);
     }
     let mut referenced_drivers = BTreeSet::new();
     let mut referenced_sinks = BTreeSet::new();
-    for gate in signal_gates {
-        if structural_gates.get(&gate.gate) != Some(&gate.gate_type) {
+    for (key, gate) in signal_gates {
+        if key != gate.gate || structural_gates.get(&gate.gate) != Some(&gate.gate_type) {
             return Err(SimulationError::InvalidCanonicalState);
         }
         let expects_input_b = matches!(gate.gate_type, GateType::And | GateType::Or);
@@ -419,7 +446,6 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
         };
         if record.id != slot_id
             || record.sample.driver_id != slot_id
-            || record.sample.revision != Revision(0)
             || record.sample.emitted_at >= world.next_tick
             || !live_drivers.insert(slot_id)
         {
@@ -458,18 +484,148 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
     }
 
     let mut slot_keys = BTreeSet::new();
-    for slot in signal.iter_slots() {
-        if slot.revision != Revision(0)
+    for ((key_sink, key_driver), slot) in signal.iter_slot_entries() {
+        let driver = signal
+            .driver_record(slot.driver)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        if key_sink != slot.sink
+            || key_driver != slot.driver
             || slot.emitted_at >= world.next_tick
             || !live_drivers.contains(&slot.driver)
             || !live_sinks.contains(&slot.sink)
-            || !slot_keys.insert((slot.sink, slot.driver))
+            || !slot_keys.insert((key_sink, key_driver))
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        if slot.revision > driver.sample.revision {
+            return Err(SimulationError::DriverRevisionInvariantViolation);
+        }
+    }
+
+    validate_event_state(world, driver_frontier, sink_frontier, &live_drivers)
+}
+
+fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<(), SimulationError> {
+    let registry = structural.entities();
+    let frontier = registry.next_id().0;
+    if frontier == 0 {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let slots: Vec<_> = registry.canonical_slots().collect();
+    let allocated = registry.allocated_count();
+    if u64::try_from(slots.len()).map_err(|_| SimulationError::NumericOverflow)? != allocated
+        || frontier
+            != allocated
+                .checked_add(1)
+                .ok_or(SimulationError::NumericOverflow)?
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
+    let mut registry_gates = BTreeSet::new();
+    let mut registry_wires = BTreeSet::new();
+    let mut registry_junctions = BTreeSet::new();
+    let mut registry_substrates = BTreeSet::new();
+    for (id, location) in slots {
+        if id.0 == 0 || id.0 >= frontier {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        let Some(location) = location else {
+            continue;
+        };
+        match location {
+            crate::EntityLocation::Gate(index) => {
+                let record = structural
+                    .gates()
+                    .get(index)
+                    .ok_or(SimulationError::InvalidCanonicalState)?;
+                if record.id.entity_id() != id || !registry_gates.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
+            crate::EntityLocation::Wire(index) => {
+                let record = structural
+                    .wires()
+                    .get(index)
+                    .ok_or(SimulationError::InvalidCanonicalState)?;
+                if record.id.entity_id() != id || !registry_wires.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
+            crate::EntityLocation::Junction(index) => {
+                let record = structural
+                    .junctions()
+                    .get(index)
+                    .ok_or(SimulationError::InvalidCanonicalState)?;
+                if record.id.entity_id() != id || !registry_junctions.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
+            crate::EntityLocation::FixedSubstrate(index) => {
+                let record = structural
+                    .fixed_substrates()
+                    .get(index)
+                    .ok_or(SimulationError::InvalidCanonicalState)?;
+                if record.id != id || !registry_substrates.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
+            _ => return Err(SimulationError::InvalidCanonicalState),
+        }
+    }
+
+    let mut store_gates = BTreeSet::new();
+    for (index, record) in structural.gates().iter_alive() {
+        let id = record.id.entity_id();
+        if registry.location(id) != Some(&crate::EntityLocation::Gate(index))
+            || !store_gates.insert(id)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    let mut store_wires = BTreeSet::new();
+    for (index, record) in structural.wires().iter_alive() {
+        let id = record.id.entity_id();
+        if registry.location(id) != Some(&crate::EntityLocation::Wire(index))
+            || !store_wires.insert(id)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    let mut store_junctions = BTreeSet::new();
+    for (index, record) in structural.junctions().iter_alive() {
+        let id = record.id.entity_id();
+        if registry.location(id) != Some(&crate::EntityLocation::Junction(index))
+            || !store_junctions.insert(id)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    let mut store_substrates = BTreeSet::new();
+    for (index, record) in structural.fixed_substrates().iter_alive() {
+        if registry.location(record.id) != Some(&crate::EntityLocation::FixedSubstrate(index))
+            || !store_substrates.insert(record.id)
         {
             return Err(SimulationError::InvalidCanonicalState);
         }
     }
 
-    validate_event_state(world, driver_frontier, sink_frontier, &live_drivers)
+    if registry_gates != store_gates
+        || registry_wires != store_wires
+        || registry_junctions != store_junctions
+        || registry_substrates != store_substrates
+        || u64::try_from(store_gates.len()).map_err(|_| SimulationError::NumericOverflow)?
+            != structural.gates().live_count()
+        || u64::try_from(store_wires.len()).map_err(|_| SimulationError::NumericOverflow)?
+            != structural.wires().live_count()
+        || u64::try_from(store_junctions.len()).map_err(|_| SimulationError::NumericOverflow)?
+            != structural.junctions().live_count()
+        || u64::try_from(store_substrates.len()).map_err(|_| SimulationError::NumericOverflow)?
+            != structural.fixed_substrates().live_count()
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    Ok(())
 }
 
 fn validate_gate_driver(
@@ -512,13 +668,36 @@ fn validate_event_state(
 ) -> Result<(), SimulationError> {
     let payload_frontier = world.event_payloads.next_payload_order();
     if payload_frontier == 0 {
-        return Err(SimulationError::InvalidCanonicalState);
+        return Err(SimulationError::EventQueueInvariantViolation);
     }
+    world.path_certificates.validate_shape()?;
+    let certificate_frontier = world.path_certificates.frontier().0;
+    if certificate_frontier == 0 {
+        return Err(SimulationError::PathCertificateInvariantViolation);
+    }
+    let mut live_certificates = BTreeSet::new();
+    let structural_frontier = world.structural.entities().next_id().0;
+    for (certificate, record) in world.path_certificates.canonical_slots() {
+        let Some(_) = record else {
+            continue;
+        };
+        if !live_certificates.insert(certificate) {
+            return Err(SimulationError::PathCertificateInvariantViolation);
+        }
+        for element in world.path_certificates.elements(certificate)? {
+            let entity = element.entity_id().0;
+            if entity == 0 || entity >= structural_frontier {
+                return Err(SimulationError::PathCertificateInvariantViolation);
+            }
+        }
+    }
+
     let mut payloads = BTreeSet::new();
 
-    for event in world.driver_events.canonical_view() {
+    for (calendar_key, event) in world.driver_events.canonical_entries() {
         let driver_raw = event.driver_id.entity_id().0;
-        if event.key.due_tick < world.next_tick
+        if *calendar_key != event.key
+            || event.key.due_tick < world.next_tick
             || event.key.kind_order != DRIVER_TRANSITION_KIND_ORDER
             || event.key.target_id != driver_raw
             || event.key.source_id != driver_raw
@@ -530,16 +709,16 @@ fn validate_event_state(
             || event.key.payload_order >= payload_frontier
             || !payloads.insert(event.key.payload_order)
         {
-            return Err(SimulationError::InvalidCanonicalState);
+            return Err(SimulationError::EventQueueInvariantViolation);
         }
         match event.cause {
             DriverTransitionCause::ExternalDriver | DriverTransitionCause::GateStrengthResponse
                 if event.pending_generation != 0 =>
             {
-                return Err(SimulationError::InvalidCanonicalState);
+                return Err(SimulationError::EventQueueInvariantViolation);
             }
             DriverTransitionCause::GateOutput if event.pending_generation == 0 => {
-                return Err(SimulationError::InvalidCanonicalState);
+                return Err(SimulationError::EventQueueInvariantViolation);
             }
             _ => {}
         }
@@ -560,20 +739,23 @@ fn validate_event_state(
         }
     }
 
-    for event in world.signal_events.canonical_view() {
+    let mut referenced_certificates = BTreeSet::new();
+    for (calendar_key, event) in world.signal_events.canonical_entries() {
         let driver_raw = event.source_driver.entity_id().0;
         let sink_raw = event.sink.entity_id().0;
-        if event.key.due_tick < world.next_tick
+        if *calendar_key != event.key
+            || event.key.due_tick < world.next_tick
             || event.key.kind_order != SIGNAL_ARRIVAL_KIND_ORDER
             || event.key.target_id != sink_raw
             || event.key.source_id != driver_raw
-            || event.key.revision != Revision(0)
+            || event.key.revision != event.sample.revision
             || event.key.generation != 0
             || event.sample.driver_id != event.source_driver
-            || event.sample.revision != Revision(0)
             || event.sample.emitted_at >= event.key.due_tick
-            || event.path_certificate.is_some()
-            || event.kind != SignalArrivalKind::Propagation
+            || !matches!(
+                event.kind,
+                SignalArrivalKind::Propagation | SignalArrivalKind::TopologySync
+            )
             || driver_raw == 0
             || driver_raw >= driver_frontier
             || sink_raw == 0
@@ -582,10 +764,86 @@ fn validate_event_state(
             || event.key.payload_order >= payload_frontier
             || !payloads.insert(event.key.payload_order)
         {
-            return Err(SimulationError::InvalidCanonicalState);
+            return Err(SimulationError::EventQueueInvariantViolation);
+        }
+        if let Some(driver) = world.signal.driver_record(event.source_driver)
+            && event.sample.revision > driver.sample.revision
+        {
+            return Err(SimulationError::DriverRevisionInvariantViolation);
+        }
+        let certificate = event
+            .path_certificate
+            .ok_or(SimulationError::PathCertificateInvariantViolation)?;
+        if certificate.0 == 0
+            || certificate.0 >= certificate_frontier
+            || !live_certificates.contains(&certificate)
+            || !referenced_certificates.insert(certificate)
+        {
+            return Err(SimulationError::PathCertificateInvariantViolation);
         }
     }
+    if referenced_certificates != live_certificates {
+        return Err(SimulationError::PathCertificateInvariantViolation);
+    }
     Ok(())
+}
+
+fn apply_route_diff(
+    world: &mut CanonicalWorld,
+    diff: &RouteDiff,
+    topology: &CompiledSignalTopology,
+    tick: Tick,
+) -> Result<SignalStepCounters, SimulationError> {
+    let mut counters = SignalStepCounters {
+        routes_added: count_items(&diff.added)?,
+        routes_removed: count_items(&diff.removed)?,
+        routes_retained: count_items(&diff.retained)?,
+        routes_replaced: count_items(&diff.replaced)?,
+        ..SignalStepCounters::default()
+    };
+
+    for pair in &diff.removed {
+        world.signal.remove_route_slot(pair.sink, pair.driver)?;
+    }
+
+    let mut candidates = Vec::new();
+    for pair in diff.added.iter().chain(&diff.replaced) {
+        let route = topology
+            .route(*pair)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let sample = world
+            .signal
+            .driver_sample(pair.driver)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        candidates.push(UncertifiedSignalArrival::topology_sync(
+            tick.checked_add(route.delay)?,
+            pair.driver,
+            pair.sink,
+            sample,
+            route.path_stamps.clone(),
+        ));
+    }
+
+    let expected = counters
+        .routes_added
+        .checked_add(counters.routes_replaced)
+        .ok_or(SimulationError::NumericOverflow)?;
+    let inserted = stage_signal_arrivals(
+        &mut world.signal_events,
+        &mut world.event_payloads,
+        &mut world.path_certificates,
+        candidates,
+    )?;
+    counters.topology_sync_arrivals_staged =
+        u64::try_from(inserted).map_err(|_| SimulationError::NumericOverflow)?;
+    if counters.topology_sync_arrivals_staged != expected {
+        return Err(SimulationError::EventQueueInvariantViolation);
+    }
+    Ok(counters)
+}
+
+fn count_items<T>(items: &[T]) -> Result<u64, SimulationError> {
+    u64::try_from(items.len()).map_err(|_| SimulationError::NumericOverflow)
 }
 
 fn stage_external_driver_updates(
@@ -631,15 +889,8 @@ fn run_phase2(
     topology: &CompiledSignalTopology,
     tick: Tick,
     logic_threshold: u64,
-) -> Result<
-    (
-        Vec<DriverChangeRecord>,
-        Vec<SignalChangeRecord>,
-        SignalStepCounters,
-    ),
-    SimulationError,
-> {
-    let mut counters = SignalStepCounters::default();
+    counters: &mut SignalStepCounters,
+) -> Result<(Vec<DriverChangeRecord>, Vec<SignalChangeRecord>), SimulationError> {
     let due_drivers = world.driver_events.drain_due(tick)?;
     let mut valid = BTreeMap::<DriverId, ValidDriverTransition>::new();
     for event in due_drivers {
@@ -685,55 +936,164 @@ fn run_phase2(
     for change in &driver_changes {
         for route in topology.routes_from(change.driver) {
             let due_tick = tick.checked_add(route.delay)?;
-            arrivals.push(SignalArrival::s0m3_propagation(
+            arrivals.push(UncertifiedSignalArrival::propagation(
                 due_tick,
                 change.driver,
                 route.sink,
                 change.current,
+                route.path_stamps.clone(),
             ));
         }
     }
-    world
-        .signal_events
-        .stage(&mut world.event_payloads, arrivals)?;
+    stage_signal_arrivals(
+        &mut world.signal_events,
+        &mut world.event_payloads,
+        &mut world.path_certificates,
+        arrivals,
+    )?;
 
     let due_arrivals = world.signal_events.drain_due(tick)?;
-    let mut slot_updates = BTreeMap::<(SinkId, DriverId), DriverSample>::new();
-    for arrival in due_arrivals {
-        if arrival.key.target_id != arrival.sink.entity_id().0
-            || arrival.key.source_id != arrival.source_driver.entity_id().0
-            || arrival.sample.driver_id != arrival.source_driver
-        {
-            return Err(SimulationError::InvalidCanonicalState);
-        }
-        if world.signal.driver_record(arrival.source_driver).is_none()
-            || world.signal.sink_record(arrival.sink).is_none()
-        {
-            continue;
-        }
-        let key = (arrival.sink, arrival.source_driver);
-        match slot_updates.get(&key) {
-            None => {
-                slot_updates.insert(key, arrival.sample);
-            }
-            Some(sample) if *sample == arrival.sample => {}
-            Some(_) => return Err(SimulationError::InvalidCanonicalState),
-        }
-    }
-
-    for ((sink, _), sample) in slot_updates {
-        world.signal.apply_slot_sample(sink, sample)?;
-        counters.signal_arrivals_applied = counters
-            .signal_arrivals_applied
-            .checked_add(1)
-            .ok_or(SimulationError::NumericOverflow)?;
-    }
+    apply_due_signal_arrivals(world, due_arrivals, counters)?;
     let (signal_changes, sinks_resolved) = world.signal.resolve_dirty(logic_threshold)?;
     counters.sinks_resolved = sinks_resolved;
     let excitations = topology.wire_excitations(&world.signal)?;
     world.signal.set_wire_excitations(&excitations)?;
 
-    Ok((driver_changes, signal_changes, counters))
+    Ok((driver_changes, signal_changes))
+}
+
+#[derive(Clone, Copy)]
+struct RevisionBucket {
+    sample: DriverSample,
+    count: u64,
+}
+
+fn apply_due_signal_arrivals(
+    world: &mut CanonicalWorld,
+    arrivals: Vec<SignalArrival>,
+    counters: &mut SignalStepCounters,
+) -> Result<(), SimulationError> {
+    let mut groups = BTreeMap::<(SinkId, DriverId), BTreeMap<Revision, RevisionBucket>>::new();
+
+    for arrival in arrivals {
+        validate_due_signal_arrival_shape(arrival)?;
+        let certificate = arrival
+            .path_certificate
+            .ok_or(SimulationError::PathCertificateInvariantViolation)?;
+        let path = world.path_certificates.consume(certificate)?;
+        let endpoints_live = world.signal.driver_record(arrival.source_driver).is_some()
+            && world.signal.sink_record(arrival.sink).is_some();
+        let path_current = path
+            .iter()
+            .copied()
+            .all(|stamp| world.structural.path_element_is_current(stamp));
+        if !endpoints_live || !path_current {
+            add_counter(&mut counters.invalid_path_arrivals, 1)?;
+            continue;
+        }
+
+        let buckets = groups
+            .entry((arrival.sink, arrival.source_driver))
+            .or_default();
+        match buckets.entry(arrival.sample.revision) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(RevisionBucket {
+                    sample: arrival.sample,
+                    count: 1,
+                });
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let bucket = entry.get_mut();
+                if bucket.sample != arrival.sample {
+                    return Err(SimulationError::DriverRevisionInvariantViolation);
+                }
+                bucket.count = bucket
+                    .count
+                    .checked_add(1)
+                    .ok_or(SimulationError::NumericOverflow)?;
+            }
+        }
+    }
+
+    for ((sink, driver), buckets) in groups {
+        let stored = world.signal.sink_driver_sample(sink, driver);
+        if let Some(stored) = stored
+            && let Some(bucket) = buckets.get(&stored.revision)
+            && bucket.sample != stored
+        {
+            return Err(SimulationError::DriverRevisionInvariantViolation);
+        }
+
+        let (&winner_revision, winner) = buckets
+            .last_key_value()
+            .ok_or(SimulationError::DriverRevisionInvariantViolation)?;
+        let lower_count = buckets
+            .iter()
+            .filter(|(revision, _)| **revision != winner_revision)
+            .try_fold(0_u64, |total, (_, bucket)| {
+                total
+                    .checked_add(bucket.count)
+                    .ok_or(SimulationError::NumericOverflow)
+            })?;
+
+        match stored.map(|sample| sample.revision.cmp(&winner_revision)) {
+            Some(std::cmp::Ordering::Greater) => {
+                let total = lower_count
+                    .checked_add(winner.count)
+                    .ok_or(SimulationError::NumericOverflow)?;
+                add_counter(&mut counters.stale_revision_arrivals, total)?;
+            }
+            Some(std::cmp::Ordering::Equal) => {
+                add_counter(&mut counters.stale_revision_arrivals, lower_count)?;
+                add_counter(&mut counters.idempotent_signal_arrivals, winner.count)?;
+            }
+            Some(std::cmp::Ordering::Less) | None => {
+                add_counter(&mut counters.stale_revision_arrivals, lower_count)?;
+                match world.signal.apply_slot_sample(sink, winner.sample)? {
+                    SlotApplyOutcome::Applied => {}
+                    SlotApplyOutcome::Idempotent | SlotApplyOutcome::Stale => {
+                        return Err(SimulationError::DriverRevisionInvariantViolation);
+                    }
+                }
+                add_counter(&mut counters.signal_arrivals_applied, 1)?;
+                add_counter(
+                    &mut counters.idempotent_signal_arrivals,
+                    winner
+                        .count
+                        .checked_sub(1)
+                        .ok_or(SimulationError::DriverRevisionInvariantViolation)?,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_due_signal_arrival_shape(arrival: SignalArrival) -> Result<(), SimulationError> {
+    if arrival.key.kind_order != SIGNAL_ARRIVAL_KIND_ORDER
+        || arrival.key.target_id != arrival.sink.entity_id().0
+        || arrival.key.source_id != arrival.source_driver.entity_id().0
+        || arrival.key.revision != arrival.sample.revision
+        || arrival.key.generation != 0
+        || arrival.sample.driver_id != arrival.source_driver
+        || !matches!(
+            arrival.kind,
+            SignalArrivalKind::Propagation | SignalArrivalKind::TopologySync
+        )
+    {
+        return Err(SimulationError::EventQueueInvariantViolation);
+    }
+    if arrival.path_certificate.is_none() {
+        return Err(SimulationError::PathCertificateInvariantViolation);
+    }
+    Ok(())
+}
+
+fn add_counter(counter: &mut u64, amount: u64) -> Result<(), SimulationError> {
+    *counter = counter
+        .checked_add(amount)
+        .ok_or(SimulationError::NumericOverflow)?;
+    Ok(())
 }
 
 fn validate_driver_transition(
@@ -746,7 +1106,7 @@ fn validate_driver_transition(
         || event.key.source_id != event.driver_id.entity_id().0
         || event.key.generation != event.pending_generation
     {
-        return Err(SimulationError::InvalidCanonicalState);
+        return Err(SimulationError::EventQueueInvariantViolation);
     }
     let Some(driver) = world.signal.driver_record(event.driver_id) else {
         return Ok(None);
@@ -912,6 +1272,7 @@ impl From<SignalError> for SimulationError {
         match error {
             SignalError::NumericOverflow => Self::NumericOverflow,
             SignalError::InvalidCanonicalState => Self::InvalidCanonicalState,
+            SignalError::DriverRevisionInvariantViolation => Self::DriverRevisionInvariantViolation,
         }
     }
 }
@@ -933,7 +1294,42 @@ impl From<EventCalendarError> for SimulationError {
             | EventCalendarError::AssignedStagedPayload { .. }
             | EventCalendarError::InvalidKindOrder { .. }
             | EventCalendarError::DuplicateEventKey { .. }
-            | EventCalendarError::OverdueEvent { .. } => Self::InvalidCanonicalState,
+            | EventCalendarError::OverdueEvent { .. } => Self::EventQueueInvariantViolation,
+        }
+    }
+}
+
+impl From<PathCertificateError> for SimulationError {
+    fn from(error: PathCertificateError) -> Self {
+        match error {
+            PathCertificateError::CertificateIdExhausted
+            | PathCertificateError::CertificateSlotIndexExhausted
+            | PathCertificateError::ElementRangeExhausted => Self::NumericOverflow,
+            PathCertificateError::ReservedCertificateId
+            | PathCertificateError::UnknownCertificate { .. }
+            | PathCertificateError::ConsumedCertificate { .. }
+            | PathCertificateError::StaleBatchPlan
+            | PathCertificateError::InvalidSlotLayout
+            | PathCertificateError::CertificateIdMismatch { .. }
+            | PathCertificateError::InvalidElementRange { .. }
+            | PathCertificateError::OverlappingElementRange { .. } => {
+                Self::PathCertificateInvariantViolation
+            }
+        }
+    }
+}
+
+impl From<SignalArrivalStagingError> for SimulationError {
+    fn from(error: SignalArrivalStagingError) -> Self {
+        match error {
+            SignalArrivalStagingError::PathCertificate(error) => error.into(),
+            SignalArrivalStagingError::EventCalendar(error) => error.into(),
+            SignalArrivalStagingError::ReservedPathElement => {
+                Self::PathCertificateInvariantViolation
+            }
+            SignalArrivalStagingError::ReservedSourceDriver
+            | SignalArrivalStagingError::ReservedSink
+            | SignalArrivalStagingError::SampleDriverMismatch => Self::EventQueueInvariantViolation,
         }
     }
 }
@@ -1128,6 +1524,10 @@ mod tests {
             control.canonical.signal_events
         );
         assert_eq!(
+            simulation.canonical.path_certificates,
+            control.canonical.path_certificates
+        );
+        assert_eq!(
             simulation.canonical.event_payloads.next_payload_order(),
             before_payload_frontier
         );
@@ -1179,6 +1579,471 @@ mod tests {
     }
 
     #[test]
+    fn driver_revision_overflow_rolls_back_event_and_certificate_frontiers() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut simulation);
+        simulation
+            .step(&[])
+            .expect("the initial NOT transition settles");
+        let ports = simulation
+            .gate_signal_ports(gate)
+            .expect("test Gate signal ports exist");
+        simulation
+            .canonical
+            .signal
+            .force_driver_revision_for_test(ports.input_a.external_driver, Revision(u64::MAX))
+            .expect("test-only Revision seed succeeds");
+        validate_canonical_world(&simulation.canonical)
+            .expect("maximum live Driver Revision is canonical before mutation");
+
+        let before_hash = simulation.state_hash();
+        let before = simulation.canonical.clone();
+        let command = crate::CommandEnvelope {
+            target_tick: simulation.next_tick(),
+            ordinal: 0,
+            command: crate::Command::SetExternalDriver(crate::SetExternalDriverCommand {
+                driver: ports.input_a.external_driver,
+                level: LogicLevel::High,
+                strength: DriveStrength(100),
+            }),
+        };
+
+        assert_eq!(
+            simulation.step(&[command]),
+            Err(SimulationError::NumericOverflow)
+        );
+        assert_eq!(simulation.state_hash(), before_hash);
+        assert_eq!(simulation.canonical.next_tick, before.next_tick);
+        assert_eq!(
+            simulation.canonical.topology_revision,
+            before.topology_revision
+        );
+        assert_eq!(simulation.canonical.structural, before.structural);
+        assert_eq!(simulation.canonical.signal, before.signal);
+        assert_eq!(simulation.canonical.event_payloads, before.event_payloads);
+        assert_eq!(simulation.canonical.driver_events, before.driver_events);
+        assert_eq!(simulation.canonical.signal_events, before.signal_events);
+        assert_eq!(
+            simulation.canonical.path_certificates,
+            before.path_certificates
+        );
+    }
+
+    #[test]
+    fn topology_sync_due_tick_overflow_rolls_back_phase0_and_both_allocators() {
+        const CIRCUIT_PITCH: i64 = 16_384;
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let bounds = crate::FixedAabb::new(
+            crate::FixedVec2::new(
+                crate::Fixed(-128 * crate::FIXED_ONE),
+                crate::Fixed(-128 * crate::FIXED_ONE),
+            ),
+            crate::FixedVec2::new(
+                crate::Fixed(128 * crate::FIXED_ONE),
+                crate::Fixed(128 * crate::FIXED_ONE),
+            ),
+        );
+        let substrate_report = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: simulation.next_tick(),
+                ordinal: 0,
+                command: crate::Command::PlaceFixedSubstrate(crate::PlaceFixedSubstrateCommand {
+                    origin: crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(0)),
+                    routing_area: bounds,
+                    footprint: bounds,
+                }),
+            }])
+            .expect("test Substrate placement succeeds");
+        let substrate = substrate_report.command_acceptances[0]
+            .created_entity
+            .expect("Substrate placement allocates an EntityId");
+        let place_gate = |tick, origin| crate::CommandEnvelope {
+            target_tick: tick,
+            ordinal: 0,
+            command: crate::Command::PlaceGate(crate::PlaceGateCommand {
+                gate_type: GateType::Not,
+                origin,
+                routing_domain: crate::RoutingDomain::FixedSubstrate(substrate),
+            }),
+        };
+        let source_report = simulation
+            .step(&[place_gate(
+                simulation.next_tick(),
+                crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(0)),
+            )])
+            .expect("source Gate placement succeeds");
+        let source = GateId(
+            source_report.command_acceptances[0]
+                .created_entity
+                .expect("source Gate allocates an EntityId"),
+        );
+        let downstream_report = simulation
+            .step(&[place_gate(
+                simulation.next_tick(),
+                crate::FixedVec2::new(crate::Fixed(34 * CIRCUIT_PITCH), crate::Fixed(0)),
+            )])
+            .expect("downstream Gate placement succeeds");
+        let downstream = GateId(
+            downstream_report.command_acceptances[0]
+                .created_entity
+                .expect("downstream Gate allocates an EntityId"),
+        );
+        for _ in 0..8 {
+            let source_state = simulation
+                .gate_signal_state(source)
+                .expect("source Gate remains live");
+            let downstream_state = simulation
+                .gate_signal_state(downstream)
+                .expect("downstream Gate remains live");
+            if source_state.current_output == LogicLevel::High
+                && source_state.pending_due_tick.is_none()
+                && downstream_state.current_output == LogicLevel::High
+                && downstream_state.pending_due_tick.is_none()
+            {
+                break;
+            }
+            simulation.step(&[]).expect("Gate settling Tick succeeds");
+        }
+        assert!(
+            [source, downstream].into_iter().all(|gate| {
+                let state = simulation
+                    .gate_signal_state(gate)
+                    .expect("test Gate remains live");
+                state.current_output == LogicLevel::High && state.pending_due_tick.is_none()
+            }),
+            "both NOT Gates must be settled before the near-maximum Tick seam"
+        );
+
+        simulation.canonical.next_tick = Tick(u64::MAX - 1);
+        validate_canonical_world(&simulation.canonical)
+            .expect("the settled near-maximum Tick world is canonical");
+        let before_hash = simulation.state_hash();
+        let before = simulation.canonical.clone();
+        let wire = crate::CommandEnvelope {
+            target_tick: simulation.next_tick(),
+            ordinal: 0,
+            command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                routing_domain: crate::RoutingDomain::FixedSubstrate(substrate),
+                points: vec![
+                    crate::FixedVec2::new(crate::Fixed(CIRCUIT_PITCH), crate::Fixed(0)),
+                    crate::FixedVec2::new(crate::Fixed(33 * CIRCUIT_PITCH), crate::Fixed(0)),
+                ],
+                endpoint_a: crate::EndpointTarget::GatePort(crate::GatePortRef {
+                    gate: source,
+                    port: crate::GatePort::Output,
+                }),
+                endpoint_b: crate::EndpointTarget::GatePort(crate::GatePortRef {
+                    gate: downstream,
+                    port: crate::GatePort::InputA,
+                }),
+            }),
+        };
+
+        assert_eq!(
+            simulation.step(&[wire]),
+            Err(SimulationError::NumericOverflow)
+        );
+        assert_eq!(simulation.state_hash(), before_hash);
+        assert_eq!(simulation.canonical.next_tick, before.next_tick);
+        assert_eq!(
+            simulation.canonical.topology_revision,
+            before.topology_revision
+        );
+        assert_eq!(simulation.canonical.structural, before.structural);
+        assert_eq!(simulation.canonical.signal, before.signal);
+        assert_eq!(simulation.canonical.event_payloads, before.event_payloads);
+        assert_eq!(simulation.canonical.driver_events, before.driver_events);
+        assert_eq!(simulation.canonical.signal_events, before.signal_events);
+        assert_eq!(
+            simulation.canonical.path_certificates,
+            before.path_certificates
+        );
+    }
+
+    #[test]
+    fn stored_revision_conflict_is_fatal_even_with_a_higher_winner_and_permutations() {
+        fn seeded(reverse: bool) -> Simulation {
+            let mut simulation = Simulation::new(package()).expect("test package is valid");
+            let gate = place_test_not(&mut simulation);
+            simulation
+                .step(&[])
+                .expect("the initial NOT transition settles");
+            let ports = simulation
+                .gate_signal_ports(gate)
+                .expect("test Gate signal ports exist");
+            simulation
+                .canonical
+                .signal
+                .force_driver_revision_for_test(ports.input_a.external_driver, Revision(4))
+                .expect("test-only Revision seed succeeds");
+            let current = simulation
+                .driver_sample(ports.input_a.external_driver)
+                .expect("external Driver sample exists");
+            let stored = DriverSample {
+                revision: Revision(3),
+                emitted_at: Tick(0),
+                ..current
+            };
+            assert_eq!(
+                simulation
+                    .canonical
+                    .signal
+                    .apply_slot_sample(ports.input_a.sink, stored),
+                Ok(SlotApplyOutcome::Applied)
+            );
+            simulation
+                .canonical
+                .signal
+                .resolve_dirty(simulation.profiles.balance.logic_threshold)
+                .expect("test Slot settles");
+
+            let conflicting = DriverSample {
+                strength: DriveStrength(1),
+                ..stored
+            };
+            let mut candidates = vec![
+                UncertifiedSignalArrival::propagation(
+                    simulation.next_tick(),
+                    ports.input_a.external_driver,
+                    ports.input_a.sink,
+                    conflicting,
+                    Vec::new(),
+                ),
+                UncertifiedSignalArrival::topology_sync(
+                    simulation.next_tick(),
+                    ports.input_a.external_driver,
+                    ports.input_a.sink,
+                    current,
+                    Vec::new(),
+                ),
+            ];
+            if reverse {
+                candidates.reverse();
+            }
+            stage_signal_arrivals(
+                &mut simulation.canonical.signal_events,
+                &mut simulation.canonical.event_payloads,
+                &mut simulation.canonical.path_certificates,
+                candidates,
+            )
+            .expect("test Arrivals stage");
+            validate_canonical_world(&simulation.canonical)
+                .expect("the conflict is a due-time, not commit-shape, invariant");
+            simulation
+        }
+
+        let mut first = seeded(false);
+        let mut reversed = seeded(true);
+        let first_before = first.state_hash();
+        let reversed_before = reversed.state_hash();
+        assert_eq!(first_before, reversed_before);
+
+        assert_eq!(
+            first.step(&[]),
+            Err(SimulationError::DriverRevisionInvariantViolation)
+        );
+        assert_eq!(
+            reversed.step(&[]),
+            Err(SimulationError::DriverRevisionInvariantViolation)
+        );
+        assert_eq!(first.state_hash(), first_before);
+        assert_eq!(reversed.state_hash(), reversed_before);
+        assert_eq!(first.state_hash(), reversed.state_hash());
+    }
+
+    #[test]
+    fn committed_validator_rejects_orphan_consumed_and_duplicate_certificates() {
+        fn pending_simulation() -> Simulation {
+            let mut simulation = Simulation::new(package()).expect("test package is valid");
+            let gate = place_test_not(&mut simulation);
+            simulation
+                .step(&[])
+                .expect("the initial NOT transition settles");
+            let ports = simulation
+                .gate_signal_ports(gate)
+                .expect("test Gate signal ports exist");
+            let sample = simulation
+                .driver_sample(ports.input_a.external_driver)
+                .expect("external Driver sample exists");
+            let due_tick = simulation
+                .next_tick()
+                .checked_add(Tick(1))
+                .expect("test due Tick fits");
+            stage_signal_arrivals(
+                &mut simulation.canonical.signal_events,
+                &mut simulation.canonical.event_payloads,
+                &mut simulation.canonical.path_certificates,
+                [UncertifiedSignalArrival::propagation(
+                    due_tick,
+                    ports.input_a.external_driver,
+                    ports.input_a.sink,
+                    sample,
+                    Vec::new(),
+                )],
+            )
+            .expect("test Arrival stages");
+            validate_canonical_world(&simulation.canonical)
+                .expect("single pending certified Arrival is canonical");
+            simulation
+        }
+
+        let mut orphan = pending_simulation();
+        orphan
+            .canonical
+            .path_certificates
+            .allocate_batch(&[&[]])
+            .expect("orphan test Certificate allocates");
+        assert_eq!(
+            validate_canonical_world(&orphan.canonical),
+            Err(SimulationError::PathCertificateInvariantViolation)
+        );
+
+        let mut consumed = pending_simulation();
+        let certificate = consumed
+            .canonical
+            .signal_events
+            .canonical_view()
+            .next()
+            .and_then(|event| event.path_certificate)
+            .expect("test Arrival owns a Certificate");
+        consumed
+            .canonical
+            .path_certificates
+            .consume(certificate)
+            .expect("test Certificate consumes");
+        assert_eq!(
+            validate_canonical_world(&consumed.canonical),
+            Err(SimulationError::PathCertificateInvariantViolation)
+        );
+
+        let mut duplicate = pending_simulation();
+        let original = *duplicate
+            .canonical
+            .signal_events
+            .canonical_view()
+            .next()
+            .expect("test Arrival exists");
+        let payload_order = duplicate.canonical.event_payloads.next_payload_order();
+        duplicate.canonical.event_payloads = EventPayloadAllocator::from_next_payload_order(
+            payload_order
+                .checked_add(1)
+                .expect("test payload frontier fits"),
+        )
+        .expect("test payload frontier is valid");
+        let mut second = original;
+        second.key.due_tick = second
+            .key
+            .due_tick
+            .checked_add(Tick(1))
+            .expect("test due Tick fits");
+        second.key.payload_order = payload_order;
+        duplicate
+            .canonical
+            .signal_events
+            .insert_assigned(second)
+            .expect("calendar keys remain distinct");
+        assert_eq!(
+            validate_canonical_world(&duplicate.canonical),
+            Err(SimulationError::PathCertificateInvariantViolation)
+        );
+    }
+
+    #[test]
+    fn certificate_and_payload_exhaustion_roll_back_phase0_allocations() {
+        fn substrate_only() -> Simulation {
+            let mut simulation = Simulation::new(package()).expect("test package is valid");
+            let bounds = crate::FixedAabb::new(
+                crate::FixedVec2::new(
+                    crate::Fixed(-4 * crate::FIXED_ONE),
+                    crate::Fixed(-4 * crate::FIXED_ONE),
+                ),
+                crate::FixedVec2::new(
+                    crate::Fixed(4 * crate::FIXED_ONE),
+                    crate::Fixed(4 * crate::FIXED_ONE),
+                ),
+            );
+            simulation
+                .step(&[crate::CommandEnvelope {
+                    target_tick: Tick(0),
+                    ordinal: 0,
+                    command: crate::Command::PlaceFixedSubstrate(
+                        crate::PlaceFixedSubstrateCommand {
+                            origin: crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(0)),
+                            routing_area: bounds,
+                            footprint: bounds,
+                        },
+                    ),
+                }])
+                .expect("test Substrate placement succeeds");
+            simulation
+        }
+
+        fn gate_command(tick: Tick) -> crate::CommandEnvelope {
+            crate::CommandEnvelope {
+                target_tick: tick,
+                ordinal: 0,
+                command: crate::Command::PlaceGate(crate::PlaceGateCommand {
+                    gate_type: GateType::Not,
+                    origin: crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(0)),
+                    routing_domain: crate::RoutingDomain::FixedSubstrate(crate::EntityId(1)),
+                }),
+            }
+        }
+
+        fn assert_rollback(simulation: &Simulation, before: &CanonicalWorld, hash: StateHash) {
+            assert_eq!(simulation.state_hash(), hash);
+            assert_eq!(simulation.canonical.next_tick, before.next_tick);
+            assert_eq!(
+                simulation.canonical.topology_revision,
+                before.topology_revision
+            );
+            assert_eq!(simulation.canonical.structural, before.structural);
+            assert_eq!(simulation.canonical.signal, before.signal);
+            assert_eq!(simulation.canonical.event_payloads, before.event_payloads);
+            assert_eq!(simulation.canonical.driver_events, before.driver_events);
+            assert_eq!(simulation.canonical.signal_events, before.signal_events);
+            assert_eq!(
+                simulation.canonical.path_certificates,
+                before.path_certificates
+            );
+        }
+
+        let mut certificate_exhausted = substrate_only();
+        let certificate_frontier = certificate_exhausted
+            .canonical
+            .path_certificates
+            .frontier()
+            .0;
+        certificate_exhausted
+            .canonical
+            .path_certificates
+            .set_frontier_limits_for_test(certificate_frontier, u32::MAX);
+        validate_canonical_world(&certificate_exhausted.canonical)
+            .expect("the bounded allocator seam does not alter canonical shape");
+        let before = certificate_exhausted.canonical.clone();
+        let hash = certificate_exhausted.state_hash();
+        assert_eq!(
+            certificate_exhausted.step(&[gate_command(certificate_exhausted.next_tick())]),
+            Err(SimulationError::NumericOverflow)
+        );
+        assert_rollback(&certificate_exhausted, &before, hash);
+
+        let mut payload_exhausted = substrate_only();
+        payload_exhausted.canonical.event_payloads =
+            EventPayloadAllocator::from_next_payload_order(u64::MAX)
+                .expect("maximum payload frontier is representable");
+        validate_canonical_world(&payload_exhausted.canonical)
+            .expect("the exhausted payload frontier is canonical before allocation");
+        let before = payload_exhausted.canonical.clone();
+        let hash = payload_exhausted.state_hash();
+        assert_eq!(
+            payload_exhausted.step(&[gate_command(payload_exhausted.next_tick())]),
+            Err(SimulationError::NumericOverflow)
+        );
+        assert_rollback(&payload_exhausted, &before, hash);
+    }
+
+    #[test]
     fn contract_hash_mismatch_rejects_simulation_start() {
         let mut package = package();
         package.contract.balance_profile_hash = crate::ProfileHash::default();
@@ -1199,14 +2064,13 @@ mod tests {
         let ports = dirty
             .gate_signal_ports(gate)
             .expect("test Gate signal ports exist");
-        let sample = dirty
-            .driver_sample(ports.input_a.external_driver)
-            .expect("external Driver sample exists");
-        dirty
-            .canonical
-            .signal
-            .apply_slot_sample(ports.input_a.sink, sample)
-            .expect("test slot mutation succeeds");
+        assert!(
+            dirty
+                .canonical
+                .signal
+                .remove_route_slot(ports.input_a.sink, ports.input_a.external_driver)
+                .expect("test slot removal succeeds")
+        );
         assert_eq!(
             validate_canonical_world(&dirty.canonical),
             Err(SimulationError::InvalidCanonicalState)
@@ -1225,6 +2089,156 @@ mod tests {
     }
 
     #[test]
+    fn committed_validator_rejects_sink_driver_slot_key_mismatch() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut simulation);
+        let ports = simulation
+            .gate_signal_ports(gate)
+            .expect("test Gate signal ports exist");
+        simulation
+            .canonical
+            .signal
+            .move_slot_key_for_test(
+                (ports.input_a.sink, ports.input_a.external_driver),
+                (ports.input_a.sink, ports.output),
+            )
+            .expect("test-only key corruption succeeds");
+
+        assert_eq!(
+            validate_canonical_world(&simulation.canonical),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+    }
+
+    #[test]
+    fn committed_validator_rejects_gate_map_key_mismatch() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut simulation);
+        simulation
+            .canonical
+            .signal
+            .move_gate_key_for_test(gate, GateId(crate::EntityId(gate.entity_id().0 + 1)))
+            .expect("test-only Gate key corruption succeeds");
+
+        assert_eq!(
+            validate_canonical_world(&simulation.canonical),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+    }
+
+    #[test]
+    fn committed_validator_rejects_registry_to_store_index_mismatch() {
+        const WORLD_PITCH: i64 = 65_536;
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let wire = |ordinal, y| crate::CommandEnvelope {
+            target_tick: Tick(0),
+            ordinal,
+            command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                routing_domain: crate::RoutingDomain::OpenWorld,
+                points: vec![
+                    crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(y)),
+                    crate::FixedVec2::new(crate::Fixed(WORLD_PITCH), crate::Fixed(y)),
+                ],
+                endpoint_a: crate::EndpointTarget::Free,
+                endpoint_b: crate::EndpointTarget::Free,
+            }),
+        };
+        simulation
+            .step(&[wire(0, 0), wire(1, 2 * WORLD_PITCH)])
+            .expect("two disjoint OpenWorld Wires place");
+        validate_canonical_world(&simulation.canonical)
+            .expect("the uncorrupted structural links are canonical");
+        let canonical_hash = simulation.state_hash();
+
+        simulation
+            .canonical
+            .structural
+            .swap_wire_registry_locations_for_test(crate::WireIndex(0), crate::WireIndex(1))
+            .expect("test-only registry index corruption succeeds");
+        assert_eq!(
+            simulation.state_hash(),
+            canonical_hash,
+            "dense registry indices are intentionally excluded from canonical bytes"
+        );
+        assert_eq!(
+            validate_canonical_world(&simulation.canonical),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+    }
+
+    #[test]
+    fn committed_validator_rejects_calendar_map_key_payload_key_mismatch() {
+        let mut driver_mismatch = Simulation::new(package()).expect("test package is valid");
+        place_test_not(&mut driver_mismatch);
+        let original = *driver_mismatch
+            .canonical
+            .driver_events
+            .canonical_keys()
+            .next()
+            .expect("NOT startup retains one Driver event");
+        let mut moved = original;
+        moved.due_tick = moved
+            .due_tick
+            .checked_add(Tick(1))
+            .expect("test due Tick fits");
+        driver_mismatch
+            .canonical
+            .driver_events
+            .move_map_key_for_test(original, moved);
+        assert_eq!(
+            validate_canonical_world(&driver_mismatch.canonical),
+            Err(SimulationError::EventQueueInvariantViolation)
+        );
+
+        let mut signal_mismatch = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut signal_mismatch);
+        let ports = signal_mismatch
+            .gate_signal_ports(gate)
+            .expect("test Gate signal ports exist");
+        let sample = signal_mismatch
+            .driver_sample(ports.input_a.external_driver)
+            .expect("external Driver sample exists");
+        let due_tick = signal_mismatch
+            .next_tick()
+            .checked_add(Tick(1))
+            .expect("test due Tick fits");
+        stage_signal_arrivals(
+            &mut signal_mismatch.canonical.signal_events,
+            &mut signal_mismatch.canonical.event_payloads,
+            &mut signal_mismatch.canonical.path_certificates,
+            [UncertifiedSignalArrival::propagation(
+                due_tick,
+                ports.input_a.external_driver,
+                ports.input_a.sink,
+                sample,
+                Vec::new(),
+            )],
+        )
+        .expect("test SignalArrival stages");
+        validate_canonical_world(&signal_mismatch.canonical)
+            .expect("the uncorrupted pending SignalArrival is canonical");
+        let original = *signal_mismatch
+            .canonical
+            .signal_events
+            .canonical_keys()
+            .next()
+            .expect("one SignalArrival is pending");
+        let mut moved = original;
+        moved.due_tick = moved
+            .due_tick
+            .checked_add(Tick(1))
+            .expect("test due Tick fits");
+        signal_mismatch
+            .canonical
+            .signal_events
+            .move_map_key_for_test(original, moved);
+        assert_eq!(
+            validate_canonical_world(&signal_mismatch.canonical),
+            Err(SimulationError::EventQueueInvariantViolation)
+        );
+    }
+
+    #[test]
     fn committed_validator_rejects_cross_calendar_payload_reuse_and_invalid_event_keys() {
         let mut duplicate = Simulation::new(package()).expect("test package is valid");
         let gate = place_test_not(&mut duplicate);
@@ -1234,7 +2248,12 @@ mod tests {
         let sample = duplicate
             .driver_sample(ports.input_a.external_driver)
             .expect("external Driver sample exists");
-        let mut arrival = SignalArrival::s0m3_propagation(
+        let certificate = duplicate
+            .canonical
+            .path_certificates
+            .allocate_batch(&[&[]])
+            .expect("empty test certificate allocates")[0];
+        let mut arrival = SignalArrival::propagation(
             duplicate
                 .next_tick()
                 .checked_add(Tick(1))
@@ -1242,8 +2261,16 @@ mod tests {
             ports.input_a.external_driver,
             ports.input_a.sink,
             sample,
+            certificate,
         );
-        arrival.key = arrival.key.with_payload_order(1);
+        let reused_payload = duplicate
+            .canonical
+            .driver_events
+            .canonical_keys()
+            .next()
+            .expect("NOT startup retains a pending Driver event")
+            .payload_order;
+        arrival.key = arrival.key.with_payload_order(reused_payload);
         duplicate
             .canonical
             .signal_events
@@ -1251,7 +2278,7 @@ mod tests {
             .expect("each calendar accepts its own assigned key");
         assert_eq!(
             validate_canonical_world(&duplicate.canonical),
-            Err(SimulationError::InvalidCanonicalState)
+            Err(SimulationError::EventQueueInvariantViolation)
         );
 
         let mut invalid_key = Simulation::new(package()).expect("test package is valid");
@@ -1281,8 +2308,64 @@ mod tests {
             .expect("calendar-level shape accepts the assigned event");
         assert_eq!(
             validate_canonical_world(&invalid_key.canonical),
+            Err(SimulationError::EventQueueInvariantViolation)
+        );
+
+        let mut invalid_role = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut invalid_role);
+        let ports = invalid_role
+            .gate_signal_ports(gate)
+            .expect("test Gate signal ports exist");
+        let transition = DriverTransition::s0m3(
+            invalid_role
+                .next_tick()
+                .checked_add(Tick(1))
+                .expect("test due Tick fits"),
+            ports.output,
+            LogicLevel::High,
+            DriveStrength(1),
+            0,
+            DriverTransitionCause::ExternalDriver,
+        );
+        invalid_role
+            .canonical
+            .driver_events
+            .stage(&mut invalid_role.canonical.event_payloads, [transition])
+            .expect("calendar-level shape accepts the cross-store role mismatch");
+        assert_eq!(
+            validate_canonical_world(&invalid_role.canonical),
             Err(SimulationError::InvalidCanonicalState)
         );
+    }
+
+    #[test]
+    fn due_driver_transition_key_shape_uses_the_event_queue_error_taxonomy() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let gate = place_test_not(&mut simulation);
+        let ports = simulation
+            .gate_signal_ports(gate)
+            .expect("test Gate signal ports exist");
+        let tick = simulation.next_tick();
+        let valid = DriverTransition::s0m3(
+            tick,
+            ports.input_a.external_driver,
+            LogicLevel::High,
+            DriveStrength(1),
+            0,
+            DriverTransitionCause::ExternalDriver,
+        );
+        let mut malformed = [valid; 4];
+        malformed[0].key.due_tick = tick.checked_add(Tick(1)).expect("test Tick fits");
+        malformed[1].key.target_id = u64::MAX;
+        malformed[2].key.source_id = u64::MAX;
+        malformed[3].key.generation = 1;
+
+        for event in malformed {
+            assert!(matches!(
+                validate_driver_transition(&simulation.canonical, event, tick),
+                Err(SimulationError::EventQueueInvariantViolation)
+            ));
+        }
     }
 
     #[test]

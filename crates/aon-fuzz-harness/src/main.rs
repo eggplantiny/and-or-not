@@ -1,8 +1,9 @@
 use aon_fuzz_harness::{
     CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
-    MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, SignalRuntimeExecutionObservation,
-    StatefulCommandExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
-    exercise_signal_runtime, exercise_stateful_commands,
+    MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
+    SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
+    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
+    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::io::Read;
 
@@ -13,7 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_limit = MAX_DECODER_INPUT_BYTES
         .max(MAX_GEOMETRY_INPUT_BYTES)
         .max(MAX_COMMAND_INPUT_BYTES)
-        .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES);
+        .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
+        .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
         .take(u64::try_from(input_limit)?)
@@ -24,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "geometry" => print_geometry(&input),
         "commands" => print_commands(&input)?,
         "signal" => print_signal_runtime(&input)?,
+        "topology" => print_topology_runtime(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -33,13 +36,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_geometry(&input);
             print_commands(&input)?;
             print_signal_runtime(&input)?;
+            print_topology_runtime(&input)?;
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, geometry, commands, signal, both, or all"
+                "unknown mode `{mode}`; expected decoder, geometry, commands, signal, topology, both, or all"
             )
             .into());
         }
+    }
+    Ok(())
+}
+
+fn print_topology_runtime(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let observation = exercise_topology_runtime(input);
+    let coverage = observation.coverage;
+    println!(
+        "topology input_bytes={} scenarios={} steps={} encodings={} hashes={} result={} permuted={} added={} removed={} retained={} replaced={} sync={} stale={} invalid_path={} slot_revisions={}",
+        observation.consumed_len,
+        observation.generated_scenarios,
+        observation.generated_steps,
+        observation.encodings.len(),
+        observation.state_hashes.len(),
+        topology_runtime_result(&observation.execution),
+        coverage.permuted_command_batches,
+        coverage.routes_added,
+        coverage.routes_removed,
+        coverage.routes_retained,
+        coverage.routes_replaced,
+        coverage.topology_sync_arrivals_staged,
+        coverage.stale_revision_arrivals,
+        coverage.invalid_path_arrivals,
+        coverage.slot_revision_observations,
+    );
+    if let Some(failure) = observation.invariant_failure() {
+        return Err(format!("topology-runtime harness invariant failed: {failure}").into());
     }
     Ok(())
 }
@@ -181,5 +212,17 @@ const fn signal_runtime_result(execution: &SignalRuntimeExecutionObservation) ->
         SignalRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
         SignalRuntimeExecutionObservation::RunError { .. } => "run-error",
         SignalRuntimeExecutionObservation::Completed => "completed",
+    }
+}
+
+const fn topology_runtime_result(execution: &TopologyRuntimeExecutionObservation) -> &'static str {
+    match execution {
+        TopologyRuntimeExecutionObservation::PackageRejected(_) => "package-rejected",
+        TopologyRuntimeExecutionObservation::SimulationRejected { .. } => "simulation-rejected",
+        TopologyRuntimeExecutionObservation::RunError { .. } => "run-error",
+        TopologyRuntimeExecutionObservation::EncoderMismatch { .. } => "encoder-mismatch",
+        TopologyRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
+        TopologyRuntimeExecutionObservation::ExpectationMismatch { .. } => "expectation-mismatch",
+        TopologyRuntimeExecutionObservation::Completed => "completed",
     }
 }

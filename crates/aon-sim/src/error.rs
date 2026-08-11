@@ -94,6 +94,15 @@ pub enum SimulationError {
     #[error("canonical structural invariant violated")]
     InvalidCanonicalState,
 
+    #[error("canonical event queue invariant violated")]
+    EventQueueInvariantViolation,
+
+    #[error("canonical Driver Revision invariant violated")]
+    DriverRevisionInvariantViolation,
+
+    #[error("canonical Path Certificate invariant violated")]
+    PathCertificateInvariantViolation,
+
     #[error("invalid simulation profile: {error}")]
     InvalidProfile { error: ProfileValidationError },
 

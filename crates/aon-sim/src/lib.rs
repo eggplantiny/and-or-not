@@ -10,6 +10,7 @@ mod geometry;
 mod hash;
 mod identity;
 mod numeric;
+mod path_certificate;
 mod profile;
 mod signal;
 mod signal_topology;
@@ -37,8 +38,8 @@ pub use error::{JsonErrorCategory, PackageError, SimulationError};
 pub use event::{
     CanonicalEvent, DRIVER_TRANSITION_KIND_ORDER, DriverSample, DriverTransition,
     DriverTransitionCause, EventCalendar, EventCalendarError, EventKey, EventPayloadAllocator,
-    FIRST_EVENT_PAYLOAD_ORDER, PathCertificateId, RESERVED_EVENT_PAYLOAD_ORDER,
-    SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival, SignalArrivalKind,
+    FIRST_EVENT_PAYLOAD_ORDER, RESERVED_EVENT_PAYLOAD_ORDER, SIGNAL_ARRIVAL_KIND_ORDER,
+    SignalArrival, SignalArrivalKind,
 };
 pub use geometry::{
     FixedVec2, GeometryError, cell_coordinate, polyline_length, segment_length, validate_quantized,
@@ -56,6 +57,7 @@ pub use numeric::{
     NumericError, Revision, Tick, ceil_div_nonnegative, ceil_isqrt, floor_div,
     round_div_nearest_even,
 };
+pub use path_certificate::PathCertificateId;
 pub use profile::{
     BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile, DivisionProfile, GateFootprint,
     GateFootprintTable, GatePortTable, GeometryLengthProfile, NumericProfile,

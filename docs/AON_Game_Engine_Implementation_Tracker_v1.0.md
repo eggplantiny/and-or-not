@@ -14,7 +14,7 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 - [x] S0-M1 — Contract / Numeric / Identity
 - [x] S0-M2 — Command / Geometry / Structural Phase
 - [x] S0-M3 — Signal Topology / Event Runtime
-- [ ] S0-M4 — Topology Sync / Path Certificate
+- [x] S0-M4 — Topology Sync / Path Certificate
 - [ ] S0-M5 — Feedback / Replay
 - [ ] S0-M6 — Bevy ASCII Probe
 - [ ] S0-M7 — Mobility
@@ -183,19 +183,104 @@ executable evidence:
     `cargo tree -p aon-sim --edges all --prefix none --locked --offline` with no Bevy/winit/wgpu
     dependency in the canonical core.
 
-## Next implementation slice — S0-M4
+## Completed slice — S0-M4
 
-S0-M4 owns Route Diff, Driver Revision, TopologySyncArrival, Sink Slot revision comparison,
-PathCertificateArena, connection-generation validation, and stale-arrival rejection after an
-in-flight topology edit.
-
-Implementation authority: `docs/AON_S0_M4_Canonical_Decisions_v1.0.md`.
+S0-M4 implements Route Diff, Driver Revision, TopologySyncArrival, revision-aware Sink Slots,
+PathCertificateArena, stamped connection-generation validation, and stale-arrival rejection after
+an in-flight topology edit. Implementation authority:
+`docs/AON_S0_M4_Canonical_Decisions_v1.0.md`.
 
 - [x] Route identity, Revision, synchronization, Certificate, V3 encoder, and completion decisions
-  are versioned
-- [ ] Driver Revision and revision-aware Sink Slots are implemented
-- [ ] Added/Removed/Retained/Replaced Route Diff and TopologySync are implemented
-- [ ] PathCertificateArena allocation, canonical staging, consumption, and validation are
-  implemented
-- [ ] V3 canonical bytes/hash and invariants are fixed
-- [ ] C-18, C-19, destroy/rebuild invalidation, fuzz, and clean-checkout gates pass
+  are versioned.
+- [x] Driver Revision, revision-aware Sink Slots, four-way Route Diff, TopologySync, certified
+  staging/consumption, and V3 canonical bytes/hash are implemented.
+- [x] C-18, C-19, destroy/rebuild invalidation, deterministic topology fuzz, and retained-corpus
+  replica agreement have executable coverage.
+- [x] Final-workspace and fresh clean-checkout offline verification pass without warnings.
+
+The 21 completion gates have the following executable evidence.
+
+1. Revision no-op/change semantics: `crates/aon-sim/src/signal.rs`
+   (`driver_revision_advances_only_for_a_real_sample_change`) and
+   `crates/aon-sim/src/simulation.rs` (`driver_revision_overflow_rolls_back_event_and_certificate_frontiers`).
+2. Slot table, stored-r3 conflict plus r4, and permutation rollback:
+   `crates/aon-sim/src/signal.rs` (`slot_revision_table_is_applied_without_partial_mutation`) and
+   `crates/aon-sim/src/simulation.rs` (`stored_revision_conflict_is_fatal_even_with_a_higher_winner_and_permutations`).
+3. Four-way, generation-sensitive Route Diff and layout-order independence:
+   `crates/aon-sim/src/signal_topology.rs` (`compiled_route_ties_ignore_command_and_store_layout`,
+   `route_diff_is_four_way_pair_ordered_and_generation_sensitive`).
+4. Same-Tick sync N versus propagation N+1 winner:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`replaced_shorter_route_sync_and_same_tick_revision_win_preserve_c19`).
+5. Local zero-delay and positive physical sync delay:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`local_zero_sync_is_same_tick_while_c18_physical_sync_waits_exact_delay`) and
+   `crates/aon-sim/src/signal_topology.rs` (`physical_delay_is_positive_and_local_delay_is_selected_by_compiler`).
+6. C-18 passive-Low until exact new-route delay:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`local_zero_sync_is_same_tick_while_c18_physical_sync_waits_exact_delay`).
+7. C-19 old revision cannot revert a newer Slot:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`replaced_shorter_route_sync_and_same_tick_revision_win_preserve_c19`).
+8. Shorter replacement produces sync without changing the old arrival:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`replaced_shorter_route_sync_and_same_tick_revision_win_preserve_c19`).
+9. Removed Route deletes its Slot and resolves passive Low without an arrival:
+   `crates/aon-sim/tests/topology_sync.rs`
+   (`removing_a_route_deletes_its_slot_and_resolves_passive_low_without_an_arrival`,
+   `removing_an_in_flight_route_resolves_a_live_sink_even_before_its_slot_exists`).
+10. Remove, rebind, and bind-away/back invalidate stamped paths only:
+    `crates/aon-sim/tests/topology_sync.rs`
+    (`wire_remove_rebind_bind_away_back_and_rebuild_invalidate_old_certificates`,
+    `binding_another_incident_wire_advances_the_stamped_junction_and_invalidates_old_arrivals`).
+11. Identical-geometry rebuild with a new EntityId invalidates the old path:
+    `crates/aon-sim/tests/topology_sync.rs`
+    (`wire_remove_rebind_bind_away_back_and_rebuild_invalidate_old_certificates`).
+12. Unrelated edit retains a valid pending Certificate:
+    `crates/aon-sim/tests/topology_sync.rs`
+    (`unrelated_topology_edit_keeps_a_pending_certificate_valid`).
+13. Monotonic/tombstoned Certificate IDs and canonical candidate allocation:
+    `crates/aon-sim/src/path_certificate.rs` tests and
+    `crates/aon-sim/src/event.rs` (`candidate_permutations_produce_identical_calendars_and_arenas`).
+14. Exact empty, single-Wire, adjacent-Wire, and Junction sequences:
+    `crates/aon-sim/src/signal_topology.rs`
+    (`compiled_certificates_cover_empty_single_and_adjacent_gate_port_wires_exactly`).
+15. Pending-invalid is permitted while orphan, consumed, and duplicate ownership is fatal:
+    `crates/aon-sim/src/simulation.rs`
+    (`committed_validator_rejects_orphan_consumed_and_duplicate_certificates` and the committed
+    registry/store/calendar key-consistency regressions) plus `crates/aon-sim/tests/topology_sync.rs`
+    invalidation cases.
+16. Certificate/payload/Revision exhaustion and preflight failures roll back transactionally:
+    `crates/aon-sim/src/simulation.rs`
+    (`driver_revision_overflow_rolls_back_event_and_certificate_frontiers`,
+    `certificate_and_payload_exhaustion_roll_back_phase0_allocations`,
+    `topology_sync_due_tick_overflow_rolls_back_phase0_and_both_allocators`),
+    `crates/aon-sim/src/event.rs`, and `crates/aon-sim/src/path_certificate.rs` tests.
+17. V3 exact empty/populated bytes, sensitivity, tombstones, and raw-layout exclusions:
+    `crates/aon-sim/src/canonical.rs` Path Certificate tests,
+    `crates/aon-sim/tests/bootstrap_simulation.rs` (`s0m4_empty_state_v3_hash_has_a_golden_value`),
+    and `crates/aon-sim/tests/structural_lifecycle.rs` V3 golden tests.
+18. Certificate canonical sensitivity and observation/layout non-mutation:
+    `crates/aon-sim/src/canonical.rs`
+    (`path_certificate_fields_frontier_and_tombstones_are_hash_sensitive`,
+    `path_certificate_raw_ranges_orphan_bytes_and_capacity_are_not_canonical`),
+    `crates/aon-sim/tests/topology_sync.rs`
+    (`route_diagnostics_and_public_observations_do_not_mutate_state_hash`), and public replica
+    observations in `crates/aon-fuzz-harness/src/topology_runtime.rs`.
+19. Stateful in-flight topology fuzz reaches add/remove/rebind/rebuild, stale revision, invalid
+    generation, same-Tick sync/propagation, and checked boundaries:
+    `crates/aon-fuzz-harness/src/topology_runtime.rs` and retained cases in
+    `crates/aon-fuzz-harness/corpus/topology-runtime/`.
+20. Forward/reversed public streams and retained corpus have identical reports, observations, and
+    per-Tick hashes: `crates/aon-fuzz-harness/src/topology_runtime.rs` and
+    `crates/aon-fuzz-harness/tests/regression_corpus.rs`.
+21. Final-workspace and fresh clean-checkout proof uses `cargo fmt --all -- --check`,
+    `cargo metadata --format-version 1 --no-deps --locked --offline`,
+    `cargo check --workspace --all-targets --locked --offline`,
+    `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`,
+    `cargo test --workspace --locked --offline`, the canonical-core dependency boundary check,
+    and the same commands from a fresh clean checkout of the final commit.
+
+Passing these gates completes only S0-M4. **The next implementation slice is S0-M5 — Feedback /
+Replay**; S0-M5 and the remaining Stage 0 milestones are still mandatory before the Stage 0
+technical gate.

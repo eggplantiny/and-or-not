@@ -1,6 +1,7 @@
 use aon_fuzz_harness::{
-    SignalRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
-    exercise_signal_runtime, exercise_stateful_commands,
+    SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
+    exercise_decoder, exercise_geometry, exercise_signal_runtime, exercise_stateful_commands,
+    exercise_topology_runtime,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -74,6 +75,11 @@ const SIGNAL_RUNTIME_CORPUS: &[(&str, &[u8])] = &[
         include_bytes!("../corpus/signal-runtime/checked-arithmetic.case"),
     ),
 ];
+
+const TOPOLOGY_RUNTIME_COVERAGE: &[u8] =
+    include_bytes!("../corpus/topology-runtime/s0-m4-coverage.case");
+
+const TOPOLOGY_RUNTIME_CORPUS: &[(&str, &[u8])] = &[("s0-m4-coverage", TOPOLOGY_RUNTIME_COVERAGE)];
 
 #[test]
 fn decoder_regression_corpus_never_panics() {
@@ -247,4 +253,75 @@ fn retained_signal_case_reaches_s0_m3_fuzz_completion_paths() {
     assert!(coverage.wire_excitation_changes > 0);
     assert!(coverage.pending_gate_observations > 0);
     assert!(coverage.nonzero_wire_observations > 0);
+}
+
+#[test]
+fn topology_runtime_regression_corpus_replays_without_panics_or_silent_run_errors() {
+    for &(name, bytes) in TOPOLOGY_RUNTIME_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_topology_runtime(bytes)));
+        let Ok(observation) = result else {
+            panic!("topology-runtime regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.invariant_failure(),
+            None,
+            "topology-runtime regression case `{name}` violated a harness invariant"
+        );
+        assert_eq!(
+            observation.execution,
+            TopologyRuntimeExecutionObservation::Completed,
+            "topology-runtime regression case `{name}` did not complete"
+        );
+        assert_eq!(
+            observation.state_hashes.len(),
+            observation.generated_steps,
+            "topology-runtime regression case `{name}` skipped a per-Tick hash"
+        );
+        assert!(
+            observation.encodings.iter().all(|encoding| {
+                encoding.allocated_result.is_ok()
+                    && encoding.streamed_result.is_ok()
+                    && encoding.bytes_match
+            }),
+            "topology-runtime regression case `{name}` failed command encoding"
+        );
+    }
+}
+
+#[test]
+fn retained_topology_case_reaches_verified_s0_m4_paths() {
+    let observation = exercise_topology_runtime(TOPOLOGY_RUNTIME_COVERAGE);
+    assert_eq!(
+        observation.execution,
+        TopologyRuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(
+        observation.generated_scenarios,
+        TOPOLOGY_RUNTIME_COVERAGE.len()
+    );
+    assert_eq!(observation.state_hashes.len(), observation.generated_steps);
+
+    let coverage = observation.coverage;
+    assert_eq!(
+        coverage.completed_scenarios,
+        u64::try_from(observation.generated_scenarios).expect("bounded scenario count fits u64")
+    );
+    assert!(coverage.permuted_command_batches > 0);
+    assert!(coverage.routes_added > 0);
+    assert!(coverage.routes_removed > 0);
+    assert!(coverage.routes_retained > 0);
+    assert!(coverage.routes_replaced > 0);
+    assert!(coverage.topology_sync_arrivals_staged > 0);
+    assert!(coverage.stale_revision_arrivals > 0);
+    assert!(coverage.invalid_path_arrivals > 0);
+    assert!(coverage.add_revision_race_outcomes > 0);
+    assert!(coverage.remove_in_flight_outcomes > 0);
+    assert!(coverage.rebind_in_flight_outcomes > 0);
+    assert!(coverage.bind_away_back_outcomes > 0);
+    assert!(coverage.rebuild_outcomes > 0);
+    assert!(coverage.unrelated_edit_outcomes > 0);
+    assert!(coverage.removed_slot_outcomes > 0);
+    assert!(coverage.checked_max_sample_outcomes > 0);
+    assert!(coverage.slot_revision_observations > 0);
 }

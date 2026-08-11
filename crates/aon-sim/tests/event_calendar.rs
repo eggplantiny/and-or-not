@@ -1,8 +1,8 @@
 use aon_sim::{
     DRIVER_TRANSITION_KIND_ORDER, DriveStrength, DriverId, DriverSample, DriverTransition,
     DriverTransitionCause, EntityId, EventCalendar, EventCalendarError, EventKey,
-    EventPayloadAllocator, LogicLevel, Revision, SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival,
-    SignalArrivalKind, SinkId, Tick,
+    EventPayloadAllocator, LogicLevel, PathCertificateId, Revision, SIGNAL_ARRIVAL_KIND_ORDER,
+    SignalArrival, SignalArrivalKind, SinkId, Tick,
 };
 
 const fn driver(id: u64) -> DriverId {
@@ -84,7 +84,7 @@ fn event_key_order_uses_every_field_in_the_declared_order() {
 }
 
 #[test]
-fn canonical_tags_and_s0m3_reserved_fields_are_exact() {
+fn canonical_tags_and_s0m4_certificate_fields_are_exact() {
     assert_eq!(DRIVER_TRANSITION_KIND_ORDER, 0);
     assert_eq!(SIGNAL_ARRIVAL_KIND_ORDER, 1);
     assert_eq!(DriverTransitionCause::ExternalDriver.canonical_tag(), 0);
@@ -97,12 +97,13 @@ fn canonical_tags_and_s0m3_reserved_fields_are_exact() {
     assert_eq!(SignalArrivalKind::TopologySync.canonical_tag(), 1);
 
     let sample = DriverSample::s0m3(driver(7), LogicLevel::X, DriveStrength(23), Tick(9));
-    let arrival = SignalArrival::s0m3_propagation(Tick(12), driver(7), sink(4), sample);
+    let arrival =
+        SignalArrival::propagation(Tick(12), driver(7), sink(4), sample, PathCertificateId(1));
 
     assert_eq!(sample.revision, Revision(0));
     assert_eq!(arrival.key.revision, Revision(0));
     assert_eq!(arrival.key.kind_order, SIGNAL_ARRIVAL_KIND_ORDER);
-    assert_eq!(arrival.path_certificate, None);
+    assert_eq!(arrival.path_certificate, Some(PathCertificateId(1)));
     assert_eq!(arrival.kind, SignalArrivalKind::Propagation);
 }
 
@@ -231,11 +232,12 @@ fn one_allocator_is_shared_across_event_kinds_and_drained_ids_are_never_reused()
     signal_calendar
         .stage(
             &mut allocator,
-            [SignalArrival::s0m3_propagation(
+            [SignalArrival::propagation(
                 Tick(3),
                 driver(1),
                 sink(1),
                 sample,
+                PathCertificateId(1),
             )],
         )
         .expect("arrival stages");
