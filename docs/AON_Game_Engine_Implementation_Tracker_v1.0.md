@@ -11,7 +11,7 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 ## Stage 0 — Emergence Probe
 
 - [x] S0-M0 — Bootstrap
-- [ ] S0-M1 — Contract / Numeric / Identity
+- [x] S0-M1 — Contract / Numeric / Identity
 - [ ] S0-M2 — Command / Geometry / Structural Phase
 - [ ] S0-M3 — Signal Topology / Event Runtime
 - [ ] S0-M4 — Topology Sync / Path Certificate
@@ -79,16 +79,29 @@ repeat it in a Stage DoD list.
 - [ ] Native probe UX and the MVP scenario pass manual runtime verification
 - [ ] Clean checkout CI passes without warnings
 
-## Current implementation slice
+## Completed slice — S0-M1
 
-S0-M1 is in progress. Its acceptance evidence is:
+S0-M1 completed on 2026-08-11 at commit `4a0d02c`. Its acceptance evidence is:
 
-- [ ] `SimulationContract` validates all three canonical profile hashes
-- [ ] Numeric v1 and Stage 0 physical/balance profile artifacts load and validate
-- [ ] Same semantic profile content produces the same hash regardless of JSON formatting or ID
-- [ ] `floor_div`, `ceil_div_nonnegative`, and ties-to-even division pass edge cases
-- [ ] `ceil_isqrt`, segment/polyline length, cell coordinate, and quantization pass C-17
-- [ ] Stable `EntityId` allocation is monotonic and never reuses a destroyed ID
-- [ ] `ConnectionGeneration` increments with checked overflow
-- [ ] Canonical state encoding includes contract, Tick, topology revision, and identity state
-- [ ] All workspace and clean-checkout quality gates pass
+- [x] `SimulationContract` validates all three canonical profile hashes
+- [x] Numeric v1 and Stage 0 physical/balance profile artifacts load and validate
+- [x] Same semantic profile content produces the same hash regardless of JSON formatting or ID
+- [x] `floor_div`, `ceil_div_nonnegative`, and ties-to-even division pass edge/property cases
+- [x] `ceil_isqrt`, segment/polyline length, cell coordinate, and quantization pass C-17
+- [x] Stable `EntityId` allocation is monotonic and never reuses a destroyed ID
+- [x] `ConnectionGeneration` increments with checked overflow
+- [x] Canonical state encoding includes contract, Tick, topology revision, and identity state
+- [x] Decoder/geometry fuzz harness replays its retained regression corpus without panic
+- [x] All workspace and clean-checkout quality gates pass offline without warnings
+
+## Current implementation slice — S0-M2
+
+- [ ] Command payload, port/node identity, created-ID return, duplicate ordinal, placement, and
+  geometry boundary decisions are versioned
+- [ ] `CommandEnvelope` and Stage 0 structural command types replace the placeholder
+- [ ] Gate, Wire, Junction, and Substrate canonical stores are implemented
+- [ ] Phase 0 validates commands in ordinal order without partial mutation
+- [ ] Geometry quantum, routing pitch, overlap, crossing, support, and endpoint rules are enforced
+- [ ] Accepted structural changes update connection generations and topology revision
+- [ ] Rejections are deterministic results rather than run-stopping errors
+- [ ] C-20, invalid-geometry no-panic, permutation, hash, and clean-checkout gates pass

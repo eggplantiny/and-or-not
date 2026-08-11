@@ -2,7 +2,10 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**Engine Bootstrap (`S0-M0`)은 완료됐고 `S0-M1 — Contract / Numeric / Identity`를 구현 중이다.** Gate, Wire, Signal 같은 gameplay semantics는 아직 구현하지 않는다. 전체 엔진 완료 현황은 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
+**`S0-M0 — Bootstrap`과 `S0-M1 — Contract / Numeric / Identity`는 완료됐고,
+`S0-M2 — Command / Geometry / Structural Phase`를 구현 중이다.** Gate/Wire의 signal
+semantics는 아직 구현하지 않는다. 전체 엔진 완료 현황은
+`docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline
 
