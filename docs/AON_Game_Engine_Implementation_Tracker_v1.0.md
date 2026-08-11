@@ -346,9 +346,9 @@ The 18 completion gates have the following executable evidence.
     (`replay_report_and_public_observation_reads_do_not_mutate_simulation`).
 18. Final-workspace metadata, format, all-target check, workspace strict Clippy, workspace tests,
     canonical-core dependency boundary, and repository-zone checks pass offline; the independent
-    audit reports P0/P1 findings 0 and the trace-length overflow P2 is fixed. The final-commit fresh
-    clean-checkout rerun is executed after the completion commit is created and recorded on this
-    evidence line.
+    audit reports P0/P1 findings 0 and the trace-length overflow P2 is fixed. Fresh clone commit
+    `d45af47` passed the same offline gates; its 100,001-state Headless/Bevy comparison completed in
+    207.96 seconds.
 
 Passing these gates completes only S0-M5. **The next implementation slice is S0-M6 — Bevy ASCII
 Probe**; S0-M7, both Stage 0 gates, Stages 1–2, and the MVP remain mandatory before the game engine

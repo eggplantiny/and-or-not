@@ -5,7 +5,8 @@ A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어
 **`S0-M0 — Bootstrap`부터 `S0-M5 — Feedback / Replay`까지 완료됐다.** S0-M5는 C-05/C-06과
 명시적 Set/Reset 피드백 회로, Replay format v1, strict decoder/encoder, Headless/Bevy Replay,
 retained bounded feedback 및 100,000-Tick 전체 cross-host trace, Replay decoder fuzz corpus를
-포함한다. 최종 workspace 품질·의존성·zone gate와 독립 감사를 통과했다. 다음 구현 경계는
+포함한다. 최종 workspace 품질·의존성·zone gate와 독립 감사를 통과했고, commit `d45af47`의
+fresh clean-checkout에서도 전체 offline gate를 재현했다. 다음 구현 경계는
 `S0-M6 — Bevy ASCII Probe`다. Stage 0과 전체 엔진은 아직 완료되지 않았으며 현황은
 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
