@@ -14,10 +14,18 @@ rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-bevy = { version = "=0.19.0", default-features = false, features = ["default_app", "bevy_winit", "x11"] }
+bevy = { version = "=0.19.0", default-features = false, features = [
+    "bevy_core_pipeline",
+    "bevy_render",
+    "bevy_ui_render",
+    "bevy_winit",
+    "default_app",
+    "x11",
+] }
 blake3 = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+skrifa = "=0.44.0"
 thiserror = "2.0"
 
 [workspace.lints.rust]

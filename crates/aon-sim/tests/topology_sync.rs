@@ -58,6 +58,23 @@ fn step_commands(simulation: &mut Simulation, commands: Vec<(u64, Command)>) -> 
     report
 }
 
+fn assert_raw_due_arrivals_are_fully_observable(report: &StepReport) {
+    let counters = report.signal_counters;
+    let accounted = counters.signal_arrivals_applied
+        + counters.invalid_path_arrivals
+        + counters.stale_revision_arrivals
+        + counters.idempotent_signal_arrivals;
+    assert_eq!(
+        u64::try_from(report.signal_arrivals.len()).expect("observation count fits u64"),
+        accounted,
+        "every applied, invalid, stale, or idempotent raw arrival remains observable"
+    );
+    assert!(report.signal_arrivals.iter().all(|arrival| {
+        arrival.due_tick == report.completed_tick
+            && arrival.source_driver == arrival.sample.driver_id
+    }));
+}
+
 fn expect_created(simulation: &mut Simulation, command: Command) -> EntityId {
     let report = step_commands(simulation, vec![(0, command)]);
     assert_eq!(report.command_acceptances.len(), 1);
@@ -476,6 +493,7 @@ fn replaced_shorter_route_sync_and_same_tick_revision_win_preserve_c19() {
     assert_eq!(revision_four.completed_tick, short_due);
     assert_eq!(revision_four.signal_counters.stale_revision_arrivals, 1);
     assert_eq!(revision_four.signal_counters.invalid_path_arrivals, 0);
+    assert_raw_due_arrivals_are_fully_observable(&revision_four);
     let winning = simulation
         .sink_driver_sample(
             downstream_ports.input_a.sink,
@@ -492,6 +510,7 @@ fn replaced_shorter_route_sync_and_same_tick_revision_win_preserve_c19() {
     assert_eq!(old_arrival.signal_counters.invalid_path_arrivals, 0);
     assert_eq!(old_arrival.signal_counters.idempotent_signal_arrivals, 1);
     assert_eq!(old_arrival.signal_counters.signal_arrivals_applied, 0);
+    assert_raw_due_arrivals_are_fully_observable(&old_arrival);
     let after_old_revision_three = simulation
         .sink_driver_sample(
             downstream_ports.input_a.sink,
@@ -593,6 +612,7 @@ fn removing_an_in_flight_route_resolves_a_live_sink_even_before_its_slot_exists(
     let invalidated = advance_to_due(&mut simulation, Tick(attach_tick.0 + DIRECT_ROUTE_DELAY));
     assert_eq!(invalidated.signal_counters.invalid_path_arrivals, 1);
     assert_eq!(invalidated.signal_counters.signal_arrivals_applied, 0);
+    assert_raw_due_arrivals_are_fully_observable(&invalidated);
 }
 
 enum WireMutation {
@@ -707,6 +727,7 @@ fn assert_wire_mutation_invalidates_pending_arrival(mutation: WireMutation) {
     let invalid = advance_to_due(&mut fixture.simulation, old_due);
     assert_eq!(invalid.signal_counters.invalid_path_arrivals, 1);
     assert_eq!(invalid.signal_counters.signal_arrivals_applied, 0);
+    assert_raw_due_arrivals_are_fully_observable(&invalid);
 }
 
 #[test]
@@ -785,6 +806,7 @@ fn removing_a_stamped_junction_invalidates_the_pending_arrival() {
     let invalid = advance_to_due(&mut simulation, old_due);
     assert_eq!(invalid.signal_counters.invalid_path_arrivals, 1);
     assert_eq!(invalid.signal_counters.signal_arrivals_applied, 0);
+    assert_raw_due_arrivals_are_fully_observable(&invalid);
 }
 
 #[test]
@@ -867,6 +889,7 @@ fn binding_another_incident_wire_advances_the_stamped_junction_and_invalidates_o
 
     let invalid = advance_to_due(&mut simulation, old_due);
     assert_eq!(invalid.signal_counters.invalid_path_arrivals, 1);
+    assert_raw_due_arrivals_are_fully_observable(&invalid);
 }
 
 #[test]

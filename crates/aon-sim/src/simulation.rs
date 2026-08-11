@@ -16,6 +16,7 @@ use crate::signal::{
 use crate::signal_topology::{
     CompiledSignalTopology, RouteDiff, SignalTopologyError, switch_energy,
 };
+use crate::snapshot::{RenderSnapshotSource, SignalProbeSample, SignalProbeTarget, sample_signal};
 use crate::structural::{StructuralError, StructuralWorld};
 use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
@@ -88,6 +89,15 @@ impl SimulationPackage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignalArrivalObservation {
+    pub due_tick: Tick,
+    pub source_driver: DriverId,
+    pub sink: SinkId,
+    pub sample: DriverSample,
+    pub kind: SignalArrivalKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StepReport {
     pub completed_tick: Tick,
     pub next_tick: Tick,
@@ -97,6 +107,7 @@ pub struct StepReport {
     pub topology_changed: bool,
     pub driver_changes: Vec<DriverChangeRecord>,
     pub signal_changes: Vec<SignalChangeRecord>,
+    pub signal_arrivals: Vec<SignalArrivalObservation>,
     pub signal_counters: SignalStepCounters,
 }
 
@@ -215,7 +226,7 @@ impl Simulation {
             &phase.external_driver_updates,
             completed_tick,
         )?;
-        let (driver_changes, signal_changes) = run_phase2(
+        let phase2 = run_phase2(
             &mut candidate,
             &topology,
             completed_tick,
@@ -242,19 +253,33 @@ impl Simulation {
             command_acceptances: phase.acceptances,
             command_rejections: phase.rejections,
             topology_changed: phase.topology_changed,
-            driver_changes,
-            signal_changes,
+            driver_changes: phase2.driver_changes,
+            signal_changes: phase2.signal_changes,
+            signal_arrivals: phase2.signal_arrivals,
             signal_counters,
         })
     }
 
     pub fn write_render_snapshot(&self, output: &mut RenderSnapshot) {
-        output.write(
-            &self.scenario_id,
+        output.write(RenderSnapshotSource {
+            scenario_id: &self.scenario_id,
+            next_tick: self.canonical.next_tick,
+            topology_revision: self.canonical.topology_revision,
+            contract: self.canonical.contract,
+            state_hash: self.state_hash(),
+            structural: &self.canonical.structural,
+            signal: &self.canonical.signal,
+            logic_threshold: self.profiles.balance.logic_threshold,
+        });
+    }
+
+    pub fn signal_probe(&self, target: SignalProbeTarget) -> Option<SignalProbeSample> {
+        sample_signal(
+            &self.canonical.signal,
+            self.profiles.balance.logic_threshold,
             self.canonical.next_tick,
-            self.canonical.structural.live_primitive_count(),
-            self.state_hash(),
-        );
+            target,
+        )
     }
 
     pub fn state_hash(&self) -> StateHash {
@@ -905,13 +930,19 @@ struct ValidDriverTransition {
     clear_pending_gate: Option<GateId>,
 }
 
+struct Phase2Report {
+    driver_changes: Vec<DriverChangeRecord>,
+    signal_changes: Vec<SignalChangeRecord>,
+    signal_arrivals: Vec<SignalArrivalObservation>,
+}
+
 fn run_phase2(
     world: &mut CanonicalWorld,
     topology: &CompiledSignalTopology,
     tick: Tick,
     logic_threshold: u64,
     counters: &mut SignalStepCounters,
-) -> Result<(Vec<DriverChangeRecord>, Vec<SignalChangeRecord>), SimulationError> {
+) -> Result<Phase2Report, SimulationError> {
     let due_drivers = world.driver_events.drain_due(tick)?;
     let mut valid = BTreeMap::<DriverId, ValidDriverTransition>::new();
     for event in due_drivers {
@@ -974,13 +1005,27 @@ fn run_phase2(
     )?;
 
     let due_arrivals = world.signal_events.drain_due(tick)?;
+    let signal_arrivals = due_arrivals
+        .iter()
+        .map(|arrival| SignalArrivalObservation {
+            due_tick: arrival.key.due_tick,
+            source_driver: arrival.source_driver,
+            sink: arrival.sink,
+            sample: arrival.sample,
+            kind: arrival.kind,
+        })
+        .collect();
     apply_due_signal_arrivals(world, due_arrivals, counters)?;
     let (signal_changes, sinks_resolved) = world.signal.resolve_dirty(logic_threshold)?;
     counters.sinks_resolved = sinks_resolved;
     let excitations = topology.wire_excitations(&world.signal)?;
     world.signal.set_wire_excitations(&excitations)?;
 
-    Ok((driver_changes, signal_changes))
+    Ok(Phase2Report {
+        driver_changes,
+        signal_changes,
+        signal_arrivals,
+    })
 }
 
 #[derive(Clone, Copy)]

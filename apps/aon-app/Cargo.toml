@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 aon-sim = { path = "../../crates/aon-sim" }
 bevy.workspace = true
+skrifa.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

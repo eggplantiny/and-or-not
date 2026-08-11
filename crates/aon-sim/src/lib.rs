@@ -78,8 +78,11 @@ pub use signal::{
     DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,
     GateSignalSnapshot, SignalChangeRecord, SignalStepCounters, SinkRole, WireSignalSnapshot,
 };
-pub use simulation::{Simulation, SimulationPackage, StepReport};
-pub use snapshot::RenderSnapshot;
+pub use simulation::{SignalArrivalObservation, Simulation, SimulationPackage, StepReport};
+pub use snapshot::{
+    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, RenderSnapshot,
+    SignalProbeSample, SignalProbeTarget, SignalProbeValue, WireRenderRecord,
+};
 pub use topology::{
     EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,
 };

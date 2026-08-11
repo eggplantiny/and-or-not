@@ -1,8 +1,19 @@
 #![forbid(unsafe_code)]
 
+pub mod cell_buffer;
+pub mod editor;
+pub mod host_action;
+pub mod inspector;
+pub mod laboratory;
+pub mod native_laboratory;
+pub mod native_probe;
+pub mod pacing;
+pub mod presenter;
+pub mod probe;
+
 use aon_sim::{
-    ArtifactBytes, CommandEnvelope, PackageError, RenderSnapshot, Replay, ReplayError, Simulation,
-    SimulationError, SimulationPackage, StateHash, Tick, decode_package,
+    ArtifactBytes, CommandEnvelope, PackageError, PhysicalScaleProfile, RenderSnapshot, Replay,
+    ReplayError, Simulation, SimulationError, SimulationPackage, StateHash, Tick, decode_package,
 };
 use bevy::prelude::*;
 use bevy::time::{TimeUpdateStrategy, Virtual};
@@ -37,6 +48,12 @@ pub enum HostError {
 
     #[error(transparent)]
     Replay(#[from] ReplayError),
+
+    #[error(transparent)]
+    NativeProbe(#[from] native_probe::NativeProbeError),
+
+    #[error(transparent)]
+    Laboratory(#[from] laboratory::LaboratoryError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +111,12 @@ struct HostTraceResource {
 #[derive(Resource)]
 struct ReplayCommandSchedule {
     replay: Replay,
+}
+
+#[derive(Resource)]
+struct NativePresentationConfig {
+    physical: PhysicalScaleProfile,
+    viewport: presenter::Viewport,
 }
 
 #[derive(Resource, Default)]
@@ -285,8 +308,9 @@ pub fn run_paced_replay_host_harness(
 
 pub fn run_native() -> Result<(), HostError> {
     let package = embedded_empty_package()?;
-    let simulation = Simulation::new(package)?;
-    let simulation_hz = simulation.profiles().balance().simulation_hz;
+    let simulation_hz = package.profiles().balance().simulation_hz;
+    let physical = package.profiles().physical_scale.clone();
+    let laboratory = laboratory::LaboratorySession::new(package)?;
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -297,7 +321,13 @@ pub fn run_native() -> Result<(), HostError> {
         ..default()
     }));
     configure_host_pacing(&mut app, simulation_hz);
-    install_simulation(&mut app, simulation, HostRunMode::Running, true);
+    native_laboratory::install_native_laboratory(&mut app, laboratory);
+    app.insert_resource(NativePresentationConfig {
+        physical,
+        viewport: presenter::Viewport::new(cell_buffer::CellPoint::new(-30, -12), 61, 25),
+    });
+    native_probe::install_native_probe_renderer(&mut app)?;
+    app.add_systems(Update, update_native_probe_document);
     app.run();
     Ok(())
 }
@@ -423,6 +453,125 @@ fn present_empty_world_title(
         latest.snapshot.next_tick(),
         &hash[..12]
     );
+}
+
+fn update_native_probe_document(
+    laboratory: Res<native_laboratory::NativeLaboratory>,
+    native_status: Res<native_laboratory::NativeLaboratoryStatus>,
+    config: Res<NativePresentationConfig>,
+    mut document: ResMut<native_probe::NativeProbeDocument>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    let session = laboratory.session();
+    let snapshot = session.latest_snapshot();
+    let mode = if session.is_faulted() || native_status.execution_error().is_some() {
+        "FAULTED"
+    } else {
+        match session.pacer().mode() {
+            pacing::HostRunMode::Paused => "PAUSED",
+            pacing::HostRunMode::Running => "RUNNING",
+        }
+    };
+    let rate = match session.pacer().rate() {
+        pacing::HostRate::Quarter => "1/4x",
+        pacing::HostRate::One => "1x",
+        pacing::HostRate::Four => "4x",
+    };
+    let hash = snapshot.state_hash().to_string();
+    let view = match session.view() {
+        presenter::ViewMode::Network => "Network".to_owned(),
+        presenter::ViewMode::Circuit { substrate } => format!("Circuit({})", substrate.0),
+    };
+    let status = cell_buffer::TextPanel::new(
+        "A/O/N Laboratory",
+        [
+            format!("scenario={}", snapshot.scenario_id()),
+            format!(
+                "nextTick={} topologyRevision={}",
+                snapshot.next_tick().0,
+                snapshot.topology_revision().0
+            ),
+            format!(
+                "state={mode} rate={rate} primitives={}",
+                snapshot.primitive_count()
+            ),
+            format!("hash={}", &hash[..16]),
+            format!("view={view}  controls: Space pause/resume  . step  1/2/3 rate  R reset"),
+            format!(
+                "lastPulseSteps={} actionRejections={} error={}",
+                native_status.steps_in_last_pulse(),
+                native_status.action_rejections().len(),
+                native_status.execution_error().unwrap_or("-")
+            ),
+        ],
+    );
+    let waveform = session.probes().waveform_panel(32);
+    let inspector_host_state = if session.is_faulted() || native_status.execution_error().is_some()
+    {
+        inspector::InspectorHostState::Faulted
+    } else {
+        match session.pacer().mode() {
+            pacing::HostRunMode::Paused => inspector::InspectorHostState::Paused,
+            pacing::HostRunMode::Running => inspector::InspectorHostState::Running,
+        }
+    };
+    let inspector_rate = match session.pacer().rate() {
+        pacing::HostRate::Quarter => inspector::InspectorRate::Quarter,
+        pacing::HostRate::One => inspector::InspectorRate::One,
+        pacing::HostRate::Four => inspector::InspectorRate::Four,
+    };
+    let selection = session
+        .selection()
+        .map(|target| inspector::InspectorSelection {
+            target: match target {
+                presenter::PickTarget::Entity(entity) => inspector::InspectorTarget::Entity(entity),
+                presenter::PickTarget::GatePort(port) => inspector::InspectorTarget::GatePort(port),
+                presenter::PickTarget::WireEnd { wire, end } => {
+                    inspector::InspectorTarget::WireEnd { wire, end }
+                }
+            },
+            latest_command: None,
+        });
+    let selected_arrival = session.reports().iter().rev().find_map(|report| {
+        (!report.signal_arrivals.is_empty()).then_some(inspector::ArrivalSelection {
+            completed_tick: report.completed_tick,
+            observation_index: 0,
+        })
+    });
+    let inspector = inspector::inspector_panel(inspector::InspectorInput {
+        snapshot,
+        retained_reports: session.reports(),
+        host_state: inspector_host_state,
+        rate: inspector_rate,
+        selection,
+        selected_arrival,
+    });
+
+    match presenter::project_snapshot(snapshot, &config.physical, session.view(), config.viewport) {
+        Ok(presentation) => document.replace_cell_buffer_with_panels(
+            &format!("{view} View"),
+            presentation.buffer(),
+            &[status, waveform, inspector],
+            2,
+        ),
+        Err(error) => document.replace(cell_buffer::compose_panels(
+            &[
+                cell_buffer::TextPanel::new(format!("{view} View"), [format!("error: {error}")]),
+                status,
+                waveform,
+                inspector,
+            ],
+            2,
+        )),
+    }
+
+    if let Ok(mut window) = windows.single_mut() {
+        window.title = format!(
+            "A/O/N Laboratory — {mode} {rate} | tick {} | hash {}",
+            snapshot.next_tick(),
+            &hash[..12]
+        );
+    }
 }
 
 fn run_presentation_updates(app: &mut App, count: u32) {
