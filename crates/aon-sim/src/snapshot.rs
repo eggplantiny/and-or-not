@@ -25,16 +25,17 @@ impl RenderSnapshot {
         self.state_hash
     }
 
-    pub(crate) fn write_empty(
+    pub(crate) fn write(
         &mut self,
         scenario_id: &str,
         next_tick: Tick,
+        primitive_count: u64,
         state_hash: StateHash,
     ) {
         self.scenario_id.clear();
         self.scenario_id.push_str(scenario_id);
         self.next_tick = next_tick;
-        self.primitive_count = 0;
+        self.primitive_count = primitive_count;
         self.state_hash = state_hash;
     }
 }

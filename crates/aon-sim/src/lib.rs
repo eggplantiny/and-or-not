@@ -2,6 +2,7 @@
 
 mod artifact;
 mod canonical;
+mod command;
 mod contract;
 mod error;
 mod geometry;
@@ -11,10 +12,19 @@ mod numeric;
 mod profile;
 mod simulation;
 mod snapshot;
+mod structural;
+mod structural_geometry;
+mod topology;
 
 pub use artifact::{
     ArtifactBytes, ArtifactKind, InitialWorld, ProfileKind, ProfileReference, ProfileReferences,
     ScenarioManifest, StageFeatureSet, decode_package, decode_scenario_manifest,
+};
+pub use command::{
+    BindPortCommand, Command, CommandAcceptance, CommandEncodingError, CommandEnvelope,
+    CommandRejection, CommandRejectionReason, LogicLevel, PlaceFixedSubstrateCommand,
+    PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
+    RemoveEntityCommand, SetExternalDriverCommand,
 };
 pub use contract::{
     ContractValidationError, HASH_ALGORITHM_ID_BLAKE3_V1, HashAlgorithmId, SEMANTICS_VERSION_V1,
@@ -46,5 +56,8 @@ pub use profile::{
     REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH,
     RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
 };
-pub use simulation::{CommandEnvelope, Simulation, SimulationPackage, StepReport};
+pub use simulation::{Simulation, SimulationPackage, StepReport};
 pub use snapshot::RenderSnapshot;
+pub use topology::{
+    EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,
+};

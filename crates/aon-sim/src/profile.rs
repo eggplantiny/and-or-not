@@ -687,6 +687,14 @@ pub enum ProfileValidationError {
     #[error("physical-scale profile anchor `{field}` lies outside its gate footprint")]
     AnchorOutsideFootprint { field: String },
 
+    #[error("physical-scale profile anchor `{field}` does not lie on its gate footprint boundary")]
+    AnchorNotOnFootprintBoundary { field: String },
+
+    #[error(
+        "physical-scale profile gate footprint `{field}` cannot be centered on the geometry quantum"
+    )]
+    GateFootprintNotCenterable { field: String },
+
     #[error("rational denominator must not be zero")]
     ZeroRationalDenominator,
 
@@ -765,7 +773,20 @@ fn validate_footprint(
         });
     }
     require_quantized(format!("{field}.width"), footprint.width.0, quantum)?;
-    require_quantized(format!("{field}.height"), footprint.height.0, quantum)
+    require_quantized(format!("{field}.height"), footprint.height.0, quantum)?;
+    let Some(centered_quantum) = quantum.checked_mul(2) else {
+        return Err(ProfileValidationError::GateFootprintNotCenterable {
+            field: field.to_owned(),
+        });
+    };
+    if footprint.width.0.rem_euclid(centered_quantum) != 0
+        || footprint.height.0.rem_euclid(centered_quantum) != 0
+    {
+        return Err(ProfileValidationError::GateFootprintNotCenterable {
+            field: field.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_anchor(
@@ -777,13 +798,17 @@ fn validate_anchor(
     let field = field.into();
     require_quantized(format!("{field}.x"), anchor.x.0, quantum)?;
     require_quantized(format!("{field}.y"), anchor.y.0, quantum)?;
-    if i128::from(anchor.x.0).unsigned_abs() > (i128::from(footprint.width.0) / 2) as u128
-        || i128::from(anchor.y.0).unsigned_abs() > (i128::from(footprint.height.0) / 2) as u128
-    {
-        Err(ProfileValidationError::AnchorOutsideFootprint { field })
-    } else {
-        Ok(())
+    let x = i128::from(anchor.x.0).abs();
+    let y = i128::from(anchor.y.0).abs();
+    let half_width = i128::from(footprint.width.0) / 2;
+    let half_height = i128::from(footprint.height.0) / 2;
+    if x > half_width || y > half_height {
+        return Err(ProfileValidationError::AnchorOutsideFootprint { field });
     }
+    if x != half_width && y != half_height {
+        return Err(ProfileValidationError::AnchorNotOnFootprintBoundary { field });
+    }
+    Ok(())
 }
 
 fn validate_binary_anchors(
@@ -1172,11 +1197,33 @@ mod tests {
             Err(ProfileValidationError::NotQuantized { .. })
         ));
 
+        let mut uncentered = PhysicalScaleProfile::stage0_alpha("physical");
+        uncentered.gate_footprints.and_gate.width = uncentered
+            .gate_footprints
+            .and_gate
+            .width
+            .checked_add(uncentered.wire_geometry_quantum)
+            .expect("test extent remains in range");
+        assert!(matches!(
+            uncentered.validate(),
+            Err(ProfileValidationError::GateFootprintNotCenterable { .. })
+        ));
+
         let mut out_of_bounds = PhysicalScaleProfile::stage0_alpha("physical");
         out_of_bounds.gate_port_anchors.and_gate.input_a.x = Fixed(32_768);
         assert!(matches!(
             out_of_bounds.validate(),
             Err(ProfileValidationError::AnchorOutsideFootprint { .. })
+        ));
+
+        let mut inside_footprint = PhysicalScaleProfile::stage0_alpha("physical");
+        inside_footprint.gate_port_anchors.and_gate.input_a = PortAnchor {
+            x: Fixed(0),
+            y: Fixed(0),
+        };
+        assert!(matches!(
+            inside_footprint.validate(),
+            Err(ProfileValidationError::AnchorNotOnFootprintBoundary { .. })
         ));
 
         let mut balance = BalanceProfile::stage0_alpha("balance");

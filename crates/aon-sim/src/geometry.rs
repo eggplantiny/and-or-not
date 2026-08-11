@@ -88,9 +88,39 @@ fn same_direction_collinear(start: FixedVec2, middle: FixedVec2, end: FixedVec2)
 fn signed_products_equal(left_a: i128, left_b: i128, right_a: i128, right_b: i128) -> bool {
     let left_sign = left_a.signum() * left_b.signum();
     let right_sign = right_a.signum() * right_b.signum();
-    left_sign == right_sign
-        && left_a.unsigned_abs() * left_b.unsigned_abs()
-            == right_a.unsigned_abs() * right_b.unsigned_abs()
+    if left_sign != right_sign {
+        return false;
+    }
+
+    products_equal_without_overflow(
+        left_a.unsigned_abs(),
+        left_b.unsigned_abs(),
+        right_a.unsigned_abs(),
+        right_b.unsigned_abs(),
+    )
+}
+
+fn products_equal_without_overflow(mut a: u128, b: u128, mut c: u128, d: u128) -> bool {
+    if a == 0 || b == 0 || c == 0 || d == 0 {
+        return (a == 0 || b == 0) && (c == 0 || d == 0);
+    }
+
+    // Cancel the common part of a/c. The remaining values are coprime, so equality requires
+    // c to divide b and a to divide d. Comparing the two exact quotients avoids a 256-bit
+    // intermediate while preserving the full i128-delta input range.
+    let common = gcd_u128(a, c);
+    a /= common;
+    c /= common;
+    b.is_multiple_of(c) && d.is_multiple_of(a) && b / c == d / a
+}
+
+const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }
 
 const fn directions_are_compatible(first: i128, second: i128) -> bool {

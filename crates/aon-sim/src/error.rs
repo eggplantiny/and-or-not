@@ -91,6 +91,9 @@ pub enum SimulationError {
     #[error("canonical numeric divisor must be positive")]
     InvalidNumericDivisor,
 
+    #[error("canonical structural invariant violated")]
+    InvalidCanonicalState,
+
     #[error("invalid simulation profile: {error}")]
     InvalidProfile { error: ProfileValidationError },
 
@@ -109,9 +112,6 @@ pub enum SimulationError {
 
     #[error("stage feature `{feature}` is not implemented by this engine build")]
     UnsupportedStageFeature { feature: &'static str },
-
-    #[error("S0-M1 simulation accepts only an empty command batch")]
-    CommandsUnsupported,
 }
 
 impl From<NumericError> for SimulationError {

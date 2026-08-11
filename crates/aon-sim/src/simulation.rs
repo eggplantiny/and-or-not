@@ -1,8 +1,9 @@
 use crate::contract::{ContractValidationError, SimulationContract};
 use crate::profile::{ProfileBundle, ProfileValidationError};
+use crate::structural::{StructuralError, StructuralWorld};
 use crate::{
-    EntityRegistry, InitialWorld, RenderSnapshot, Revision, ScenarioManifest, SimulationError,
-    StageFeatureSet, StateHash, Tick, canonical,
+    CommandAcceptance, CommandEnvelope, CommandRejection, InitialWorld, RenderSnapshot, Revision,
+    ScenarioManifest, SimulationError, StageFeatureSet, StateHash, Tick, canonical,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,23 +70,20 @@ impl SimulationPackage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CommandEnvelope {
-    _s0_private: (),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StepReport {
     pub completed_tick: Tick,
     pub next_tick: Tick,
     pub state_hash: StateHash,
+    pub command_acceptances: Vec<CommandAcceptance>,
+    pub command_rejections: Vec<CommandRejection>,
+    pub topology_changed: bool,
 }
 
 struct CanonicalWorld {
     next_tick: Tick,
     topology_revision: Revision,
     contract: SimulationContract,
-    entities: EntityRegistry,
+    structural: StructuralWorld,
 }
 
 pub struct Simulation {
@@ -106,8 +104,8 @@ impl Simulation {
             .validate_profiles(&package.profiles)
             .map_err(SimulationError::from)?;
 
-        let entities = match package.initial_world {
-            InitialWorld::Empty => EntityRegistry::new(),
+        let structural = match package.initial_world {
+            InitialWorld::Empty => StructuralWorld::new(),
         };
 
         Ok(Self {
@@ -116,32 +114,44 @@ impl Simulation {
                 next_tick: Tick(0),
                 topology_revision: Revision(0),
                 contract: package.contract,
-                entities,
+                structural,
             },
             profiles: package.profiles,
         })
     }
 
     pub fn step(&mut self, commands: &[CommandEnvelope]) -> Result<StepReport, SimulationError> {
-        if !commands.is_empty() {
-            return Err(SimulationError::CommandsUnsupported);
-        }
-
         let completed_tick = self.canonical.next_tick;
-        self.canonical.next_tick = completed_tick.checked_add(Tick(1))?;
+        let next_tick = completed_tick.checked_add(Tick(1))?;
+        let mut structural = self.canonical.structural.clone();
+        let phase =
+            structural.apply_phase0(completed_tick, commands, &self.profiles.physical_scale)?;
+        let topology_revision = if phase.topology_changed {
+            self.canonical.topology_revision.checked_add(Revision(1))?
+        } else {
+            self.canonical.topology_revision
+        };
+
+        self.canonical.structural = structural;
+        self.canonical.topology_revision = topology_revision;
+        self.canonical.next_tick = next_tick;
         let state_hash = self.state_hash();
 
         Ok(StepReport {
             completed_tick,
-            next_tick: self.canonical.next_tick,
+            next_tick,
             state_hash,
+            command_acceptances: phase.acceptances,
+            command_rejections: phase.rejections,
+            topology_changed: phase.topology_changed,
         })
     }
 
     pub fn write_render_snapshot(&self, output: &mut RenderSnapshot) {
-        output.write_empty(
+        output.write(
             &self.scenario_id,
             self.canonical.next_tick,
+            self.canonical.structural.live_primitive_count(),
             self.state_hash(),
         );
     }
@@ -151,7 +161,7 @@ impl Simulation {
             &self.canonical.contract,
             self.canonical.next_tick,
             self.canonical.topology_revision,
-            &self.canonical.entities,
+            &self.canonical.structural,
         )
     }
 
@@ -179,6 +189,15 @@ impl Simulation {
 impl From<ProfileValidationError> for SimulationError {
     fn from(error: ProfileValidationError) -> Self {
         Self::InvalidProfile { error }
+    }
+}
+
+impl From<StructuralError> for SimulationError {
+    fn from(error: StructuralError) -> Self {
+        match error {
+            StructuralError::NumericOverflow => Self::NumericOverflow,
+            StructuralError::InvalidCanonicalState => Self::InvalidCanonicalState,
+        }
     }
 }
 
@@ -231,9 +250,34 @@ mod tests {
     fn tick_overflow_is_typed_and_does_not_wrap() {
         let mut simulation = Simulation::new(package()).expect("test package is valid");
         simulation.canonical.next_tick = Tick(u64::MAX);
+        let before_hash = simulation.state_hash();
 
         assert_eq!(simulation.step(&[]), Err(SimulationError::NumericOverflow));
         assert_eq!(simulation.next_tick(), Tick(u64::MAX));
+        assert_eq!(simulation.state_hash(), before_hash);
+    }
+
+    #[test]
+    fn topology_revision_overflow_rolls_back_tick_and_structural_changes() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        simulation.canonical.topology_revision = Revision(u64::MAX);
+        let before_hash = simulation.state_hash();
+        let command = crate::CommandEnvelope {
+            target_tick: Tick(0),
+            ordinal: 0,
+            command: crate::Command::PlaceJunction(crate::PlaceJunctionCommand {
+                routing_domain: crate::RoutingDomain::OpenWorld,
+                position: crate::FixedVec2::new(crate::Fixed(0), crate::Fixed(0)),
+            }),
+        };
+
+        assert_eq!(
+            simulation.step(&[command]),
+            Err(SimulationError::NumericOverflow)
+        );
+        assert_eq!(simulation.next_tick(), Tick(0));
+        assert_eq!(simulation.topology_revision(), Revision(u64::MAX));
+        assert_eq!(simulation.state_hash(), before_hash);
     }
 
     #[test]

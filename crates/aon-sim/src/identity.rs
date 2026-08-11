@@ -180,6 +180,16 @@ impl EntityRegistry {
             .map(|(id, location)| (EntityId(id), *location))
     }
 
+    #[cfg(test)]
+    pub(crate) fn force_next_id_for_test(&mut self, next_id: EntityId) {
+        self.next_id = next_id.0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reserve_capacity_for_test(&mut self, additional: usize) {
+        self.locations.reserve(additional);
+    }
+
     fn slot_mut(
         &mut self,
         id: EntityId,
