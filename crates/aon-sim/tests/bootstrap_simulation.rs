@@ -105,12 +105,12 @@ fn snapshot_is_an_empty_read_only_projection() {
 }
 
 #[test]
-fn s0m1_empty_state_hash_has_a_golden_value() {
+fn s0m3_empty_state_v2_hash_has_a_golden_value() {
     let simulation = Simulation::new(package()).expect("simulation is valid");
 
     // Updated only when the explicitly versioned canonical encoder changes.
     assert_eq!(
         simulation.state_hash().to_string(),
-        "3ab5b0132646b92483379d9b70ffbbb0f91e42069b4a96a0594b4596d2e0f226"
+        "083afd89f8b5f88884492445595b297b22c18ba6807eac326d5375f94cb8ef1c"
     );
 }

@@ -13,7 +13,7 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 - [x] S0-M0 — Bootstrap
 - [x] S0-M1 — Contract / Numeric / Identity
 - [x] S0-M2 — Command / Geometry / Structural Phase
-- [ ] S0-M3 — Signal Topology / Event Runtime
+- [x] S0-M3 — Signal Topology / Event Runtime
 - [ ] S0-M4 — Topology Sync / Path Certificate
 - [ ] S0-M5 — Feedback / Replay
 - [ ] S0-M6 — Bevy ASCII Probe
@@ -117,12 +117,74 @@ S0-M2 completed on 2026-08-12 at commit `f978b7e`. Its acceptance evidence is:
 - [x] C-20, invalid-geometry no-panic, permutation, hash, strict Clippy, and clean-checkout offline
   gates pass
 
-## Current implementation slice — S0-M3
+## Completed slice — S0-M3
 
-- [ ] S0-M3 signal/event representation and ordering decisions are versioned
-- [ ] Driver/Sink stores and Gate/Wire signal state are canonical
-- [ ] Signal adjacency and deterministic Driver-to-Sink routes compile from explicit bindings
-- [ ] Event Calendar orders DriverTransition and SignalArrival deterministically
-- [ ] Inertial generation tokens discard canceled arrivals and Sink resolution is deterministic
-- [ ] Scheduled events and signal state participate in canonical state hashing
-- [ ] C-01, C-02, C-03, replay, fuzz, and clean-checkout gates pass
+S0-M3 completed on 2026-08-12. This completes only the static-topology signal/event slice; Stage 0
+and the game engine remain incomplete.
+
+- [x] S0-M3 signal/event representation and ordering decisions are versioned
+- [x] Driver/Sink stores and Gate/Wire signal state are canonical
+- [x] Signal adjacency and deterministic Driver-to-Sink routes compile from explicit bindings
+- [x] Event Calendar orders DriverTransition and SignalArrival deterministically
+- [x] Inertial generation tokens discard canceled arrivals and Sink resolution is deterministic
+- [x] Scheduled events and signal state participate in canonical state hashing
+- [x] C-01, C-02, C-03, deterministic command-stream, fuzz, and clean-checkout gates pass
+
+The 19 completion gates in `docs/AON_S0_M3_Canonical_Decisions_v1.0.md` have the following
+executable evidence:
+
+1. Endpoint namespace independence, monotonic allocation, tombstones, and non-reuse:
+   `crates/aon-sim/tests/signal_determinism.rs` and `crates/aon-sim/src/signal.rs`.
+2. Same-batch predicted-ID rejection and next-Tick observed-ID acceptance:
+   `crates/aon-sim/tests/signal_determinism.rs`.
+3. Unknown/removed/wrong-kind rejection, same-value no-op, and ordinal-last coalescing:
+   `crates/aon-sim/tests/signal_determinism.rs`.
+4. Explicit-only connectivity, including distinct Free ends and Gate/Junction nodes:
+   `crates/aon-sim/src/signal_topology.rs` and crossing regressions in
+   `crates/aon-sim/tests/structural_geometry_commands.rs`.
+5. Length/segment/path-key route ties independent of adjacency insertion order:
+   `crates/aon-sim/src/signal_topology.rs`.
+6. Zero-Tick local and positive superlinear physical delay:
+   `crates/aon-sim/src/signal_topology.rs` plus C-01/C-03.
+7. Checked load, fanout, delay, energy, due-Tick, and generation whole-Tick rollback, plus the
+   valid-Driver accumulator upper bound and defensive no-mutation check:
+   `crates/aon-sim/tests/signal_overflow.rs`, `crates/aon-sim/src/simulation.rs`,
+   `crates/aon-sim/src/signal.rs`, and `crates/aon-sim/src/signal_topology.rs`.
+8. Permutation-invariant Low/High/X multi-driver resolution and once-per-dirty-Sink accounting:
+   `crates/aon-sim/src/signal.rs` and `crates/aon-sim/tests/signal_conformance.rs`.
+9. Inertial replacement/cancel, harmless stale events, and exact canceled heat: C-02 in
+   `crates/aon-sim/tests/signal_conformance.rs`.
+10. One-Tick transport pulse preservation: C-03 in
+    `crates/aon-sim/tests/signal_conformance.rs`.
+11. Unchanged samples emit no transition or arrival:
+    `crates/aon-sim/tests/signal_conformance.rs`.
+12. Event staging/insertion permutations produce canonical calendars and hashes:
+    `crates/aon-sim/tests/event_calendar.rs` and `crates/aon-sim/src/canonical.rs`.
+13. Signal/event hash sensitivity and non-canonical layout/cache exclusions:
+    `crates/aon-sim/src/canonical.rs`.
+14. C-01 proves NOT `t=1` and 8-WU downstream arrival `t=4` in
+    `crates/aon-sim/tests/signal_conformance.rs`.
+15. C-02 proves a two-Tick pulse is filtered by delay three with exact canceled heat in
+    `crates/aon-sim/tests/signal_conformance.rs`.
+16. C-03 proves a one-Tick pulse arrives exactly five Ticks later in
+    `crates/aon-sim/tests/signal_conformance.rs`.
+17. Reversed equivalent public command batches preserve reports, observations, and per-Tick hashes:
+    `crates/aon-sim/tests/signal_determinism.rs`.
+18. Stateful signal fuzz and retained cases cover valid/stale/wrong-kind/event/checked-arithmetic
+    paths:
+    `crates/aon-fuzz-harness/src/lib.rs`, `crates/aon-fuzz-harness/tests/regression_corpus.rs`, and
+    `crates/aon-fuzz-harness/corpus/signal-runtime/`.
+19. Workspace and clean-checkout verification uses:
+    `cargo fmt --all -- --check`,
+    `cargo metadata --format-version 1 --no-deps --locked --offline`,
+    `cargo check --workspace --all-targets --locked --offline`,
+    `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`,
+    `cargo test --workspace --locked --offline`, and
+    `cargo tree -p aon-sim --edges all --prefix none --locked --offline` with no Bevy/winit/wgpu
+    dependency in the canonical core.
+
+## Next implementation slice — S0-M4
+
+S0-M4 owns Route Diff, Driver Revision, TopologySyncArrival, Sink Slot revision comparison,
+PathCertificateArena, connection-generation validation, and stale-arrival rejection after an
+in-flight topology edit.

@@ -198,6 +198,9 @@ pub enum CommandRejectionReason {
     InvalidPortBinding,
     SubstrateBoundsViolation,
     SubstrateInUse,
+    UnknownDriver,
+    RemovedDriver,
+    InvalidDriverKind,
 }
 
 impl CommandRejectionReason {
@@ -221,6 +224,9 @@ impl CommandRejectionReason {
             Self::InvalidPortBinding => 15,
             Self::SubstrateBoundsViolation => 16,
             Self::SubstrateInUse => 17,
+            Self::UnknownDriver => 18,
+            Self::RemovedDriver => 19,
+            Self::InvalidDriverKind => 20,
         }
     }
 }

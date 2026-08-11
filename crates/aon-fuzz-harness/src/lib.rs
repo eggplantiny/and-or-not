@@ -2,12 +2,13 @@
 
 use aon_sim::{
     ArtifactBytes, BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength,
-    DriverId, EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId, GatePort, GatePortRef,
-    GateType, GeometryError, JunctionId, LogicLevel, NumericError, PackageError,
-    PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
-    PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand, RoutingDomain,
-    SetExternalDriverCommand, Simulation, SimulationError, StepReport, Tick, WireEnd, WireId,
-    decode_package, decode_scenario_manifest, polyline_length, validate_quantized,
+    DriverId, DriverSample, EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId,
+    GatePort, GatePortRef, GateSignalPorts, GateSignalSnapshot, GateType, GeometryError,
+    JunctionId, LogicLevel, NumericError, PackageError, PlaceFixedSubstrateCommand,
+    PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
+    RemoveEntityCommand, RoutingDomain, SetExternalDriverCommand, Simulation, SimulationError,
+    StateHash, StepReport, Tick, WireEnd, WireId, WireSignalSnapshot, decode_package,
+    decode_scenario_manifest, polyline_length, validate_quantized,
 };
 
 const REFERENCE_SCENARIO: &[u8] = include_bytes!("../../../fixtures/scenarios/empty.json");
@@ -26,6 +27,13 @@ const STATEFUL_TOMBSTONE_ID: EntityId = EntityId(4);
 const STATEFUL_WIRE_ID: EntityId = EntityId(5);
 const STATEFUL_BATCH_TICK: Tick = Tick(3);
 
+const SIGNAL_SUBSTRATE_ID: EntityId = EntityId(1);
+const SIGNAL_SOURCE_GATE_ID: GateId = GateId(EntityId(2));
+const SIGNAL_TARGET_GATE_ID: GateId = GateId(EntityId(3));
+const SIGNAL_REMOVED_GATE_ID: GateId = GateId(EntityId(4));
+const SIGNAL_WIRE_ID: WireId = WireId(EntityId(5));
+const SIGNAL_SETTLE_TICKS: usize = 8;
+
 /// Maximum number of bytes interpreted by one decoder invocation.
 pub const MAX_DECODER_INPUT_BYTES: usize = 16 * 1024;
 
@@ -43,6 +51,10 @@ pub const MAX_COMMAND_ENVELOPES: usize = 16;
 
 /// Maximum number of raw vertices constructed for one arbitrary Wire command.
 pub const MAX_COMMAND_WIRE_POINTS: usize = 8;
+
+/// Maximum number of bytes, and therefore post-prefix Ticks, interpreted by the signal-runtime
+/// target.
+pub const MAX_SIGNAL_RUNTIME_INPUT_BYTES: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecoderTarget {
@@ -246,6 +258,815 @@ impl StatefulCommandObservation {
                 Some("arbitrary stateful commands produced a non-numeric run error")
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SignalRuntimeCoverage {
+    pub valid_external_updates: u64,
+    pub removed_driver_attempts: u64,
+    pub wrong_kind_driver_attempts: u64,
+    pub predicted_driver_attempts: u64,
+    pub simultaneous_update_batches: u64,
+    pub simultaneous_driver_event_batches: u64,
+    pub coalesced_update_batches: u64,
+    pub permuted_insertion_batches: u64,
+    pub max_strength_updates: u64,
+    pub driver_transitions_applied: u64,
+    pub signal_arrivals_applied: u64,
+    pub sinks_resolved: u64,
+    pub driver_changes: u64,
+    pub signal_changes: u64,
+    pub gate_output_changes: u64,
+    pub wire_excitation_changes: u64,
+    pub pending_gate_observations: u64,
+    pub nonzero_wire_observations: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SignalRuntimeExecutionObservation {
+    PackageRejected(PackageError),
+    SimulationRejected {
+        replica: u8,
+        error: SimulationError,
+    },
+    PrefixRunError {
+        replica: u8,
+        step_index: usize,
+        error: SimulationError,
+    },
+    PrefixCommandRejected {
+        replica: u8,
+        step_index: usize,
+        report: StepReport,
+    },
+    PrefixInvariantViolation {
+        replica: u8,
+        step_index: usize,
+    },
+    DeterminismMismatch {
+        step_index: Option<usize>,
+    },
+    RunError {
+        replica: u8,
+        step_index: usize,
+        error: SimulationError,
+    },
+    Completed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignalRuntimeObservation {
+    pub consumed_len: usize,
+    pub generated_steps: usize,
+    pub prefix_reports: Vec<StepReport>,
+    pub step_reports: Vec<StepReport>,
+    pub state_hashes: Vec<StateHash>,
+    pub encodings: Vec<CommandEncodingObservation>,
+    pub expectation_failures: u64,
+    pub coverage: SignalRuntimeCoverage,
+    pub execution: SignalRuntimeExecutionObservation,
+}
+
+impl SignalRuntimeObservation {
+    /// Returns a harness failure. The signal target has no intentionally fatal input: bounded
+    /// Driver samples must not produce `NumericOverflow`, `InvalidCanonicalState`, or any other
+    /// run error.
+    pub fn invariant_failure(&self) -> Option<&'static str> {
+        if self.encodings.iter().any(|encoding| !encoding.bytes_match) {
+            return Some("allocated and streaming signal command encoders disagreed");
+        }
+        if self.expectation_failures != 0 {
+            return Some("signal command outcome or public observation disagreed with its model");
+        }
+        match self.execution {
+            SignalRuntimeExecutionObservation::PackageRejected(_) => {
+                Some("the embedded reference package was rejected")
+            }
+            SignalRuntimeExecutionObservation::SimulationRejected { .. } => {
+                Some("the embedded reference signal simulation was rejected")
+            }
+            SignalRuntimeExecutionObservation::PrefixRunError { .. } => {
+                Some("the deterministic signal prefix produced a run error")
+            }
+            SignalRuntimeExecutionObservation::PrefixCommandRejected { .. } => {
+                Some("the deterministic signal prefix rejected a command")
+            }
+            SignalRuntimeExecutionObservation::PrefixInvariantViolation { .. } => {
+                Some("the deterministic signal prefix violated its public contract")
+            }
+            SignalRuntimeExecutionObservation::DeterminismMismatch { .. } => {
+                Some("equivalent signal command streams produced different observations")
+            }
+            SignalRuntimeExecutionObservation::RunError { .. } => {
+                Some("bounded signal commands produced an unexpected run error")
+            }
+            SignalRuntimeExecutionObservation::Completed => None,
+        }
+    }
+}
+
+/// Runs a bounded stateful S0-M3 signal stream against two independently built simulations.
+///
+/// Each byte selects one Tick containing a valid external update, a removed/wrong-kind/predicted
+/// Driver attempt, a simultaneous pair, an ordinal-last coalescing pair, or no commands. The
+/// second simulation receives multi-command batches in reverse insertion order. Canonical command
+/// ordering requires both replicas to produce identical reports, public observations, and hashes.
+pub fn exercise_signal_runtime(input: &[u8]) -> SignalRuntimeObservation {
+    let bounded = &input[..input.len().min(MAX_SIGNAL_RUNTIME_INPUT_BYTES)];
+    let mut observation = SignalRuntimeObservation {
+        consumed_len: bounded.len(),
+        generated_steps: 0,
+        prefix_reports: Vec::new(),
+        step_reports: Vec::with_capacity(bounded.len()),
+        state_hashes: Vec::with_capacity(bounded.len()),
+        encodings: Vec::new(),
+        expectation_failures: 0,
+        coverage: SignalRuntimeCoverage::default(),
+        execution: SignalRuntimeExecutionObservation::Completed,
+    };
+
+    let package = match decode_package(ArtifactBytes {
+        scenario: REFERENCE_SCENARIO,
+        numeric_profile: REFERENCE_NUMERIC_PROFILE,
+        physical_scale_profile: REFERENCE_PHYSICAL_SCALE_PROFILE,
+        balance_profile: REFERENCE_BALANCE_PROFILE,
+    }) {
+        Ok(package) => package,
+        Err(error) => {
+            observation.execution = SignalRuntimeExecutionObservation::PackageRejected(error);
+            return observation;
+        }
+    };
+
+    let left = match Simulation::new(package.clone()) {
+        Ok(simulation) => simulation,
+        Err(error) => {
+            observation.execution =
+                SignalRuntimeExecutionObservation::SimulationRejected { replica: 0, error };
+            return observation;
+        }
+    };
+    let right = match Simulation::new(package) {
+        Ok(simulation) => simulation,
+        Err(error) => {
+            observation.execution =
+                SignalRuntimeExecutionObservation::SimulationRejected { replica: 1, error };
+            return observation;
+        }
+    };
+
+    let mut left = match build_signal_fixture(left) {
+        Ok(fixture) => fixture,
+        Err(failure) => {
+            observation.execution = failure.into_observation(0);
+            return observation;
+        }
+    };
+    let mut right = match build_signal_fixture(right) {
+        Ok(fixture) => fixture,
+        Err(failure) => {
+            observation.execution = failure.into_observation(1);
+            return observation;
+        }
+    };
+    observation.prefix_reports.clone_from(&left.prefix_reports);
+
+    if left.ids != right.ids
+        || left.prefix_reports != right.prefix_reports
+        || left.simulation.state_hash() != right.simulation.state_hash()
+        || signal_public_snapshot(&left.simulation, left.ids)
+            != signal_public_snapshot(&right.simulation, right.ids)
+    {
+        observation.execution =
+            SignalRuntimeExecutionObservation::DeterminismMismatch { step_index: None };
+        return observation;
+    }
+
+    let Some(mut previous_snapshot) = signal_public_snapshot(&left.simulation, left.ids) else {
+        observation.execution = SignalRuntimeExecutionObservation::PrefixInvariantViolation {
+            replica: 0,
+            step_index: left.prefix_reports.len(),
+        };
+        return observation;
+    };
+
+    for (step_index, &selector) in bounded.iter().enumerate() {
+        let batch = signal_runtime_batch(selector, left.simulation.next_tick(), left.ids);
+        observation.generated_steps += 1;
+        observation
+            .encodings
+            .extend(batch.envelopes.iter().map(exercise_command_encoding));
+        record_signal_batch_intent(&mut observation.coverage, &batch);
+
+        let left_report = match left.simulation.step(&batch.envelopes) {
+            Ok(report) => report,
+            Err(error) => {
+                observation.execution = SignalRuntimeExecutionObservation::RunError {
+                    replica: 0,
+                    step_index,
+                    error,
+                };
+                return observation;
+            }
+        };
+        let mut permuted = batch.envelopes.clone();
+        if permuted.len() > 1 {
+            permuted.reverse();
+            observation.coverage.permuted_insertion_batches += 1;
+        }
+        let right_report = match right.simulation.step(&permuted) {
+            Ok(report) => report,
+            Err(error) => {
+                observation.execution = SignalRuntimeExecutionObservation::RunError {
+                    replica: 1,
+                    step_index,
+                    error,
+                };
+                return observation;
+            }
+        };
+
+        let left_snapshot = signal_public_snapshot(&left.simulation, left.ids);
+        let right_snapshot = signal_public_snapshot(&right.simulation, right.ids);
+        if left_report != right_report
+            || left_report.state_hash != left.simulation.state_hash()
+            || right_report.state_hash != right.simulation.state_hash()
+            || left_snapshot != right_snapshot
+        {
+            observation.execution = SignalRuntimeExecutionObservation::DeterminismMismatch {
+                step_index: Some(step_index),
+            };
+            return observation;
+        }
+
+        let Some(current_snapshot) = left_snapshot else {
+            observation.expectation_failures += 1;
+            observation.execution = SignalRuntimeExecutionObservation::PrefixInvariantViolation {
+                replica: 0,
+                step_index: left.prefix_reports.len() + step_index,
+            };
+            return observation;
+        };
+        if !signal_report_matches(&left_report, &batch)
+            || !signal_samples_match(&current_snapshot, &batch)
+        {
+            observation.expectation_failures += 1;
+        }
+        record_signal_step_coverage(
+            &mut observation.coverage,
+            &batch,
+            &left_report,
+            &previous_snapshot,
+            &current_snapshot,
+        );
+        previous_snapshot = current_snapshot;
+        observation.state_hashes.push(left_report.state_hash);
+        observation.step_reports.push(left_report);
+    }
+
+    observation
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SignalFixtureIds {
+    source: GateSignalPorts,
+    target: GateSignalPorts,
+    removed: GateSignalPorts,
+    predicted_driver: DriverId,
+    wire: WireId,
+}
+
+struct SignalFixture {
+    simulation: Simulation,
+    ids: SignalFixtureIds,
+    prefix_reports: Vec<StepReport>,
+}
+
+enum SignalPrefixFailure {
+    Run {
+        step_index: usize,
+        error: SimulationError,
+    },
+    CommandRejected {
+        step_index: usize,
+        report: Box<StepReport>,
+    },
+    Invariant {
+        step_index: usize,
+    },
+}
+
+impl SignalPrefixFailure {
+    fn into_observation(self, replica: u8) -> SignalRuntimeExecutionObservation {
+        match self {
+            Self::Run { step_index, error } => SignalRuntimeExecutionObservation::PrefixRunError {
+                replica,
+                step_index,
+                error,
+            },
+            Self::CommandRejected { step_index, report } => {
+                SignalRuntimeExecutionObservation::PrefixCommandRejected {
+                    replica,
+                    step_index,
+                    report: *report,
+                }
+            }
+            Self::Invariant { step_index } => {
+                SignalRuntimeExecutionObservation::PrefixInvariantViolation {
+                    replica,
+                    step_index,
+                }
+            }
+        }
+    }
+}
+
+fn build_signal_fixture(mut simulation: Simulation) -> Result<SignalFixture, SignalPrefixFailure> {
+    let mut prefix_reports = Vec::with_capacity(4 + SIGNAL_SETTLE_TICKS);
+    let substrate_bounds = FixedAabb::new(
+        signal_point(-32 * STATEFUL_WORLD_PITCH, -32 * STATEFUL_WORLD_PITCH),
+        signal_point(32 * STATEFUL_WORLD_PITCH, 32 * STATEFUL_WORLD_PITCH),
+    );
+    let domain = RoutingDomain::FixedSubstrate(SIGNAL_SUBSTRATE_ID);
+
+    run_signal_prefix_step(
+        &mut simulation,
+        vec![Command::PlaceFixedSubstrate(PlaceFixedSubstrateCommand {
+            origin: signal_point(0, 0),
+            routing_area: substrate_bounds,
+            footprint: substrate_bounds,
+        })],
+        &mut prefix_reports,
+    )?;
+    if prefix_created_entities(&prefix_reports[0]) != vec![SIGNAL_SUBSTRATE_ID] {
+        return Err(SignalPrefixFailure::Invariant { step_index: 0 });
+    }
+
+    run_signal_prefix_step(
+        &mut simulation,
+        vec![
+            Command::PlaceGate(PlaceGateCommand {
+                gate_type: GateType::Not,
+                origin: signal_point(0, 0),
+                routing_domain: domain,
+            }),
+            Command::PlaceGate(PlaceGateCommand {
+                gate_type: GateType::Not,
+                origin: signal_point(34 * STATEFUL_CIRCUIT_PITCH, 0),
+                routing_domain: domain,
+            }),
+            Command::PlaceGate(PlaceGateCommand {
+                gate_type: GateType::Not,
+                origin: signal_point(0, 16 * STATEFUL_WORLD_PITCH),
+                routing_domain: domain,
+            }),
+        ],
+        &mut prefix_reports,
+    )?;
+    if prefix_created_entities(&prefix_reports[1])
+        != vec![
+            SIGNAL_SOURCE_GATE_ID.entity_id(),
+            SIGNAL_TARGET_GATE_ID.entity_id(),
+            SIGNAL_REMOVED_GATE_ID.entity_id(),
+        ]
+    {
+        return Err(SignalPrefixFailure::Invariant { step_index: 1 });
+    }
+    let source = simulation
+        .gate_signal_ports(SIGNAL_SOURCE_GATE_ID)
+        .ok_or(SignalPrefixFailure::Invariant { step_index: 1 })?;
+    let target = simulation
+        .gate_signal_ports(SIGNAL_TARGET_GATE_ID)
+        .ok_or(SignalPrefixFailure::Invariant { step_index: 1 })?;
+    let removed = simulation
+        .gate_signal_ports(SIGNAL_REMOVED_GATE_ID)
+        .ok_or(SignalPrefixFailure::Invariant { step_index: 1 })?;
+    let predicted_driver = DriverId(EntityId(
+        removed
+            .output
+            .entity_id()
+            .0
+            .checked_add(1)
+            .ok_or(SignalPrefixFailure::Invariant { step_index: 1 })?,
+    ));
+
+    run_signal_prefix_step(
+        &mut simulation,
+        vec![Command::PlaceWire(PlaceWireCommand {
+            routing_domain: domain,
+            points: vec![
+                signal_point(STATEFUL_CIRCUIT_PITCH, 0),
+                signal_point(33 * STATEFUL_CIRCUIT_PITCH, 0),
+            ],
+            endpoint_a: EndpointTarget::GatePort(GatePortRef {
+                gate: SIGNAL_SOURCE_GATE_ID,
+                port: GatePort::Output,
+            }),
+            endpoint_b: EndpointTarget::GatePort(GatePortRef {
+                gate: SIGNAL_TARGET_GATE_ID,
+                port: GatePort::InputA,
+            }),
+        })],
+        &mut prefix_reports,
+    )?;
+    if prefix_created_entities(&prefix_reports[2]) != vec![SIGNAL_WIRE_ID.entity_id()]
+        || simulation.wire_signal_state(SIGNAL_WIRE_ID).is_none()
+    {
+        return Err(SignalPrefixFailure::Invariant { step_index: 2 });
+    }
+
+    run_signal_prefix_step(
+        &mut simulation,
+        vec![Command::RemoveEntity(RemoveEntityCommand {
+            target: SIGNAL_REMOVED_GATE_ID.entity_id(),
+        })],
+        &mut prefix_reports,
+    )?;
+    if simulation
+        .gate_signal_ports(SIGNAL_REMOVED_GATE_ID)
+        .is_some()
+        || simulation
+            .driver_sample(removed.input_a.external_driver)
+            .is_some()
+        || simulation.driver_sample(removed.output).is_some()
+    {
+        return Err(SignalPrefixFailure::Invariant { step_index: 3 });
+    }
+
+    for _ in 0..SIGNAL_SETTLE_TICKS {
+        run_signal_prefix_step(&mut simulation, Vec::new(), &mut prefix_reports)?;
+    }
+
+    let ids = SignalFixtureIds {
+        source,
+        target,
+        removed,
+        predicted_driver,
+        wire: SIGNAL_WIRE_ID,
+    };
+    if signal_public_snapshot(&simulation, ids).is_none() {
+        return Err(SignalPrefixFailure::Invariant {
+            step_index: prefix_reports.len(),
+        });
+    }
+    Ok(SignalFixture {
+        simulation,
+        ids,
+        prefix_reports,
+    })
+}
+
+fn run_signal_prefix_step(
+    simulation: &mut Simulation,
+    commands: Vec<Command>,
+    prefix_reports: &mut Vec<StepReport>,
+) -> Result<(), SignalPrefixFailure> {
+    let step_index = prefix_reports.len();
+    let tick = simulation.next_tick();
+    let envelopes: Vec<_> = commands
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, command)| CommandEnvelope {
+            target_tick: tick,
+            ordinal: ordinal as u64,
+            command,
+        })
+        .collect();
+    let report = simulation
+        .step(&envelopes)
+        .map_err(|error| SignalPrefixFailure::Run { step_index, error })?;
+    if !report.command_rejections.is_empty() || report.command_acceptances.len() != envelopes.len()
+    {
+        return Err(SignalPrefixFailure::CommandRejected {
+            step_index,
+            report: Box::new(report),
+        });
+    }
+    prefix_reports.push(report);
+    Ok(())
+}
+
+fn prefix_created_entities(report: &StepReport) -> Vec<EntityId> {
+    report
+        .command_acceptances
+        .iter()
+        .filter_map(|acceptance| acceptance.created_entity)
+        .collect()
+}
+
+const fn signal_point(x: i64, y: i64) -> FixedVec2 {
+    FixedVec2::new(Fixed(x), Fixed(y))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SignalPublicSnapshot {
+    source_gate: GateSignalSnapshot,
+    target_gate: GateSignalSnapshot,
+    wire: WireSignalSnapshot,
+    source_external: DriverSample,
+    target_external: DriverSample,
+    source_output: DriverSample,
+    target_output: DriverSample,
+    source_input: LogicLevel,
+    target_input: LogicLevel,
+}
+
+fn signal_public_snapshot(
+    simulation: &Simulation,
+    ids: SignalFixtureIds,
+) -> Option<SignalPublicSnapshot> {
+    Some(SignalPublicSnapshot {
+        source_gate: simulation.gate_signal_state(SIGNAL_SOURCE_GATE_ID)?,
+        target_gate: simulation.gate_signal_state(SIGNAL_TARGET_GATE_ID)?,
+        wire: simulation.wire_signal_state(ids.wire)?,
+        source_external: simulation.driver_sample(ids.source.input_a.external_driver)?,
+        target_external: simulation.driver_sample(ids.target.input_a.external_driver)?,
+        source_output: simulation.driver_sample(ids.source.output)?,
+        target_output: simulation.driver_sample(ids.target.output)?,
+        source_input: simulation.sink_level(ids.source.input_a.sink)?,
+        target_input: simulation.sink_level(ids.target.input_a.sink)?,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExpectedSignalCommand {
+    Accepted,
+    Rejected(aon_sim::CommandRejectionReason),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SignalBatchKind {
+    Valid,
+    Removed,
+    WrongKind,
+    Predicted,
+    Simultaneous,
+    Coalesced,
+    Empty,
+}
+
+struct SignalRuntimeBatch {
+    envelopes: Vec<CommandEnvelope>,
+    expected: Vec<(u64, ExpectedSignalCommand)>,
+    expected_live_samples: Vec<(DriverId, LogicLevel, DriveStrength)>,
+    kind: SignalBatchKind,
+}
+
+fn signal_runtime_batch(
+    selector: u8,
+    target_tick: Tick,
+    ids: SignalFixtureIds,
+) -> SignalRuntimeBatch {
+    let kind = selector & 0b111;
+    let level = signal_level(selector);
+    let next_level = rotate_signal_level(level);
+    let strength = signal_strength(selector);
+    let mut envelopes = Vec::with_capacity(2);
+    let mut expected = Vec::with_capacity(2);
+    let mut expected_live_samples = Vec::with_capacity(2);
+
+    let mut push = |ordinal: u64,
+                    driver: DriverId,
+                    level: LogicLevel,
+                    strength: DriveStrength,
+                    outcome: ExpectedSignalCommand| {
+        envelopes.push(CommandEnvelope {
+            target_tick,
+            ordinal,
+            command: Command::SetExternalDriver(SetExternalDriverCommand {
+                driver,
+                level,
+                strength,
+            }),
+        });
+        expected.push((ordinal, outcome));
+    };
+
+    let batch_kind = match kind {
+        0 => {
+            push(
+                0,
+                ids.source.input_a.external_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            expected_live_samples.push((ids.source.input_a.external_driver, level, strength));
+            SignalBatchKind::Valid
+        }
+        1 => {
+            push(
+                0,
+                ids.target.input_a.external_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            expected_live_samples.push((ids.target.input_a.external_driver, level, strength));
+            SignalBatchKind::Valid
+        }
+        2 => {
+            push(
+                0,
+                ids.removed.input_a.external_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Rejected(aon_sim::CommandRejectionReason::RemovedDriver),
+            );
+            SignalBatchKind::Removed
+        }
+        3 => {
+            push(
+                0,
+                ids.source.output,
+                level,
+                strength,
+                ExpectedSignalCommand::Rejected(aon_sim::CommandRejectionReason::InvalidDriverKind),
+            );
+            SignalBatchKind::WrongKind
+        }
+        4 => {
+            push(
+                0,
+                ids.predicted_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Rejected(aon_sim::CommandRejectionReason::UnknownDriver),
+            );
+            SignalBatchKind::Predicted
+        }
+        5 => {
+            push(
+                1,
+                ids.source.input_a.external_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            push(
+                0,
+                ids.target.input_a.external_driver,
+                next_level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            expected_live_samples.push((ids.source.input_a.external_driver, level, strength));
+            expected_live_samples.push((ids.target.input_a.external_driver, next_level, strength));
+            SignalBatchKind::Simultaneous
+        }
+        6 => {
+            push(
+                0,
+                ids.source.input_a.external_driver,
+                level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            push(
+                1,
+                ids.source.input_a.external_driver,
+                next_level,
+                strength,
+                ExpectedSignalCommand::Accepted,
+            );
+            expected_live_samples.push((ids.source.input_a.external_driver, next_level, strength));
+            SignalBatchKind::Coalesced
+        }
+        _ => SignalBatchKind::Empty,
+    };
+
+    SignalRuntimeBatch {
+        envelopes,
+        expected,
+        expected_live_samples,
+        kind: batch_kind,
+    }
+}
+
+const fn signal_level(selector: u8) -> LogicLevel {
+    match (selector >> 3) % 3 {
+        0 => LogicLevel::Low,
+        1 => LogicLevel::High,
+        _ => LogicLevel::X,
+    }
+}
+
+const fn rotate_signal_level(level: LogicLevel) -> LogicLevel {
+    match level {
+        LogicLevel::Low => LogicLevel::High,
+        LogicLevel::High => LogicLevel::X,
+        LogicLevel::X => LogicLevel::Low,
+    }
+}
+
+const fn signal_strength(selector: u8) -> DriveStrength {
+    DriveStrength(match selector >> 5 {
+        0 => 0,
+        1 => 99,
+        2 => 100,
+        _ => u64::MAX,
+    })
+}
+
+fn signal_report_matches(report: &StepReport, batch: &SignalRuntimeBatch) -> bool {
+    if report.command_acceptances.len() + report.command_rejections.len() != batch.expected.len() {
+        return false;
+    }
+    batch
+        .expected
+        .iter()
+        .all(|&(ordinal, outcome)| match outcome {
+            ExpectedSignalCommand::Accepted => {
+                report.command_acceptances.iter().any(|acceptance| {
+                    acceptance.target_tick == report.completed_tick
+                        && acceptance.ordinal == ordinal
+                        && acceptance.created_entity.is_none()
+                })
+            }
+            ExpectedSignalCommand::Rejected(reason) => {
+                report.command_rejections.iter().any(|rejection| {
+                    rejection.target_tick == report.completed_tick
+                        && rejection.ordinal == ordinal
+                        && rejection.reason == reason
+                })
+            }
+        })
+}
+
+fn signal_samples_match(snapshot: &SignalPublicSnapshot, batch: &SignalRuntimeBatch) -> bool {
+    batch
+        .expected_live_samples
+        .iter()
+        .all(|&(driver, level, strength)| {
+            let sample = if driver == snapshot.source_external.driver_id {
+                snapshot.source_external
+            } else if driver == snapshot.target_external.driver_id {
+                snapshot.target_external
+            } else {
+                return false;
+            };
+            sample.level == level && sample.strength == strength
+        })
+}
+
+fn record_signal_batch_intent(coverage: &mut SignalRuntimeCoverage, batch: &SignalRuntimeBatch) {
+    match batch.kind {
+        SignalBatchKind::Valid => coverage.valid_external_updates += 1,
+        SignalBatchKind::Removed => coverage.removed_driver_attempts += 1,
+        SignalBatchKind::WrongKind => coverage.wrong_kind_driver_attempts += 1,
+        SignalBatchKind::Predicted => coverage.predicted_driver_attempts += 1,
+        SignalBatchKind::Simultaneous => {
+            coverage.valid_external_updates += 2;
+            coverage.simultaneous_update_batches += 1;
+        }
+        SignalBatchKind::Coalesced => {
+            coverage.valid_external_updates += 2;
+            coverage.coalesced_update_batches += 1;
+        }
+        SignalBatchKind::Empty => {}
+    }
+    coverage.max_strength_updates += batch
+        .expected_live_samples
+        .iter()
+        .filter(|(_, _, strength)| strength.0 == u64::MAX)
+        .count() as u64;
+}
+
+fn record_signal_step_coverage(
+    coverage: &mut SignalRuntimeCoverage,
+    batch: &SignalRuntimeBatch,
+    report: &StepReport,
+    previous: &SignalPublicSnapshot,
+    current: &SignalPublicSnapshot,
+) {
+    coverage.driver_transitions_applied += report.signal_counters.driver_transitions_applied;
+    coverage.signal_arrivals_applied += report.signal_counters.signal_arrivals_applied;
+    coverage.sinks_resolved += report.signal_counters.sinks_resolved;
+    coverage.driver_changes += report.driver_changes.len() as u64;
+    coverage.signal_changes += report.signal_changes.len() as u64;
+    if batch.kind == SignalBatchKind::Simultaneous && report.driver_changes.len() >= 2 {
+        coverage.simultaneous_driver_event_batches += 1;
+    }
+    if previous.source_gate.current_output != current.source_gate.current_output {
+        coverage.gate_output_changes += 1;
+    }
+    if previous.target_gate.current_output != current.target_gate.current_output {
+        coverage.gate_output_changes += 1;
+    }
+    if previous.wire != current.wire {
+        coverage.wire_excitation_changes += 1;
+    }
+    if current.source_gate.pending_due_tick.is_some()
+        || current.target_gate.pending_due_tick.is_some()
+    {
+        coverage.pending_gate_observations += 1;
+    }
+    if current.wire.active.high != 0
+        || current.wire.active.low != 0
+        || current.wire.active.unknown != 0
+    {
+        coverage.nonzero_wire_observations += 1;
     }
 }
 
@@ -726,11 +1547,13 @@ impl<'a> CyclicBytes<'a> {
 mod tests {
     use super::{
         CommandExecutionObservation, DecoderTarget, MAX_COMMAND_INPUT_BYTES,
-        MAX_DECODER_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, REFERENCE_BALANCE_PROFILE,
-        REFERENCE_NUMERIC_PROFILE, REFERENCE_PHYSICAL_SCALE_PROFILE, REFERENCE_SCENARIO,
-        STATEFUL_BATCH_TICK, STATEFUL_GATE_ID, STATEFUL_JUNCTION_ID, STATEFUL_TOMBSTONE_ID,
-        STATEFUL_WIRE_ID, StatefulCommandExecutionObservation, exercise_commands, exercise_decoder,
-        exercise_geometry, exercise_stateful_commands, stateful_envelope, stateful_prefix_batches,
+        MAX_DECODER_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
+        REFERENCE_BALANCE_PROFILE, REFERENCE_NUMERIC_PROFILE, REFERENCE_PHYSICAL_SCALE_PROFILE,
+        REFERENCE_SCENARIO, STATEFUL_BATCH_TICK, STATEFUL_GATE_ID, STATEFUL_JUNCTION_ID,
+        STATEFUL_TOMBSTONE_ID, STATEFUL_WIRE_ID, SignalRuntimeExecutionObservation,
+        StatefulCommandExecutionObservation, exercise_commands, exercise_decoder,
+        exercise_geometry, exercise_signal_runtime, exercise_stateful_commands, stateful_envelope,
+        stateful_prefix_batches,
     };
     use aon_sim::{
         ArtifactBytes, BindPortCommand, Command, CommandAcceptance, CommandRejection,
@@ -808,7 +1631,7 @@ mod tests {
                 (4, CommandRejectionReason::UnsupportedPlacement),
                 (5, CommandRejectionReason::UnknownEntity),
                 (6, CommandRejectionReason::UnknownEntity),
-                (7, CommandRejectionReason::UnsupportedCommand),
+                (7, CommandRejectionReason::UnknownDriver),
             ]
         );
     }
@@ -970,6 +1793,11 @@ mod tests {
             exercise_stateful_commands(&commands),
             expected_stateful_commands
         );
+
+        let mut signal = vec![0x6d; MAX_SIGNAL_RUNTIME_INPUT_BYTES];
+        let expected_signal = exercise_signal_runtime(&signal);
+        signal.extend_from_slice(b"ignored signal-runtime suffix");
+        assert_eq!(exercise_signal_runtime(&signal), expected_signal);
     }
 
     #[test]
@@ -1017,6 +1845,24 @@ mod tests {
                 None,
                 "stateful commands violated a harness invariant for generated case {case_index}"
             );
+
+            if case_index < 256 {
+                let signal_runtime =
+                    catch_unwind(AssertUnwindSafe(|| exercise_signal_runtime(&bytes)));
+                let Ok(signal_runtime) = signal_runtime else {
+                    panic!("signal runtime panicked for generated case {case_index}");
+                };
+                assert_eq!(
+                    signal_runtime.execution,
+                    SignalRuntimeExecutionObservation::Completed,
+                    "signal runtime did not complete for generated case {case_index}"
+                );
+                assert_eq!(
+                    signal_runtime.invariant_failure(),
+                    None,
+                    "signal runtime violated a harness invariant for generated case {case_index}"
+                );
+            }
         }
     }
 

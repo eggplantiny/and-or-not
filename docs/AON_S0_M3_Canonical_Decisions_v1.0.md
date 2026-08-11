@@ -479,8 +479,10 @@ S0-M3 is not complete until all of the following are executable deterministic te
 4. explicit bindings compile while crossings and equal Free coordinates stay disconnected;
 5. route length, segment, and lexicographic ties are independent of store/adjacency order;
 6. local routes have delay zero and every physical route has positive superlinear delay;
-7. exact load, fanout, delay, energy, due-Tick, generation, and accumulator overflow roll back the
-   whole Tick;
+7. exact load, fanout, delay, energy, due-Tick, and generation overflow roll back the whole Tick;
+   DriveVector accumulation remains checked defensively, while an executable upper-bound proof
+   fixes that every valid unique-Driver set fits in `u128`: at most `u64::MAX - 1` live Driver IDs,
+   each with strength at most `u64::MAX`, sum to strictly less than `u128::MAX`;
 8. multi-driver Low/High/X resolution is permutation-invariant and each Sink resolves once;
 9. inertial replacement/cancel leaves stale events harmless and canceled energy as heat;
 10. transport preserves a one-Tick pulse;

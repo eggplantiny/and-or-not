@@ -1,5 +1,6 @@
 use aon_fuzz_harness::{
-    exercise_commands, exercise_decoder, exercise_geometry, exercise_stateful_commands,
+    SignalRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
+    exercise_signal_runtime, exercise_stateful_commands,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -58,6 +59,20 @@ const COMMAND_CORPUS: &[(&str, &[u8])] = &[
         include_bytes!("../corpus/command/stateful-references.case"),
     ),
     ("stateful-effective-paths", STATEFUL_EFFECTIVE_PATHS),
+];
+
+const SIGNAL_RUNTIME_COVERAGE: &[u8] = include_bytes!("../corpus/signal-runtime/coverage.case");
+
+const SIGNAL_RUNTIME_CORPUS: &[(&str, &[u8])] = &[
+    ("coverage", SIGNAL_RUNTIME_COVERAGE),
+    (
+        "event-order",
+        include_bytes!("../corpus/signal-runtime/event-order.case"),
+    ),
+    (
+        "checked-arithmetic",
+        include_bytes!("../corpus/signal-runtime/checked-arithmetic.case"),
+    ),
 ];
 
 #[test]
@@ -168,4 +183,68 @@ fn retained_stateful_case_reaches_effective_bind_remove_tombstone_and_wrong_kind
     );
     assert!(report.topology_changed);
     assert_eq!(report.next_tick, Tick(4));
+}
+
+#[test]
+fn signal_runtime_regression_corpus_replays_without_panics_or_silent_run_errors() {
+    for &(name, bytes) in SIGNAL_RUNTIME_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_signal_runtime(bytes)));
+        let Ok(observation) = result else {
+            panic!("signal-runtime regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.invariant_failure(),
+            None,
+            "signal-runtime regression case `{name}` violated a harness invariant"
+        );
+        assert_eq!(
+            observation.execution,
+            SignalRuntimeExecutionObservation::Completed,
+            "signal-runtime regression case `{name}` did not complete"
+        );
+        assert_eq!(
+            observation.state_hashes.len(),
+            observation.generated_steps,
+            "signal-runtime regression case `{name}` skipped a state-hash observation"
+        );
+        assert!(
+            observation
+                .encodings
+                .iter()
+                .all(|encoding| encoding.bytes_match),
+            "signal-runtime regression case `{name}` disagreed between command encoders"
+        );
+    }
+}
+
+#[test]
+fn retained_signal_case_reaches_s0_m3_fuzz_completion_paths() {
+    let observation = exercise_signal_runtime(SIGNAL_RUNTIME_COVERAGE);
+    assert_eq!(
+        observation.execution,
+        SignalRuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.prefix_reports.len(), 12);
+    assert_eq!(observation.generated_steps, SIGNAL_RUNTIME_COVERAGE.len());
+
+    let coverage = observation.coverage;
+    assert!(coverage.valid_external_updates > 0);
+    assert!(coverage.removed_driver_attempts > 0);
+    assert!(coverage.wrong_kind_driver_attempts > 0);
+    assert!(coverage.predicted_driver_attempts > 0);
+    assert!(coverage.simultaneous_update_batches > 0);
+    assert!(coverage.simultaneous_driver_event_batches > 0);
+    assert!(coverage.coalesced_update_batches > 0);
+    assert!(coverage.permuted_insertion_batches > 0);
+    assert!(coverage.max_strength_updates > 0);
+    assert!(coverage.driver_transitions_applied > 0);
+    assert!(coverage.signal_arrivals_applied > 0);
+    assert!(coverage.sinks_resolved > 0);
+    assert!(coverage.driver_changes > 0);
+    assert!(coverage.signal_changes > 0);
+    assert!(coverage.gate_output_changes > 0);
+    assert!(coverage.wire_excitation_changes > 0);
+    assert!(coverage.pending_gate_observations > 0);
+    assert!(coverage.nonzero_wire_observations > 0);
 }

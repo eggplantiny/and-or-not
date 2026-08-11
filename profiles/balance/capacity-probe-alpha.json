@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profileId": "balance-capacity-probe-alpha",
   "kind": "balance",
   "simulationHz": 20,
   "gateBaseDelay": 1,
+  "gateSwitchBaseEnergy": 1,
   "senseDelay": 1,
   "logicThreshold": 100,
   "nominalGateDrive": 400,

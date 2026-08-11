@@ -44,13 +44,65 @@ fn reference_contract_and_profiles_create_a_simulation() {
 
     assert_eq!(package.scenario_id(), "empty");
     assert_eq!(package.semantics_version().as_str(), SEMANTICS_VERSION_V1);
+    assert_eq!(package.profiles().numeric().schema_version, 1);
     assert_eq!(package.profiles().numeric().kind, ProfileKind::Numeric);
+    assert_eq!(package.profiles().physical_scale().schema_version, 1);
     assert_eq!(
         package.profiles().physical_scale().kind,
         ProfileKind::PhysicalScale
     );
+    assert_eq!(package.profiles().balance().schema_version, 2);
     assert_eq!(package.profiles().balance().kind, ProfileKind::Balance);
+    assert_eq!(package.profiles().balance().gate_switch_base_energy, 1);
     Simulation::new(package).expect("the declared contract matches the profiles");
+}
+
+#[test]
+fn balance_schema_v2_requires_switch_energy_and_rejects_v1() {
+    let mut old_schema: serde_json::Value =
+        serde_json::from_slice(BALANCE).expect("reference balance JSON");
+    old_schema["schemaVersion"] = 1.into();
+    let old_schema = serde_json::to_vec(&old_schema).expect("test JSON serializes");
+    let error = decode_package(ArtifactBytes {
+        scenario: SCENARIO,
+        numeric_profile: NUMERIC,
+        physical_scale_profile: PHYSICAL,
+        balance_profile: &old_schema,
+    })
+    .expect_err("Balance schema v1 must be rejected");
+    assert!(matches!(
+        error,
+        PackageError::InvalidProfile {
+            profile: ProfileKind::Balance,
+            error: ProfileValidationError::UnsupportedSchema {
+                expected: 2,
+                actual: 1
+            }
+        }
+    ));
+
+    let mut missing_energy: serde_json::Value =
+        serde_json::from_slice(BALANCE).expect("reference balance JSON");
+    missing_energy
+        .as_object_mut()
+        .expect("balance profile is an object")
+        .remove("gateSwitchBaseEnergy");
+    let missing_energy = serde_json::to_vec(&missing_energy).expect("test JSON serializes");
+    let error = decode_package(ArtifactBytes {
+        scenario: SCENARIO,
+        numeric_profile: NUMERIC,
+        physical_scale_profile: PHYSICAL,
+        balance_profile: &missing_energy,
+    })
+    .expect_err("gateSwitchBaseEnergy must be required");
+    assert!(matches!(
+        error,
+        PackageError::InvalidJson {
+            artifact: ArtifactKind::Profile(ProfileKind::Balance),
+            category: JsonErrorCategory::Data,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -58,11 +110,11 @@ fn balance_extension_reference_artifacts_match_their_golden_hashes() {
     for (bytes, expected_hash) in [
         (
             CAPACITY_BALANCE,
-            "1e3ffe4f813e49ecd1c77bb61cad23e6f6e8c5967e6702038999b4132a438fa9",
+            "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c",
         ),
         (
             RADIATION_BALANCE,
-            "beb967d29951251cf6404fd998ed687bb98ad302559cf6cd9e05017cf92ecae6",
+            "86d135f608076ec8c8c1f2702d28cc7c3c4792c4311c503ffa1532239d4589c9",
         ),
     ] {
         let profile: BalanceProfile =

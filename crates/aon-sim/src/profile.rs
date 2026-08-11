@@ -4,6 +4,7 @@ use std::fmt;
 use thiserror::Error;
 
 pub const PROFILE_SCHEMA_VERSION_V1: u32 = 1;
+pub const PROFILE_SCHEMA_VERSION_V2: u32 = 2;
 
 pub const REFERENCE_WIRE_GEOMETRY_QUANTUM: Fixed = Fixed(FIXED_ONE / 64);
 pub const REFERENCE_CIRCUIT_ROUTING_PITCH: Fixed = Fixed(FIXED_ONE / 4);
@@ -87,6 +88,7 @@ impl NumericProfile {
             &self.profile_id,
             self.kind,
             ProfileKind::Numeric,
+            PROFILE_SCHEMA_VERSION_V1,
         )?;
         if self.fixed_one != FIXED_ONE {
             return Err(ProfileValidationError::FixedOneMismatch {
@@ -244,6 +246,7 @@ impl PhysicalScaleProfile {
             &self.profile_id,
             self.kind,
             ProfileKind::PhysicalScale,
+            PROFILE_SCHEMA_VERSION_V1,
         )?;
 
         let quantum = self.wire_geometry_quantum.0;
@@ -435,6 +438,7 @@ pub struct BalanceProfile {
     pub kind: ProfileKind,
     pub simulation_hz: u32,
     pub gate_base_delay: u64,
+    pub gate_switch_base_energy: u64,
     pub sense_delay: u64,
     pub logic_threshold: u64,
     pub nominal_gate_drive: u64,
@@ -459,11 +463,12 @@ pub struct BalanceProfile {
 impl BalanceProfile {
     pub fn stage0_alpha(profile_id: impl Into<String>) -> Self {
         Self {
-            schema_version: PROFILE_SCHEMA_VERSION_V1,
+            schema_version: PROFILE_SCHEMA_VERSION_V2,
             profile_id: profile_id.into(),
             kind: ProfileKind::Balance,
             simulation_hz: 20,
             gate_base_delay: 1,
+            gate_switch_base_energy: 1,
             sense_delay: 1,
             logic_threshold: 100,
             nominal_gate_drive: 400,
@@ -521,10 +526,12 @@ impl BalanceProfile {
             &self.profile_id,
             self.kind,
             ProfileKind::Balance,
+            PROFILE_SCHEMA_VERSION_V2,
         )?;
         for (field, valid) in [
             ("simulationHz", self.simulation_hz > 0),
             ("gateBaseDelay", self.gate_base_delay > 0),
+            ("gateSwitchBaseEnergy", self.gate_switch_base_energy > 0),
             ("senseDelay", self.sense_delay > 0),
             ("logicThreshold", self.logic_threshold > 0),
             ("nominalGateDrive", self.nominal_gate_drive > 0),
@@ -547,7 +554,7 @@ impl BalanceProfile {
         }
         require_positive_rational("wireLoadPerWU", self.wire_load_per_wu)?;
         require_nonnegative_rational("wireLinearK", self.wire_linear_k)?;
-        require_nonnegative_rational("wireQuadraticK", self.wire_quadratic_k)?;
+        require_positive_rational("wireQuadraticK", self.wire_quadratic_k)?;
         require_unit_interval("logicOperateThreshold", self.logic_operate_threshold)?;
         require_unit_interval("brownoutDelayFloor", self.brownout_delay_floor)?;
         require_positive(ProfileKind::Balance, "senseRadius", self.sense_radius.0)?;
@@ -575,6 +582,7 @@ impl BalanceProfile {
         write_u32(self.simulation_hz, write);
         for value in [
             self.gate_base_delay,
+            self.gate_switch_base_energy,
             self.sense_delay,
             self.logic_threshold,
             self.nominal_gate_drive,
@@ -716,10 +724,11 @@ fn validate_header(
     profile_id: &str,
     actual_kind: ProfileKind,
     expected_kind: ProfileKind,
+    expected_schema_version: u32,
 ) -> Result<(), ProfileValidationError> {
-    if schema_version != PROFILE_SCHEMA_VERSION_V1 {
+    if schema_version != expected_schema_version {
         return Err(ProfileValidationError::UnsupportedSchema {
-            expected: PROFILE_SCHEMA_VERSION_V1,
+            expected: expected_schema_version,
             actual: schema_version,
         });
     }
@@ -1150,6 +1159,27 @@ mod tests {
     }
 
     #[test]
+    fn balance_v2_hashes_schema_and_switch_energy_in_fixed_field_order() {
+        let profile = BalanceProfile::stage0_alpha("not-hashed");
+        let mut actual = Vec::new();
+        profile.encode_canonical(&mut |bytes| actual.extend_from_slice(bytes));
+
+        let mut expected_prefix = Vec::new();
+        expected_prefix.extend_from_slice(PROFILE_HASH_DOMAIN);
+        expected_prefix.extend_from_slice(&PROFILE_ENCODER_VERSION.to_le_bytes());
+        expected_prefix.push(ProfileKind::Balance.canonical_tag());
+        expected_prefix.extend_from_slice(&PROFILE_SCHEMA_VERSION_V2.to_le_bytes());
+        expected_prefix.extend_from_slice(&profile.simulation_hz.to_le_bytes());
+        expected_prefix.extend_from_slice(&profile.gate_base_delay.to_le_bytes());
+        expected_prefix.extend_from_slice(&profile.gate_switch_base_energy.to_le_bytes());
+        assert!(actual.starts_with(&expected_prefix));
+
+        let mut changed = profile.clone();
+        changed.gate_switch_base_energy = 2;
+        assert_ne!(profile.canonical_hash(), changed.canonical_hash());
+    }
+
+    #[test]
     fn rational_is_normalized_before_hashing() {
         assert_eq!(Rational::new(2, 20), Ok(ratio(1, 10)));
         assert_eq!(Rational::new(-2, -20), Ok(ratio(1, 10)));
@@ -1235,6 +1265,36 @@ mod tests {
                 field: "gateBaseDelay",
             })
         );
+
+        let mut old_balance = BalanceProfile::stage0_alpha("balance");
+        old_balance.schema_version = PROFILE_SCHEMA_VERSION_V1;
+        assert_eq!(
+            old_balance.validate(),
+            Err(ProfileValidationError::UnsupportedSchema {
+                expected: PROFILE_SCHEMA_VERSION_V2,
+                actual: PROFILE_SCHEMA_VERSION_V1,
+            })
+        );
+
+        let mut zero_switch_energy = BalanceProfile::stage0_alpha("balance");
+        zero_switch_energy.gate_switch_base_energy = 0;
+        assert_eq!(
+            zero_switch_energy.validate(),
+            Err(ProfileValidationError::NonPositiveField {
+                profile: ProfileKind::Balance,
+                field: "gateSwitchBaseEnergy",
+            })
+        );
+
+        let mut zero_quadratic_delay = BalanceProfile::stage0_alpha("balance");
+        zero_quadratic_delay.wire_quadratic_k = ratio(0, 1);
+        assert_eq!(
+            zero_quadratic_delay.validate(),
+            Err(ProfileValidationError::NonPositiveField {
+                profile: ProfileKind::Balance,
+                field: "wireQuadraticK",
+            })
+        );
     }
 
     #[test]
@@ -1287,8 +1347,10 @@ mod tests {
     #[test]
     fn stage0_balance_constructor_contains_all_reference_values() {
         let profile = BalanceProfile::stage0_alpha("stage0-alpha");
+        assert_eq!(profile.schema_version, PROFILE_SCHEMA_VERSION_V2);
         assert_eq!(profile.simulation_hz, 20);
         assert_eq!(profile.gate_base_delay, 1);
+        assert_eq!(profile.gate_switch_base_energy, 1);
         assert_eq!(profile.sense_delay, 1);
         assert_eq!(profile.logic_threshold, 100);
         assert_eq!(profile.nominal_gate_drive, 400);
@@ -1457,21 +1519,21 @@ mod tests {
                 .canonical_hash()
                 .expect("reference balance profile is valid")
                 .to_string(),
-            "5eac16f9f91f442c2283009b69d164bdaa5b33557b402f33c1c581801c05bdee"
+            "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd"
         );
         assert_eq!(
             BalanceProfile::capacity_probe_alpha("ignored")
                 .canonical_hash()
                 .expect("reference capacity probe profile is valid")
                 .to_string(),
-            "1e3ffe4f813e49ecd1c77bb61cad23e6f6e8c5967e6702038999b4132a438fa9"
+            "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c"
         );
         assert_eq!(
             BalanceProfile::radiation_reference_alpha("ignored")
                 .canonical_hash()
                 .expect("reference radiation profile is valid")
                 .to_string(),
-            "beb967d29951251cf6404fd998ed687bb98ad302559cf6cd9e05017cf92ecae6"
+            "86d135f608076ec8c8c1f2702d28cc7c3c4792c4311c503ffa1532239d4589c9"
         );
     }
 }

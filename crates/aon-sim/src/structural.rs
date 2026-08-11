@@ -1,7 +1,7 @@
 use crate::command::{
     BindPortCommand, Command, CommandAcceptance, CommandEnvelope, CommandRejection,
     CommandRejectionReason, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
-    PlaceWireCommand, RemoveEntityCommand,
+    PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand,
 };
 #[cfg(test)]
 use crate::identity::FixedSubstrateIndex;
@@ -10,6 +10,7 @@ use crate::identity::{
     JunctionIndex, WireId, WireIndex,
 };
 use crate::profile::{GateFootprint, PhysicalScaleProfile, PortAnchor};
+use crate::signal::{ExternalDriverStatus, SignalError, SignalWorld};
 use crate::structural_geometry::{
     parallel_segments_are_too_close, point_is_strict_segment_interior,
     segment_intersects_aabb_interior, segment_overlaps_aabb_boundary,
@@ -20,7 +21,7 @@ use crate::topology::{
     GateType, JunctionStore, RoutingDomain, TopologyError, WireEnd, WireRecord, WireStore,
     checked_add_point, checked_sub_point,
 };
-use crate::{EntityId, Fixed, FixedVec2, NumericError, Tick, polyline_length};
+use crate::{DriverId, EntityId, Fixed, FixedVec2, NumericError, Tick, polyline_length};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -65,11 +66,29 @@ impl From<EntityRegistryError> for StructuralError {
     }
 }
 
+impl From<SignalError> for StructuralError {
+    fn from(error: SignalError) -> Self {
+        match error {
+            SignalError::NumericOverflow => Self::NumericOverflow,
+            SignalError::InvalidCanonicalState => Self::InvalidCanonicalState,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalDriverUpdate {
+    pub driver: DriverId,
+    pub level: crate::LogicLevel,
+    pub strength: crate::DriveStrength,
+    pub ordinal: u64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct StructuralPhaseReport {
     pub acceptances: Vec<CommandAcceptance>,
     pub rejections: Vec<CommandRejection>,
     pub topology_changed: bool,
+    pub external_driver_updates: Vec<ExternalDriverUpdate>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -93,16 +112,43 @@ impl StructuralWorld {
         Self::default()
     }
 
+    #[cfg(test)]
     pub fn apply_phase0(
         &mut self,
         tick: Tick,
         commands: &[CommandEnvelope],
         physical: &PhysicalScaleProfile,
     ) -> Result<StructuralPhaseReport, StructuralError> {
+        self.apply_phase0_internal(tick, commands, physical, None)
+    }
+
+    pub fn apply_phase0_with_signal(
+        &mut self,
+        signal: &mut SignalWorld,
+        tick: Tick,
+        commands: &[CommandEnvelope],
+        physical: &PhysicalScaleProfile,
+    ) -> Result<StructuralPhaseReport, StructuralError> {
+        let mut signal_working = signal.clone();
+        let report =
+            self.apply_phase0_internal(tick, commands, physical, Some(&mut signal_working))?;
+        *signal = signal_working;
+        Ok(report)
+    }
+
+    fn apply_phase0_internal(
+        &mut self,
+        tick: Tick,
+        commands: &[CommandEnvelope],
+        physical: &PhysicalScaleProfile,
+        mut signal: Option<&mut SignalWorld>,
+    ) -> Result<StructuralPhaseReport, StructuralError> {
         let mut working = self.clone();
         let batch_frontier = self.entities.next_id();
+        let driver_frontier = signal.as_deref().map(SignalWorld::driver_frontier);
         let mut report = StructuralPhaseReport::default();
         let mut ordinal_counts = BTreeMap::<u64, usize>::new();
+        let mut external_updates = BTreeMap::<DriverId, ExternalDriverUpdate>::new();
 
         for envelope in commands {
             if envelope.target_tick == tick {
@@ -136,12 +182,27 @@ impl StructuralWorld {
                 continue;
             }
 
-            match working.apply_command(
-                &envelope.command,
-                batch_frontier,
-                physical,
-                &mut changes,
-            )? {
+            let removed_location = match &envelope.command {
+                Command::RemoveEntity(command) => {
+                    working.entities.location(command.target).copied()
+                }
+                _ => None,
+            };
+            let result = match &envelope.command {
+                Command::SetExternalDriver(command) => match signal.as_deref_mut() {
+                    Some(signal) => apply_external_driver_command(
+                        signal,
+                        *command,
+                        driver_frontier.ok_or(StructuralError::InvalidCanonicalState)?,
+                        envelope.ordinal,
+                        &mut external_updates,
+                    ),
+                    None => Ok(Err(Rejection::UnsupportedCommand)),
+                },
+                command => working.apply_command(command, batch_frontier, physical, &mut changes),
+            }?;
+
+            match result {
                 Ok(created_entity) => report.acceptances.push(CommandAcceptance {
                     target_tick: envelope.target_tick,
                     ordinal: envelope.ordinal,
@@ -152,6 +213,19 @@ impl StructuralWorld {
                     ordinal: envelope.ordinal,
                     reason,
                 }),
+            }
+
+            if result.is_ok()
+                && !matches!(envelope.command, Command::SetExternalDriver(_))
+                && let Some(signal) = signal.as_deref_mut()
+            {
+                apply_signal_lifecycle(
+                    signal,
+                    &envelope.command,
+                    result.ok().flatten(),
+                    removed_location,
+                    tick,
+                )?;
             }
         }
 
@@ -172,6 +246,18 @@ impl StructuralWorld {
         report
             .rejections
             .sort_unstable_by_key(|result| (result.target_tick, result.ordinal));
+        if let Some(signal) = signal.as_deref() {
+            external_updates.retain(|driver, _| {
+                matches!(
+                    signal.external_driver_status(*driver, signal.driver_frontier()),
+                    ExternalDriverStatus::External
+                )
+            });
+        }
+        report.external_driver_updates = external_updates.into_values().collect();
+        report
+            .external_driver_updates
+            .sort_unstable_by_key(|update| update.ordinal);
         report.topology_changed = changes.topology_changed;
         *self = working;
         Ok(report)
@@ -350,6 +436,64 @@ impl StructuralWorld {
             .update_location(second_id, EntityLocation::FixedSubstrate(first))?;
         Ok(())
     }
+}
+
+fn apply_external_driver_command(
+    signal: &SignalWorld,
+    command: SetExternalDriverCommand,
+    batch_frontier: DriverId,
+    ordinal: u64,
+    updates: &mut BTreeMap<DriverId, ExternalDriverUpdate>,
+) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
+    let reason = match signal.external_driver_status(command.driver, batch_frontier) {
+        ExternalDriverStatus::Unknown => Some(Rejection::UnknownDriver),
+        ExternalDriverStatus::Removed => Some(Rejection::RemovedDriver),
+        ExternalDriverStatus::WrongKind => Some(Rejection::InvalidDriverKind),
+        ExternalDriverStatus::External => None,
+    };
+    if let Some(reason) = reason {
+        return Ok(Err(reason));
+    }
+    updates.insert(
+        command.driver,
+        ExternalDriverUpdate {
+            driver: command.driver,
+            level: command.level,
+            strength: command.strength,
+            ordinal,
+        },
+    );
+    Ok(Ok(None))
+}
+
+fn apply_signal_lifecycle(
+    signal: &mut SignalWorld,
+    command: &Command,
+    created_entity: Option<EntityId>,
+    removed_location: Option<EntityLocation>,
+    tick: Tick,
+) -> Result<(), StructuralError> {
+    match command {
+        Command::PlaceGate(command) => {
+            let id = created_entity.ok_or(StructuralError::InvalidCanonicalState)?;
+            signal.activate_gate(GateId(id), command.gate_type, tick)?;
+        }
+        Command::PlaceWire(_) => {
+            let id = created_entity.ok_or(StructuralError::InvalidCanonicalState)?;
+            signal.activate_wire(WireId(id))?;
+        }
+        Command::RemoveEntity(command) => match removed_location {
+            Some(EntityLocation::Gate(_)) => signal.remove_gate(GateId(command.target))?,
+            Some(EntityLocation::Wire(_)) => signal.remove_wire(WireId(command.target))?,
+            _ => {}
+        },
+        Command::PlaceJunction(_)
+        | Command::PlaceFixedSubstrate(_)
+        | Command::PlaceMobileSubstrate(_)
+        | Command::BindPort(_)
+        | Command::SetExternalDriver(_) => {}
+    }
+    Ok(())
 }
 
 impl StructuralWorld {

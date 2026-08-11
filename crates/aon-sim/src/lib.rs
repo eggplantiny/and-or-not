@@ -5,11 +5,14 @@ mod canonical;
 mod command;
 mod contract;
 mod error;
+mod event;
 mod geometry;
 mod hash;
 mod identity;
 mod numeric;
 mod profile;
+mod signal;
+mod signal_topology;
 mod simulation;
 mod snapshot;
 mod structural;
@@ -31,6 +34,12 @@ pub use contract::{
     SemanticsVersion, SimulationContract,
 };
 pub use error::{JsonErrorCategory, PackageError, SimulationError};
+pub use event::{
+    CanonicalEvent, DRIVER_TRANSITION_KIND_ORDER, DriverSample, DriverTransition,
+    DriverTransitionCause, EventCalendar, EventCalendarError, EventKey, EventPayloadAllocator,
+    FIRST_EVENT_PAYLOAD_ORDER, PathCertificateId, RESERVED_EVENT_PAYLOAD_ORDER,
+    SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival, SignalArrivalKind,
+};
 pub use geometry::{
     FixedVec2, GeometryError, cell_coordinate, polyline_length, segment_length, validate_quantized,
 };
@@ -51,10 +60,14 @@ pub use profile::{
     BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile, DivisionProfile, GateFootprint,
     GateFootprintTable, GatePortTable, GeometryLengthProfile, NumericProfile,
     OrientationBoundaryMultipliers, OrientationWeightTable, OverflowPolicy,
-    PROFILE_SCHEMA_VERSION_V1, PhysicalScaleProfile, PortAnchor, ProfileBundle, ProfileHashes,
-    ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH, REFERENCE_GATE_MINIMUM_EXTENT,
-    REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH,
-    RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
+    PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2, PhysicalScaleProfile, PortAnchor,
+    ProfileBundle, ProfileHashes, ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH,
+    REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM,
+    REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
+};
+pub use signal::{
+    DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,
+    GateSignalSnapshot, SignalChangeRecord, SignalStepCounters, SinkRole, WireSignalSnapshot,
 };
 pub use simulation::{Simulation, SimulationPackage, StepReport};
 pub use snapshot::RenderSnapshot;

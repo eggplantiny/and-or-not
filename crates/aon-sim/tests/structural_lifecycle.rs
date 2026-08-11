@@ -163,7 +163,7 @@ fn heterogeneous_rejections_are_permutation_invariant_and_unsupported_commands_a
         CommandRejection {
             target_tick: Tick(0),
             ordinal: 20,
-            reason: CommandRejectionReason::UnsupportedCommand,
+            reason: CommandRejectionReason::UnknownDriver,
         },
         CommandRejection {
             target_tick: Tick(0),
@@ -669,8 +669,8 @@ fn simulation_with_every_structural_kind() -> Simulation {
 
 fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"AON\0STATE\0V1\0");
-    push_u16(&mut bytes, 1); // encoder version
+    bytes.extend_from_slice(b"AON\0STATE\0V2\0");
+    push_u16(&mut bytes, 2); // encoder version
     bytes.push(0); // aon-semantics-v1
     bytes.extend_from_slice(contract.numeric_profile_hash.as_bytes());
     bytes.extend_from_slice(contract.physical_scale_profile_hash.as_bytes());
@@ -720,8 +720,67 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
         push_point(&mut bytes, SUBSTRATE_HALF_EXTENT, SUBSTRATE_HALF_EXTENT);
     }
 
-    for _ in 0..4 {
-        push_u64(&mut bytes, 0); // future structural sections
+    // Driver allocation slots. Driver 1 is the inert external input; Driver 2 is the NOT output.
+    push_u64(&mut bytes, 3); // DriverId frontier
+    push_u64(&mut bytes, 2); // allocated Driver slots
+    push_u64(&mut bytes, 1);
+    bytes.push(1); // alive
+    push_u64(&mut bytes, 2); // owner Gate
+    bytes.push(0); // ExternalInputA
+    bytes.push(0); // Low
+    push_u64(&mut bytes, 0); // strength
+    push_u64(&mut bytes, 0); // revision
+    push_u64(&mut bytes, 1); // emitted Tick
+    push_u64(&mut bytes, 1); // sample DriverId
+    push_u64(&mut bytes, 2);
+    bytes.push(1); // alive
+    push_u64(&mut bytes, 2); // owner Gate
+    bytes.push(2); // GateOutput
+    bytes.push(1); // High
+    push_u64(&mut bytes, 400); // nominal Gate drive
+    push_u64(&mut bytes, 0); // revision
+    push_u64(&mut bytes, 2); // emitted Tick
+    push_u64(&mut bytes, 2); // sample DriverId
+
+    push_u64(&mut bytes, 2); // SinkId frontier
+    push_u64(&mut bytes, 1); // allocated Sink slots
+    push_u64(&mut bytes, 1);
+    bytes.push(1); // alive
+    push_u64(&mut bytes, 2); // owner Gate
+    bytes.push(0); // InputA
+    bytes.push(0); // Low
+    bytes.push(0); // committed dirty=false
+
+    push_u64(&mut bytes, 1); // Gate signal count
+    push_u64(&mut bytes, 2); // GateId
+    push_u64(&mut bytes, 1); // input A SinkId
+    push_u64(&mut bytes, 1); // input A external DriverId
+    bytes.push(0); // no input B
+    push_u64(&mut bytes, 2); // output DriverId
+    bytes.push(1); // current High
+    bytes.push(1); // desired High
+    push_u32(&mut bytes, 1); // pending generation frontier
+    bytes.push(0); // no pending due Tick
+    bytes.push(0); // no pending level
+    bytes.push(0); // no pending energy
+    push_u64(&mut bytes, 0); // canceled switching heat
+
+    push_u64(&mut bytes, 1); // Wire excitation count
+    push_u64(&mut bytes, 4); // WireId
+    push_u128(&mut bytes, 400); // active High
+    push_u128(&mut bytes, 0); // active Low
+    push_u128(&mut bytes, 0); // active X
+    push_u128(&mut bytes, 0); // previous High
+    push_u128(&mut bytes, 0); // previous Low
+    push_u128(&mut bytes, 0); // previous X
+
+    push_u64(&mut bytes, 0); // Sink Driver slot count
+    push_u64(&mut bytes, 2); // event payload frontier; payload 1 was drained
+    push_u64(&mut bytes, 0); // pending DriverTransition count
+    push_u64(&mut bytes, 0); // pending SignalArrival count
+
+    for _ in 0..5 {
+        push_u64(&mut bytes, 0); // later-stage reserved sections
     }
     bytes
 }
@@ -748,6 +807,10 @@ fn push_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
+fn push_u128(bytes: &mut Vec<u8>, value: u128) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
 #[test]
 fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
     let simulation = simulation_with_every_structural_kind();
@@ -756,7 +819,7 @@ fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
 
     assert_eq!(
         independently_hashed.to_hex().as_str(),
-        "a3561c16544814bdea3a795ace042e0a21b8eba1fae5d839328acb8dd970ed74"
+        "eb720145430a6ea25d962ba3749c3a9c24fdfe6abb8ce12750d6c7fea4e66d81"
     );
     assert_eq!(
         simulation.state_hash().as_bytes(),

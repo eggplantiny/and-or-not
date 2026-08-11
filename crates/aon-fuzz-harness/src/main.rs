@@ -1,7 +1,8 @@
 use aon_fuzz_harness::{
     CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
-    MAX_GEOMETRY_INPUT_BYTES, StatefulCommandExecutionObservation, exercise_commands,
-    exercise_decoder, exercise_geometry, exercise_stateful_commands,
+    MAX_GEOMETRY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, SignalRuntimeExecutionObservation,
+    StatefulCommandExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
+    exercise_signal_runtime, exercise_stateful_commands,
 };
 use std::io::Read;
 
@@ -11,7 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| String::from("both"));
     let input_limit = MAX_DECODER_INPUT_BYTES
         .max(MAX_GEOMETRY_INPUT_BYTES)
-        .max(MAX_COMMAND_INPUT_BYTES);
+        .max(MAX_COMMAND_INPUT_BYTES)
+        .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
         .take(u64::try_from(input_limit)?)
@@ -21,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "decoder" => print_decoder(&input),
         "geometry" => print_geometry(&input),
         "commands" => print_commands(&input)?,
+        "signal" => print_signal_runtime(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -29,13 +32,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_decoder(&input);
             print_geometry(&input);
             print_commands(&input)?;
+            print_signal_runtime(&input)?;
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, geometry, commands, both, or all"
+                "unknown mode `{mode}`; expected decoder, geometry, commands, signal, both, or all"
             )
             .into());
         }
+    }
+    Ok(())
+}
+
+fn print_signal_runtime(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let observation = exercise_signal_runtime(input);
+    let coverage = observation.coverage;
+    println!(
+        "signal input_bytes={} prefix_steps={} generated_steps={} encodings={} hashes={} result={} valid_updates={} removed={} wrong_kind={} predicted={} simultaneous={} ordered_events={} coalesced={} max_strength={} driver_events={} arrivals={} gate_changes={} wire_changes={}",
+        observation.consumed_len,
+        observation.prefix_reports.len(),
+        observation.generated_steps,
+        observation.encodings.len(),
+        observation.state_hashes.len(),
+        signal_runtime_result(&observation.execution),
+        coverage.valid_external_updates,
+        coverage.removed_driver_attempts,
+        coverage.wrong_kind_driver_attempts,
+        coverage.predicted_driver_attempts,
+        coverage.simultaneous_update_batches,
+        coverage.simultaneous_driver_event_batches,
+        coverage.coalesced_update_batches,
+        coverage.max_strength_updates,
+        coverage.driver_transitions_applied,
+        coverage.signal_arrivals_applied,
+        coverage.gate_output_changes,
+        coverage.wire_excitation_changes,
+    );
+    if let Some(failure) = observation.invariant_failure() {
+        return Err(format!("signal-runtime harness invariant failed: {failure}").into());
     }
     Ok(())
 }
@@ -130,5 +164,22 @@ const fn stateful_command_result(execution: &StatefulCommandExecutionObservation
         }
         StatefulCommandExecutionObservation::Stepped(Ok(_)) => "stepped",
         StatefulCommandExecutionObservation::Stepped(Err(_)) => "run-error",
+    }
+}
+
+const fn signal_runtime_result(execution: &SignalRuntimeExecutionObservation) -> &'static str {
+    match execution {
+        SignalRuntimeExecutionObservation::PackageRejected(_) => "package-rejected",
+        SignalRuntimeExecutionObservation::SimulationRejected { .. } => "simulation-rejected",
+        SignalRuntimeExecutionObservation::PrefixRunError { .. } => "prefix-run-error",
+        SignalRuntimeExecutionObservation::PrefixCommandRejected { .. } => {
+            "prefix-command-rejected"
+        }
+        SignalRuntimeExecutionObservation::PrefixInvariantViolation { .. } => {
+            "prefix-invariant-violation"
+        }
+        SignalRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
+        SignalRuntimeExecutionObservation::RunError { .. } => "run-error",
+        SignalRuntimeExecutionObservation::Completed => "completed",
     }
 }

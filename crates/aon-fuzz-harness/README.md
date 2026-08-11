@@ -20,6 +20,23 @@ a fresh world. The stateful target first builds a deterministic three-Tick Fixed
 through public commands, leaving live Gate/Junction/Wire records and a tombstoned EntityId before
 applying the arbitrary batch.
 
+The `signal` target maps at most 32 bytes to 32 post-prefix Ticks. It constructs two identical
+two-NOT/one-Wire circuits entirely through the public `Simulation` command API, retains observed
+live and removed Driver IDs, and then interprets each byte as one of these operations:
+
+- valid source or target external update, including threshold-adjacent and `u64::MAX` strength;
+- removed, predicted-frontier, or live Gate-output Driver update;
+- simultaneous updates to two Drivers;
+- two updates to one Driver that exercise ordinal-last coalescing;
+- an empty Tick that lets inertial and transport events mature.
+
+Multi-command batches are submitted to the second simulation in reverse insertion order. Every
+report, public Gate/Driver/Sink/Wire observation, and post-Tick state hash must still agree. Any
+command-encoder mismatch, modeled acceptance/rejection mismatch, `NumericOverflow`,
+`InvalidCanonicalState`, other run error, or replica disagreement fails the target. The signal
+target therefore does not silently classify a fatal engine error as an ordinary arbitrary-input
+outcome.
+
 Run the deterministic generated cases and retained regression corpus with:
 
 ```sh
@@ -32,11 +49,13 @@ Replay an arbitrary stream from standard input with:
 cargo run -p aon-fuzz-harness --locked -- decoder < input.bin
 cargo run -p aon-fuzz-harness --locked -- geometry < input.bin
 cargo run -p aon-fuzz-harness --locked -- commands < input.bin
+cargo run -p aon-fuzz-harness --locked -- signal < input.bin
 cargo run -p aon-fuzz-harness --locked -- all < input.bin
 ```
 
-Normal typed decoder or checked numeric-overflow results are accepted outcomes. A panic, reference
-package/prefix failure, non-numeric simulation invariant error, or disagreement between the two
-command encoders fails CI and command-mode CLI replay. Add every minimized reproducer under
-`corpus/decoder`, `corpus/geometry`, or `corpus/command` and register it in
+Normal typed decoder errors and checked numeric-overflow outcomes in the geometry and legacy
+command targets are accepted. The signal target treats every simulation run error as a failure. A
+panic, reference package/prefix failure, unexpected simulation invariant error, or disagreement
+between the two command encoders fails CI and CLI replay. Add every minimized reproducer under
+`corpus/decoder`, `corpus/geometry`, `corpus/command`, or `corpus/signal-runtime` and register it in
 `tests/regression_corpus.rs` so CI replays it permanently.
