@@ -8,6 +8,11 @@ fresh clean-checkout offline 게이트와 실제 GUI 스모크를 통과했고, 
 2026-08-12 사용자 직접 A/B 플레이에서 PASS했다. 전체 엔진은 아직 완료되지 않았으며, 현황은
 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
+**S1-M0 Physical Scale Experiment Baseline도 정식 완료됐다.** 구현 커밋
+`fe616fc6d9ffc81fd37864cf3d018343b327106b`는 별도 Windows-native clean clone에서 전체
+workspace 검사와 테스트, Stage 0 게이트, 47-test S1-M0 게이트, 8-profile/16-run 실제
+materialization을 모두 통과했다. Stage 1 전체는 아직 진행 중이며 다음 구현 경계는 S1-M1이다.
+
 ## Source baseline
 
 - Product: `docs/prd-v.1.0.md` — v1.0 GO Candidate

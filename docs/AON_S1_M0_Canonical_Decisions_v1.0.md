@@ -909,3 +909,41 @@ same Module primitive composition
 
 Conversely, metadata cannot be used to fake semantic uniqueness, and semantic incompatibility
 cannot be hidden by metadata or silent geometry transformation.
+
+## 17. Closure evidence
+
+S1-M0 was implemented at commit `fe616fc6d9ffc81fd37864cf3d018343b327106b` and closed on
+2026-08-12 after an independent Windows-native `git clone --no-local` verification. WSL was not
+used. The committed clone returned exit status zero for:
+
+```powershell
+cargo metadata --locked --offline --format-version 1 --no-deps
+cargo fmt --all -- --check
+cargo check --workspace --all-targets --locked --offline
+cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+cargo test --workspace --locked --offline -- --test-threads=1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stage0-technical-gate.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\s1-m0-technical-gate.ps1
+cargo run -p aon-headless --locked --offline -- `
+  experiment-plan fixtures/experiments/s1-m0-physical-scale-v1.json `
+  --output <fresh-output-directory>
+```
+
+The clean run proved 25 exact Stage 0 tests plus the canonical-core dependency boundary, 47
+exact S1-M0 tests, and the full workspace suite. Actual materialization produced eight Physical
+Scale Profile artifacts and sixteen pairwise-distinct Run IDs. Its retained evidence is:
+
+- Experiment plan file SHA-256:
+  `9229F65C6DD81605FB912EF03FBEA832A7828FA48675E0DE260D6A51F96872F4`;
+- Module fixture file SHA-256:
+  `2C2B27B14C5D75EF90EA2CAD075CA66D35CDC90A7129F575446161D65A5CABA3`;
+- Module semantic `ArtifactHash`:
+  `e7130605cbaebd753f8f338be7a633d8006bc6f85b14bbd5c74e44ecd0a06172`;
+- materialized `runs.json` SHA-256:
+  `6F16DE35480066D8B7DCBC1006AC3F27CA30E219012F4F404D7E896391ACD371`;
+- retained sixteen-run first and last IDs:
+  `7f39a07dbcddd870959cc0b03d99e1ff7a0087f1e9cc37316fa1a4ceb6f4cc07` and
+  `3d48884476f70b2972f903ed47ffb2c342bfdf24032f10e0888d685226bf2667`.
+
+The independent post-run `git status --short` was empty. This evidence closes S1-M0 only;
+S1-M1 through S1-M6 and both Stage 1 gates remain open.

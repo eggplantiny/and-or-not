@@ -26,7 +26,7 @@ C-18, C-19, C-20, C-25.
 
 ## Stage 1 — Capacity Economy Probe
 
-- [ ] S1-M0 — Physical Scale Experiment Baseline
+- [x] S1-M0 — Physical Scale Experiment Baseline *(committed fresh clean-checkout and Windows-native gate passed)*
 - [ ] S1-M1 — Main Core / Capacity Accounting
 - [ ] S1-M2 — Sensing / Power / Brownout
 - [ ] S1-M3 — Capacity Support Load
@@ -365,3 +365,41 @@ workspace test, 25 exact technical-gate tests, the canonical dependency boundary
 and a clean post-run status. The same clean binary passed the default editor and F5/F6 Network/
 Circuit Mobile GUI smokes. The Stage 0 product gate passed by explicit user direct-play verdict
 on 2026-08-12 using `docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`. Stage 1 may begin.
+
+## Completed slice — S1-M0
+
+S1-M0 completed on 2026-08-12 at implementation commit
+`fe616fc6d9ffc81fd37864cf3d018343b327106b`. This completes only the Physical Scale
+Experiment Baseline; S1-M1 through S1-M6 and both Stage 1 gates remain open.
+
+- [x] The Physical Scale generator validates and publishes a canonical hash-sorted 2 x 2 x 2
+  matrix with eight pairwise-distinct semantic Profile hashes.
+- [x] Long-wire distance is exact absolute Design geometry rather than a Physical Profile field;
+  two distances reuse the eight Physical hashes and produce sixteen distinct canonical Run IDs.
+- [x] Strict Experiment plan v1 resolution verifies Scenario and Profile IDs, kinds, schemas,
+  invariants, declared hashes, axes, ordering, limits, and retained Run ID goldens.
+- [x] Module v1 stores exact absolute Fixed geometry, validates the Semantics/Numeric/Physical
+  contract and structural laws, and never scales, snaps, rotates, or mutates its source artifact.
+- [x] Generated-profile Replay round trips with an identical full trace, while a different
+  Physical hash is rejected before Tick execution.
+- [x] Headless materialization validates before atomic publication and emits eight canonical
+  Physical Profile files plus one sixteen-run manifest; bounded Experiment and Module decoder
+  fuzz targets replay retained valid and invalid corpora without panic.
+- [x] The fail-closed `scripts/s1-m0-technical-gate.ps1` runs 47 exact tests, and the complete
+  Stage 0 technical gate remains green.
+- [x] An independent Windows-native `git clone --no-local` of the implementation commit passed
+  locked/offline metadata, formatting, all-target workspace check, strict Clippy, the complete
+  workspace test suite, both technical gates, actual headless materialization, and a clean
+  post-run Git status. WSL was not used.
+
+Retained closure goldens:
+
+- Experiment plan file SHA-256:
+  `9229F65C6DD81605FB912EF03FBEA832A7828FA48675E0DE260D6A51F96872F4`.
+- Module fixture file SHA-256:
+  `2C2B27B14C5D75EF90EA2CAD075CA66D35CDC90A7129F575446161D65A5CABA3`;
+  Module semantic `ArtifactHash`:
+  `e7130605cbaebd753f8f338be7a633d8006bc6f85b14bbd5c74e44ecd0a06172`.
+- Materialized `runs.json` SHA-256:
+  `6F16DE35480066D8B7DCBC1006AC3F27CA30E219012F4F404D7E896391ACD371`;
+  its sixteen retained Run IDs are ordered and pairwise distinct.
