@@ -602,6 +602,10 @@ fn signal_node_for_endpoint(
         crate::EndpointTarget::MobilePort(reference) => {
             SignalNodeKey::MobilePort(reference.mobile, reference.port)
         }
+        // The Main Core anchor participates in physical Body Connectivity but is neither a
+        // Signal processor nor an automatic router. Each incident Signal Wire therefore remains
+        // a terminal at the anchor rather than being joined into a shared Signal net.
+        crate::EndpointTarget::MainCoreAnchor(_) => SignalNodeKey::FreeEnd(wire, end),
     }
 }
 
@@ -1577,6 +1581,21 @@ mod tests {
             signal_node_for_endpoint(first_wire, WireEnd::B, crate::EndpointTarget::Free),
             signal_node_for_endpoint(second_wire, WireEnd::A, crate::EndpointTarget::Free),
             "coordinate-equal Free endpoints remain distinct because coordinates are not graph keys"
+        );
+
+        let core = crate::MainCoreId(EntityId(1));
+        assert_ne!(
+            signal_node_for_endpoint(
+                first_wire,
+                WireEnd::B,
+                crate::EndpointTarget::MainCoreAnchor(core)
+            ),
+            signal_node_for_endpoint(
+                second_wire,
+                WireEnd::A,
+                crate::EndpointTarget::MainCoreAnchor(core)
+            ),
+            "Main Core anchors are physical Network endpoints, not shared Signal nodes"
         );
 
         let junction = JunctionId(EntityId(12));

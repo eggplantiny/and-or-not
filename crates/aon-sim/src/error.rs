@@ -57,6 +57,17 @@ pub enum PackageError {
         field: &'static str,
     },
 
+    #[error(
+        "Scenario schema {schema_version} does not support initial world kind `{initial_world}`"
+    )]
+    UnsupportedInitialWorld {
+        schema_version: u32,
+        initial_world: &'static str,
+    },
+
+    #[error("Scenario initial-world field `{field}` must be positive")]
+    NonPositiveInitialWorldField { field: &'static str },
+
     #[error("profile kind mismatch: expected {expected}, got {actual}")]
     ProfileKindMismatch {
         expected: ProfileKind,
@@ -121,6 +132,21 @@ pub enum SimulationError {
 
     #[error("stage feature `{feature}` is not implemented by this engine build")]
     UnsupportedStageFeature { feature: &'static str },
+
+    #[error("stage feature `capacity` requires the `main-core-v1` initial world")]
+    CapacityRequiresMainCore,
+
+    #[error("the `main-core-v1` initial world requires stage feature `capacity`")]
+    MainCoreRequiresCapacity,
+
+    #[error("stage feature `capacity` requires Balance section `capacityProbe`")]
+    CapacityRequiresProfile,
+
+    #[error("Main Core position is not aligned to wireGeometryQuantum")]
+    InvalidMainCoreGeometryQuantum,
+
+    #[error("Main Core integrity must be positive at world generation")]
+    InvalidMainCoreIntegrity,
 }
 
 impl From<NumericError> for SimulationError {

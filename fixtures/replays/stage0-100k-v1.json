@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
-    "stateHashVersion": "aon-state-v4",
+    "stateHashVersion": "aon-state-v5",
     "worldGeneratorVersion": "aon-empty-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3",
+    "initialStateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -309,27 +309,27 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3"
+      "stateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561"
     },
     {
       "nextTick": 15,
-      "stateHash": "391f1f4eafce48efbc8ecf318348ff97c6bcd94898fe3f554fb21ad9d0f96c86"
+      "stateHash": "571226e91241c1fa521489a498535f9522727404959da40569eb3acbcba03e81"
     },
     {
       "nextTick": 20,
-      "stateHash": "2bc1e82cd32e929c9a0b7b8c75f0b66eca09db8b68952abfe4d1eec4f4e26202"
+      "stateHash": "cdd886edc0cf5142358071b3c48ca766d426646c3e1b7d2f4439f5575f7304b3"
     },
     {
       "nextTick": 33,
-      "stateHash": "8bb44fb83d4f051bf677083ec2529871b772d9c96dcc90b9a1d4d49a20879c7e"
+      "stateHash": "4c919b0a07cf8cfb086ab0820a35c394134a3dd19b85c9b186bda40360518df6"
     },
     {
       "nextTick": 46,
-      "stateHash": "1f9142035b62d3c088ca9016a4cb5ee3f936c0d693d8904ddf569951d4434d1e"
+      "stateHash": "572e1c031e5eddb0f41b7e90374194de745b083f59d390a961f72c6349cd3815"
     },
     {
       "nextTick": 100000,
-      "stateHash": "eda68c2223e47399ac7b0196034f94409b71f43ae260c8945af6d1111b469519"
+      "stateHash": "61d49248320f1c9cb803325945e18fc19d59cf80e33ab7d877543e3b4fc75f32"
     }
   ]
 }

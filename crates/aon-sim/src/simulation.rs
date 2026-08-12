@@ -1,9 +1,11 @@
+use crate::capacity::{account_network, analyzer_snapshot};
 use crate::contract::{ContractValidationError, SimulationContract};
 use crate::event::{
     DRIVER_TRANSITION_KIND_ORDER, DriverTransition, DriverTransitionCause, EventCalendar,
     EventCalendarError, EventPayloadAllocator, SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival,
     SignalArrivalKind, SignalArrivalStagingError, UncertifiedSignalArrival, stage_signal_arrivals,
 };
+use crate::main_core::MainCoreState;
 use crate::mobility::{
     MobileControlSample, MobileMovementObservation, TrackGraph, TrackGraphError, TrackPosition,
 };
@@ -114,6 +116,7 @@ pub struct StepReport {
     pub signal_arrivals: Vec<SignalArrivalObservation>,
     pub signal_counters: SignalStepCounters,
     pub mobile_movements: Vec<MobileMovementObservation>,
+    pub network_accounting: Option<crate::NetworkAccounting>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,6 +225,7 @@ struct CanonicalWorld {
     next_tick: Tick,
     topology_revision: Revision,
     contract: SimulationContract,
+    main_core: Option<MainCoreState>,
     structural: StructuralWorld,
     signal: SignalWorld,
     event_payloads: EventPayloadAllocator,
@@ -236,6 +240,7 @@ impl CanonicalWorld {
             contract: &self.contract,
             next_tick: self.next_tick,
             topology_revision: self.topology_revision,
+            main_core: self.main_core.as_ref(),
             structural: &self.structural,
             signal: &self.signal,
             event_payloads: &self.event_payloads,
@@ -251,11 +256,12 @@ pub struct Simulation {
     canonical: CanonicalWorld,
     profiles: ProfileBundle,
     initial_state_hash: StateHash,
+    world_generator_version: WorldGeneratorVersion,
 }
 
 impl Simulation {
     pub fn new(package: SimulationPackage) -> Result<Self, SimulationError> {
-        if let Some(feature) = package.required_features.first_enabled() {
+        if let Some(feature) = package.required_features.first_unsupported() {
             return Err(SimulationError::UnsupportedStageFeature { feature });
         }
 
@@ -265,14 +271,59 @@ impl Simulation {
             .validate_profiles(&package.profiles)
             .map_err(SimulationError::from)?;
 
-        let structural = match package.initial_world {
-            InitialWorld::Empty => StructuralWorld::new(),
+        let (structural, main_core, world_generator_version) = match package.initial_world {
+            InitialWorld::Empty => {
+                if package.required_features.capacity {
+                    return Err(SimulationError::CapacityRequiresMainCore);
+                }
+                (StructuralWorld::new(), None, WorldGeneratorVersion::EmptyV1)
+            }
+            InitialWorld::MainCoreV1 {
+                position,
+                integrity,
+                heat_energy,
+            } => {
+                if !package.required_features.capacity {
+                    return Err(SimulationError::MainCoreRequiresCapacity);
+                }
+                let capacity_profile = package
+                    .profiles
+                    .balance
+                    .capacity_probe
+                    .ok_or(SimulationError::CapacityRequiresProfile)?;
+                if integrity.0 == 0 {
+                    return Err(SimulationError::InvalidMainCoreIntegrity);
+                }
+                if crate::validate_quantized(
+                    position,
+                    package.profiles.physical_scale.wire_geometry_quantum,
+                )
+                .is_err()
+                {
+                    return Err(SimulationError::InvalidMainCoreGeometryQuantum);
+                }
+                let capacity =
+                    crate::Capacity::from_whole_ncu(capacity_profile.main_core_capacity)?;
+                let (structural, id) = StructuralWorld::new_with_main_core_registry_entry()?;
+                (
+                    structural,
+                    Some(MainCoreState::new(
+                        id,
+                        position,
+                        capacity,
+                        integrity,
+                        heat_energy,
+                    )),
+                    WorldGeneratorVersion::MainCoreV1,
+                )
+            }
         };
 
         let canonical = CanonicalWorld {
             next_tick: Tick(0),
             topology_revision: Revision(0),
             contract: package.contract,
+            main_core,
             structural,
             signal: SignalWorld::new(),
             event_payloads: EventPayloadAllocator::new(),
@@ -287,6 +338,7 @@ impl Simulation {
             canonical,
             profiles: package.profiles,
             initial_state_hash,
+            world_generator_version,
         })
     }
 
@@ -321,7 +373,8 @@ impl Simulation {
         let mut mobile_intents = run_phase3(&mut candidate, &phase1)?;
 
         phases.enter(TickPhase::GlobalAccountingAndNominalDemand)?;
-        run_phase4_global_accounting_and_nominal_demand(&candidate, &mobile_intents);
+        let network_accounting =
+            run_phase4_global_accounting_and_nominal_demand(&candidate, &mobile_intents)?;
 
         phases.enter(TickPhase::PowerSolveAndBrownout)?;
         run_phase5_power_solve_and_brownout();
@@ -366,6 +419,7 @@ impl Simulation {
             signal_arrivals: phase2.signal_arrivals,
             signal_counters: phase0.signal_counters,
             mobile_movements: phase11.mobile_movements,
+            network_accounting,
         })
     }
 
@@ -376,6 +430,7 @@ impl Simulation {
             topology_revision: self.canonical.topology_revision,
             contract: self.canonical.contract,
             state_hash: self.state_hash(),
+            main_core: self.canonical.main_core.as_ref(),
             structural: &self.canonical.structural,
             signal: &self.canonical.signal,
             logic_threshold: self.profiles.balance.logic_threshold,
@@ -415,7 +470,7 @@ impl Simulation {
             physical_scale_profile_hash: self.canonical.contract.physical_scale_profile_hash,
             balance_profile_hash: self.canonical.contract.balance_profile_hash,
             state_hash_version: StateHashVersion::current(),
-            world_generator_version: WorldGeneratorVersion::EmptyV1,
+            world_generator_version: self.world_generator_version,
             seed: Seed::ZERO,
             initial_state_hash: self.initial_state_hash,
             hash_algorithm_id: self.canonical.contract.hash_algorithm_id(),
@@ -428,6 +483,22 @@ impl Simulation {
 
     pub fn scenario_id(&self) -> &str {
         &self.scenario_id
+    }
+
+    pub const fn main_core_state(&self) -> Option<&MainCoreState> {
+        self.canonical.main_core.as_ref()
+    }
+
+    pub fn network_analyzer_snapshot(
+        &self,
+    ) -> Result<Option<crate::NetworkAnalyzerSnapshot>, SimulationError> {
+        self.canonical
+            .main_core
+            .as_ref()
+            .map(|core| {
+                analyzer_snapshot(self.canonical.next_tick, &self.canonical.structural, core)
+            })
+            .transpose()
     }
 
     pub fn gate_signal_ports(&self, gate: GateId) -> Option<GateSignalPorts> {
@@ -456,7 +527,7 @@ impl Simulation {
 }
 
 fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationError> {
-    validate_structural_registry_links(&world.structural)?;
+    validate_structural_registry_links(&world.structural, world.main_core.as_ref())?;
     let signal = &world.signal;
     let driver_frontier = signal.driver_frontier().entity_id().0;
     let sink_frontier = signal.sink_frontier().entity_id().0;
@@ -697,7 +768,10 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
     validate_event_state(world, driver_frontier, sink_frontier, &live_drivers)
 }
 
-fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<(), SimulationError> {
+fn validate_structural_registry_links(
+    structural: &StructuralWorld,
+    main_core: Option<&MainCoreState>,
+) -> Result<(), SimulationError> {
     let registry = structural.entities();
     let frontier = registry.next_id().0;
     if frontier == 0 {
@@ -719,6 +793,7 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
     let mut registry_junctions = BTreeSet::new();
     let mut registry_substrates = BTreeSet::new();
     let mut registry_mobiles = BTreeSet::new();
+    let mut registry_main_core = None;
     for (id, location) in slots {
         if id.0 == 0 || id.0 >= frontier {
             return Err(SimulationError::InvalidCanonicalState);
@@ -727,6 +802,11 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
             continue;
         };
         match location {
+            crate::EntityLocation::MainCore => {
+                if registry_main_core.replace(id).is_some() {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
             crate::EntityLocation::Gate(index) => {
                 let record = structural
                     .gates()
@@ -776,6 +856,13 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
         }
     }
 
+    if registry_main_core != main_core.map(|core| core.id().entity_id()) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    if main_core.is_some_and(|core| core.id().entity_id() != crate::FIRST_ENTITY_ID) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
     let mut store_gates = BTreeSet::new();
     for (index, record) in structural.gates().iter_alive() {
         let id = record.id.entity_id();
@@ -792,6 +879,18 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
             || !store_wires.insert(id)
         {
             return Err(SimulationError::InvalidCanonicalState);
+        }
+        for (target, point) in [
+            (record.endpoint_a, record.points.first().copied()),
+            (record.endpoint_b, record.points.last().copied()),
+        ] {
+            if let crate::EndpointTarget::MainCoreAnchor(id) = target
+                && (record.routing_domain != crate::RoutingDomain::OpenWorld
+                    || point != main_core.map(|core| core.position())
+                    || main_core.map(|core| core.id()) != Some(id))
+            {
+                return Err(SimulationError::InvalidCanonicalState);
+            }
         }
     }
     let mut store_junctions = BTreeSet::new();
@@ -1120,10 +1219,14 @@ fn run_phase0_structural_commit(
     balance: &BalanceProfile,
 ) -> Result<Phase0Output, SimulationError> {
     let old_topology = CompiledSignalTopology::compile(&world.structural, &world.signal, balance)?;
-    let structural_report =
-        world
-            .structural
-            .apply_phase0_with_signal(&mut world.signal, tick, commands, physical)?;
+    let main_core = world.main_core.map(MainCoreState::anchor_view);
+    let structural_report = world.structural.apply_phase0_with_signal_and_core(
+        &mut world.signal,
+        tick,
+        commands,
+        physical,
+        main_core,
+    )?;
     world.topology_revision = if structural_report.topology_changed {
         world.topology_revision.checked_add(Revision(1))?
     } else {
@@ -1519,11 +1622,14 @@ fn run_phase3(
 }
 
 fn run_phase4_global_accounting_and_nominal_demand(
-    _world: &CanonicalWorld,
+    world: &CanonicalWorld,
     _mobile_intents: &[MobileIntent],
-) {
-    // Stage 0 has no Capacity, Power, or economy stores. The fixed movement demand represented by
-    // each MobileIntent is granted at unity in Phase 6; the phase remains explicit and ordered.
+) -> Result<Option<crate::NetworkAccounting>, SimulationError> {
+    world
+        .main_core
+        .as_ref()
+        .map(|core| account_network(&world.structural, Some(core)))
+        .transpose()
 }
 
 fn run_phase5_power_solve_and_brownout() {
@@ -1939,6 +2045,7 @@ mod tests {
             canonical: simulation.canonical.clone(),
             profiles: simulation.profiles.clone(),
             initial_state_hash: simulation.initial_state_hash,
+            world_generator_version: simulation.world_generator_version,
         };
         let sampled_report = simulation.step(&[]).expect("sampled replica advances");
         let control_report = control.step(&[]).expect("control replica advances");
@@ -2198,6 +2305,7 @@ mod tests {
             canonical: simulation.canonical.clone(),
             profiles: simulation.profiles.clone(),
             initial_state_hash: simulation.initial_state_hash,
+            world_generator_version: simulation.world_generator_version,
         };
         let before_hash = simulation.state_hash();
         let before_driver = simulation
@@ -2887,6 +2995,80 @@ mod tests {
     }
 
     #[test]
+    fn committed_validator_rejects_main_core_registry_mismatch() {
+        let profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-core-validator"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-core-validator"),
+            balance: BalanceProfile::capacity_probe_alpha("balance-core-validator"),
+        };
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        let mut simulation = Simulation::new(SimulationPackage::new(
+            "core-validator",
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed(0), Fixed(0)),
+                integrity: crate::Integrity(1),
+                heat_energy: crate::HeatEnergy(0),
+            },
+            StageFeatureSet {
+                capacity: true,
+                ..StageFeatureSet::none()
+            },
+            contract,
+            profiles,
+        ))
+        .expect("Main Core simulation starts");
+        validate_canonical_world(&simulation.canonical).expect("uncorrupted Main Core is valid");
+        simulation
+            .canonical
+            .structural
+            .remove_registry_entry_for_test(crate::EntityId(1))
+            .expect("test-only Main Core registry corruption succeeds");
+        assert_eq!(
+            validate_canonical_world(&simulation.canonical),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+
+        let profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-core-id-validator"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-core-id-validator"),
+            balance: BalanceProfile::capacity_probe_alpha("balance-core-id-validator"),
+        };
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        let mut matching_id_two = Simulation::new(SimulationPackage::new(
+            "core-id-validator",
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed(0), Fixed(0)),
+                integrity: crate::Integrity(1),
+                heat_energy: crate::HeatEnergy(0),
+            },
+            StageFeatureSet {
+                capacity: true,
+                ..StageFeatureSet::none()
+            },
+            contract,
+            profiles,
+        ))
+        .expect("Main Core simulation starts");
+        let id_two = matching_id_two
+            .canonical
+            .structural
+            .relocate_main_core_registry_for_test()
+            .expect("test-only Main Core registry relocation succeeds");
+        let relocated = matching_id_two
+            .canonical
+            .main_core
+            .expect("Main Core exists")
+            .with_id_for_test(id_two);
+        matching_id_two.canonical.main_core = Some(relocated);
+        assert_eq!(id_two, crate::MainCoreId(crate::EntityId(2)));
+        assert_eq!(
+            validate_canonical_world(&matching_id_two.canonical),
+            Err(SimulationError::InvalidCanonicalState),
+            "a matching registry/Core pair is still invalid unless the Core owns EntityId 1"
+        );
+    }
+
+    #[test]
     fn committed_validator_rejects_calendar_map_key_payload_key_mismatch() {
         let mut driver_mismatch = Simulation::new(package()).expect("test package is valid");
         place_test_not(&mut driver_mismatch);
@@ -3092,13 +3274,11 @@ mod tests {
     fn unsupported_later_stage_feature_rejects_simulation_start() {
         let mut package = package();
         package.required_features.mobility = true;
-        package.required_features.capacity = true;
+        package.required_features.sensing = true;
 
         assert_eq!(
             Simulation::new(package).err(),
-            Some(SimulationError::UnsupportedStageFeature {
-                feature: "capacity"
-            })
+            Some(SimulationError::UnsupportedStageFeature { feature: "sensing" })
         );
     }
 
@@ -3156,6 +3336,7 @@ mod tests {
             canonical: canonical.canonical.clone(),
             profiles: canonical.profiles.clone(),
             initial_state_hash: canonical.initial_state_hash,
+            world_generator_version: canonical.world_generator_version,
         };
         reordered
             .canonical
@@ -3180,6 +3361,96 @@ mod tests {
                 .all(|pair| pair[0].mobile < pair[1].mobile),
             "Phase 11 commits and reports Mobiles in stable MobileId order"
         );
+    }
+
+    #[test]
+    fn capacity_accounting_and_analyzer_are_invariant_to_wire_store_layout() {
+        let mut profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-capacity-layout"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-capacity-layout"),
+            balance: BalanceProfile::capacity_probe_alpha("balance-capacity-layout"),
+        };
+        profiles
+            .balance
+            .capacity_probe
+            .as_mut()
+            .expect("capacity section exists")
+            .main_core_capacity = 1_000;
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        let package = SimulationPackage::new(
+            "capacity-layout",
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed(0), Fixed(0)),
+                integrity: crate::Integrity(1),
+                heat_energy: crate::HeatEnergy(0),
+            },
+            StageFeatureSet {
+                capacity: true,
+                ..StageFeatureSet::none()
+            },
+            contract,
+            profiles,
+        );
+        let mut canonical = Simulation::new(package).expect("capacity simulation starts");
+        let point = |x: i64, y: i64| FixedVec2::new(Fixed(x), Fixed(y));
+        let pitch = crate::FIXED_ONE;
+        let commands = [
+            crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![point(0, 0), point(2 * pitch, 0)],
+                    endpoint_a: crate::EndpointTarget::MainCoreAnchor(crate::MainCoreId(
+                        crate::EntityId(1),
+                    )),
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            },
+            crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 1,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![point(0, 4 * pitch), point(3 * pitch, 4 * pitch)],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            },
+        ];
+        canonical.step(&commands).expect("two capacity Wires place");
+
+        let mut reordered = Simulation {
+            scenario_id: canonical.scenario_id.clone(),
+            canonical: canonical.canonical.clone(),
+            profiles: canonical.profiles.clone(),
+            initial_state_hash: canonical.initial_state_hash,
+            world_generator_version: canonical.world_generator_version,
+        };
+        reordered
+            .canonical
+            .structural
+            .reserve_layout_capacity_for_test(128);
+        reordered
+            .canonical
+            .structural
+            .swap_wire_slots_for_test(crate::WireIndex(0), crate::WireIndex(1))
+            .expect("test-only Wire slots swap");
+        validate_canonical_world(&reordered.canonical).expect("reordered layout remains valid");
+        assert_eq!(canonical.state_hash(), reordered.state_hash());
+        assert_eq!(
+            canonical
+                .network_analyzer_snapshot()
+                .expect("canonical Analyzer fits"),
+            reordered
+                .network_analyzer_snapshot()
+                .expect("reordered Analyzer fits")
+        );
+
+        let canonical_report = canonical.step(&[]).expect("canonical Tick succeeds");
+        let reordered_report = reordered.step(&[]).expect("reordered Tick succeeds");
+        assert_eq!(canonical_report, reordered_report);
+        assert_eq!(canonical.state_hash(), reordered.state_hash());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 fixtures/replays/*.json text eol=lf
+fixtures/scenarios/*.json text eol=lf
 fixtures/experiments/*.json text eol=lf
 fixtures/experiments/*.txt text eol=lf
 fixtures/modules/*.json text eol=lf

@@ -15,7 +15,8 @@ pub mod probe;
 use aon_sim::{
     ArtifactBytes, CommandEnvelope, DriverId, EntityId, GateId, LogicLevel, MobileId, PackageError,
     PhysicalScaleProfile, RenderSnapshot, Replay, ReplayError, SignalProbeTarget, Simulation,
-    SimulationError, SimulationPackage, StateHash, Tick, decode_package, decode_replay_artifact,
+    SimulationError, SimulationPackage, StateHash, StepReport, Tick, decode_package,
+    decode_replay_artifact,
 };
 use bevy::input::{ButtonState, keyboard::KeyboardInput};
 use bevy::prelude::*;
@@ -155,6 +156,7 @@ impl SimulationHostState {
 #[derive(Resource)]
 struct HostTraceResource {
     checkpoints: Vec<StateHash>,
+    reports: Vec<StepReport>,
 }
 
 #[derive(Resource)]
@@ -183,11 +185,16 @@ struct HostFault {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostTrace {
     checkpoints: Vec<StateHash>,
+    reports: Vec<StepReport>,
 }
 
 impl HostTrace {
     pub fn checkpoints(&self) -> &[StateHash] {
         &self.checkpoints
+    }
+
+    pub fn reports(&self) -> &[StepReport] {
+        &self.reports
     }
 
     pub fn final_hash(&self) -> StateHash {
@@ -353,12 +360,11 @@ pub fn run_host_harness(
         return Err(error);
     }
 
-    let checkpoints = app
-        .world()
-        .resource::<HostTraceResource>()
-        .checkpoints
-        .clone();
-    Ok(HostTrace { checkpoints })
+    let trace = app.world().resource::<HostTraceResource>();
+    Ok(HostTrace {
+        checkpoints: trace.checkpoints.clone(),
+        reports: trace.reports.clone(),
+    })
 }
 
 pub fn run_replay_host_harness(
@@ -412,12 +418,11 @@ pub fn run_paced_host_harness(
         return Err(error);
     }
 
-    let checkpoints = app
-        .world()
-        .resource::<HostTraceResource>()
-        .checkpoints
-        .clone();
-    Ok(HostTrace { checkpoints })
+    let trace = app.world().resource::<HostTraceResource>();
+    Ok(HostTrace {
+        checkpoints: trace.checkpoints.clone(),
+        reports: trace.reports.clone(),
+    })
 }
 
 pub fn run_paced_replay_host_harness(
@@ -553,6 +558,7 @@ fn install_simulation(
     app.insert_resource(SimulationHostState { mode });
     app.insert_resource(HostTraceResource {
         checkpoints: vec![initial_hash],
+        reports: Vec::new(),
     });
     app.init_resource::<HostFault>();
 
@@ -607,6 +613,7 @@ fn advance_canonical_simulation(
                     actual: report.state_hash,
                 }));
             }
+            trace.reports.push(report);
         }
         Err(error) => fault.error = Some(HostError::Simulation(error)),
     }
@@ -1012,6 +1019,7 @@ fn finish_replay_host(app: &mut App) -> Result<HostTrace, HostError> {
             .resource::<HostTraceResource>()
             .checkpoints
             .clone(),
+        reports: app.world().resource::<HostTraceResource>().reports.clone(),
     };
     app.world()
         .resource::<ReplayCommandSchedule>()

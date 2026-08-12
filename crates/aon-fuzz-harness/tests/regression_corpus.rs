@@ -52,6 +52,11 @@ const REPLAY_CORPUS: &[(&str, &[u8], bool)] = &[
         true,
     ),
     (
+        "valid-s1-m1-capacity",
+        include_bytes!("../../../fixtures/replays/s1-m1-capacity-accounting-v1.json"),
+        true,
+    ),
+    (
         "truncated",
         include_bytes!("../corpus/replay/truncated.case"),
         false,

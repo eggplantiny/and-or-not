@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
-    "stateHashVersion": "aon-state-v4",
+    "stateHashVersion": "aon-state-v5",
     "worldGeneratorVersion": "aon-empty-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3",
+    "initialStateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -522,31 +522,31 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3"
+      "stateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561"
     },
     {
       "nextTick": 24,
-      "stateHash": "53a091d320f3dbeff9cbbf6366a216aeb769802e2388bc58b764b54483714fca"
+      "stateHash": "d27cc5d02ed80427bc6cf53c5d3232e45f7b64933c43ad449826c108c6e3a723"
     },
     {
       "nextTick": 70,
-      "stateHash": "a50b0b34cdd44ae15d7c2e3321b221ffd49404fb16e0f29284814c336dcaf327"
+      "stateHash": "915b229f066b6f303f15c51a05f4f98c235b0981b71b22daeb2df307cf165e42"
     },
     {
       "nextTick": 81,
-      "stateHash": "62c9a05d446e96c6290b1706f18ed7706f1ec15f8c8fa10f8048ee02b1d1bad2"
+      "stateHash": "b9899c3306633f0acaa96a578e7ad8a041dcce29d3cfb8c05f64080aa4300f8b"
     },
     {
       "nextTick": 97,
-      "stateHash": "957dcd8876af43525830879911f1af904edc4bb5f6082bb89f948bc5186cef8e"
+      "stateHash": "1525b00da568937cfeaec4e33e0f4e48e940eeae5af4bc0126e6c4ac1fd15a55"
     },
     {
       "nextTick": 98,
-      "stateHash": "c10a27a38cd3cecc7b0b1a9aa94bf8177cae598361c624ad8f0a7d519f6be59d"
+      "stateHash": "6ca502dd3298ff747f02a0f7a85b6b63e1bfcc38e14845207995ae46207c8e37"
     },
     {
       "nextTick": 162,
-      "stateHash": "d3915d1586e7e4b109858c2d702e68373c94b34456ecdeb78997686ba3fb244d"
+      "stateHash": "abce08ad6673cbd094a93bb59ed80210cb29b88d8481b5c4a0145189e00f8505"
     }
   ]
 }

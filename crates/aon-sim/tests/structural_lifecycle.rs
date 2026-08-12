@@ -669,8 +669,8 @@ fn simulation_with_every_structural_kind() -> Simulation {
 
 fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"AON\0STATE\0V4\0");
-    push_u16(&mut bytes, 4); // encoder version
+    bytes.extend_from_slice(b"AON\0STATE\0V5\0");
+    push_u16(&mut bytes, 5); // encoder version
     bytes.push(0); // aon-semantics-v1
     bytes.extend_from_slice(contract.numeric_profile_hash.as_bytes());
     bytes.extend_from_slice(contract.physical_scale_profile_hash.as_bytes());
@@ -686,6 +686,8 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
         bytes.push(1);
         bytes.push(kind);
     }
+
+    bytes.push(0); // no Main Core
 
     push_u64(&mut bytes, 1); // Gate count
     push_u64(&mut bytes, 2);
@@ -832,7 +834,7 @@ fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
 
     assert_eq!(
         independently_hashed.to_hex().as_str(),
-        "929eeb4963808b4e4e56c5311da064f574b3ff0601e71a2042625d7e8fec1f3b"
+        "2d7cef4990a3218fe909a07a82e4becdc37061161dfb2de1b80c530720e425fe"
     );
     assert_eq!(
         simulation.state_hash().as_bytes(),

@@ -34,6 +34,16 @@ canonical_unsigned_type!(Integrity);
 canonical_unsigned_type!(DriveStrength);
 canonical_unsigned_type!(Capacity);
 
+impl Capacity {
+    /// Converts a whole-NCU Balance value to canonical Fixed-scale raw capacity.
+    pub fn from_whole_ncu(value: u64) -> Result<Self, NumericError> {
+        value
+            .checked_mul(FIXED_ONE as u64)
+            .map(Self)
+            .ok_or(NumericError::Overflow)
+    }
+}
+
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityId(pub u64);
@@ -143,7 +153,8 @@ pub fn ceil_isqrt(value: u128) -> Result<u64, NumericError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Fixed, NumericError, ceil_div_nonnegative, ceil_isqrt, floor_div, round_div_nearest_even,
+        Capacity, Fixed, NumericError, ceil_div_nonnegative, ceil_isqrt, floor_div,
+        round_div_nearest_even,
     };
 
     #[test]
@@ -207,6 +218,15 @@ mod tests {
         assert_eq!(Fixed(65_536).checked_mul(Fixed(32_768)), Ok(Fixed(32_768)));
         assert_eq!(
             Fixed(i64::MAX).checked_mul(Fixed(i64::MAX)),
+            Err(NumericError::Overflow)
+        );
+    }
+
+    #[test]
+    fn whole_ncu_capacity_conversion_uses_fixed_raw_units_and_checks_overflow() {
+        assert_eq!(Capacity::from_whole_ncu(1_000), Ok(Capacity(65_536_000)));
+        assert_eq!(
+            Capacity::from_whole_ncu(u64::MAX / 65_536 + 1),
             Err(NumericError::Overflow)
         );
     }

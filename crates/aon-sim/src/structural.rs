@@ -9,6 +9,7 @@ use crate::identity::{
     EntityLocation, EntityRegistry, EntityRegistryError, GateId, GateIndex, JunctionId,
     JunctionIndex, MobileId, MobileSubstrateIndex, WireId, WireIndex,
 };
+use crate::main_core::MainCoreAnchorView;
 use crate::mobility::{
     MobileSubstrateRecord, MobileSubstrateStore, TrackGraph, TrackGraphError, TrackPosition,
 };
@@ -27,7 +28,9 @@ use crate::topology::{
     GateType, JunctionStore, RoutingDomain, TopologyError, WireEnd, WireRecord, WireStore,
     checked_add_point, checked_sub_point,
 };
-use crate::{DriverId, EntityId, Fixed, FixedVec2, NumericError, Tick, polyline_length};
+use crate::{
+    DriverId, EntityId, Fixed, FixedVec2, MainCoreId, NumericError, Tick, polyline_length,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -130,6 +133,13 @@ impl StructuralWorld {
         Self::default()
     }
 
+    pub(crate) fn new_with_main_core_registry_entry() -> Result<(Self, MainCoreId), StructuralError>
+    {
+        let mut world = Self::new();
+        let id = MainCoreId(world.entities.allocate(EntityLocation::MainCore)?);
+        Ok((world, id))
+    }
+
     #[cfg(test)]
     pub fn apply_phase0(
         &mut self,
@@ -137,9 +147,10 @@ impl StructuralWorld {
         commands: &[CommandEnvelope],
         physical: &PhysicalScaleProfile,
     ) -> Result<StructuralPhaseReport, StructuralError> {
-        self.apply_phase0_internal(tick, commands, physical, None)
+        self.apply_phase0_internal(tick, commands, physical, None, None)
     }
 
+    #[cfg(test)]
     pub fn apply_phase0_with_signal(
         &mut self,
         signal: &mut SignalWorld,
@@ -149,7 +160,27 @@ impl StructuralWorld {
     ) -> Result<StructuralPhaseReport, StructuralError> {
         let mut signal_working = signal.clone();
         let report =
-            self.apply_phase0_internal(tick, commands, physical, Some(&mut signal_working))?;
+            self.apply_phase0_internal(tick, commands, physical, None, Some(&mut signal_working))?;
+        *signal = signal_working;
+        Ok(report)
+    }
+
+    pub(crate) fn apply_phase0_with_signal_and_core(
+        &mut self,
+        signal: &mut SignalWorld,
+        tick: Tick,
+        commands: &[CommandEnvelope],
+        physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
+    ) -> Result<StructuralPhaseReport, StructuralError> {
+        let mut signal_working = signal.clone();
+        let report = self.apply_phase0_internal(
+            tick,
+            commands,
+            physical,
+            main_core,
+            Some(&mut signal_working),
+        )?;
         *signal = signal_working;
         Ok(report)
     }
@@ -159,6 +190,7 @@ impl StructuralWorld {
         tick: Tick,
         commands: &[CommandEnvelope],
         physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
         mut signal: Option<&mut SignalWorld>,
     ) -> Result<StructuralPhaseReport, StructuralError> {
         let mut working = self.clone();
@@ -217,7 +249,13 @@ impl StructuralWorld {
                     ),
                     None => Ok(Err(Rejection::UnsupportedCommand)),
                 },
-                command => working.apply_command(command, batch_frontier, physical, &mut changes),
+                command => working.apply_command(
+                    command,
+                    batch_frontier,
+                    physical,
+                    main_core,
+                    &mut changes,
+                ),
             }?;
 
             match result {
@@ -286,11 +324,14 @@ impl StructuralWorld {
         command: &Command,
         frontier: EntityId,
         physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
         changes: &mut PhaseChanges,
     ) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
         match command {
             Command::PlaceGate(command) => self.place_gate(*command, frontier, physical, changes),
-            Command::PlaceWire(command) => self.place_wire(command, frontier, physical, changes),
+            Command::PlaceWire(command) => {
+                self.place_wire(command, frontier, physical, main_core, changes)
+            }
             Command::PlaceJunction(command) => {
                 self.place_junction(*command, frontier, physical, changes)
             }
@@ -299,7 +340,9 @@ impl StructuralWorld {
                 self.place_mobile_substrate(*command, physical, changes)
             }
             Command::RemoveEntity(command) => self.remove_entity(*command, frontier, changes),
-            Command::BindPort(command) => self.bind_port(*command, frontier, physical, changes),
+            Command::BindPort(command) => {
+                self.bind_port(*command, frontier, physical, main_core, changes)
+            }
             Command::SetExternalDriver(_) => Ok(Err(Rejection::UnsupportedCommand)),
         }
     }
@@ -373,6 +416,24 @@ impl StructuralWorld {
         self.junctions.reserve_capacity_for_test(additional);
         self.fixed_substrates.reserve_capacity_for_test(additional);
         self.mobile_substrates.reserve_capacity_for_test(additional);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_registry_entry_for_test(
+        &mut self,
+        id: EntityId,
+    ) -> Result<EntityLocation, StructuralError> {
+        self.entities.remove(id).map_err(StructuralError::from)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn relocate_main_core_registry_for_test(
+        &mut self,
+    ) -> Result<MainCoreId, StructuralError> {
+        self.entities.remove(crate::FIRST_ENTITY_ID)?;
+        Ok(MainCoreId(
+            self.entities.allocate(EntityLocation::MainCore)?,
+        ))
     }
 
     #[cfg(test)]
@@ -996,6 +1057,7 @@ impl StructuralWorld {
             EndpointTarget::Junction(id) => id.entity_id(),
             EndpointTarget::GatePort(reference) => reference.gate.entity_id(),
             EndpointTarget::MobilePort(reference) => reference.mobile.entity_id(),
+            EndpointTarget::MainCoreAnchor(core) => core.entity_id(),
         };
         self.reference_location(id, frontier).err()
     }
@@ -1007,6 +1069,7 @@ impl StructuralWorld {
         command: &PlaceWireCommand,
         frontier: EntityId,
         physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
         changes: &mut PhaseChanges,
     ) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
         if command.points.len() < 2 || u32::try_from(command.points.len()).is_err() {
@@ -1136,6 +1199,7 @@ impl StructuralWorld {
             command.routing_domain,
             frontier,
             physical,
+            main_core,
         )? {
             Ok(()) => {}
             Err(reason) => return Ok(Err(reason)),
@@ -1149,6 +1213,7 @@ impl StructuralWorld {
             command.routing_domain,
             frontier,
             physical,
+            main_core,
         )? {
             Ok(()) => {}
             Err(reason) => return Ok(Err(reason)),
@@ -1194,6 +1259,7 @@ impl StructuralWorld {
         domain: RoutingDomain,
         frontier: EntityId,
         physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
     ) -> Result<Result<(), Rejection>, StructuralError> {
         match target {
             EndpointTarget::Free => Ok(Ok(())),
@@ -1253,6 +1319,25 @@ impl StructuralWorld {
                 }
                 Ok(Ok(()))
             }
+            EndpointTarget::MainCoreAnchor(core) => {
+                let location = match self.reference_location(core.entity_id(), frontier) {
+                    Ok(location) => location,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                if location != EntityLocation::MainCore {
+                    return Ok(Err(Rejection::InvalidEndpoint));
+                }
+                let Some(anchor) = main_core else {
+                    return Err(StructuralError::InvalidCanonicalState);
+                };
+                if anchor.id != core
+                    || domain != RoutingDomain::OpenWorld
+                    || anchor.position != endpoint
+                {
+                    return Ok(Err(Rejection::InvalidEndpoint));
+                }
+                Ok(Ok(()))
+            }
         }
     }
 
@@ -1283,6 +1368,7 @@ impl StructuralWorld {
         command: BindPortCommand,
         frontier: EntityId,
         physical: &PhysicalScaleProfile,
+        main_core: Option<MainCoreAnchorView>,
         changes: &mut PhaseChanges,
     ) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
         if self.wire_is_occupied(command.wire) {
@@ -1326,6 +1412,7 @@ impl StructuralWorld {
             wire.routing_domain,
             frontier,
             physical,
+            main_core,
         )? {
             Ok(()) => {}
             Err(reason) => return Ok(Err(reason)),

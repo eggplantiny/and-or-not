@@ -295,14 +295,14 @@ fn unknown_scenario_field_is_rejected() {
 #[test]
 fn unsupported_schema_semantics_and_hash_algorithm_are_rejected() {
     let mut scenario: serde_json::Value = serde_json::from_slice(SCENARIO).expect("fixture JSON");
-    scenario["schemaVersion"] = 2.into();
+    scenario["schemaVersion"] = 3.into();
     let bytes = serde_json::to_vec(&scenario).expect("test JSON serializes");
     assert_eq!(
         decode_scenario_manifest(&bytes),
         Err(PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Scenario,
-            expected: 1,
-            actual: 2,
+            expected: 2,
+            actual: 3,
         })
     );
 

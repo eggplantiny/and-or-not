@@ -2,11 +2,20 @@ use crate::mobility::TrackGraph;
 use crate::signal::{SignalWorld, resolve_drive};
 use crate::structural::StructuralWorld;
 use crate::{
-    ConnectionGeneration, DriveVector, DriverId, DriverSample, EndpointTarget, EntityId, FixedAabb,
-    FixedVec2, GateId, GateSignalPorts, GateType, JunctionId, LogicLevel, MobileControlPorts,
-    MobileId, Revision, RoutingDomain, SimulationContract, SinkId, StateHash, Tick, TrackPosition,
-    WireId,
+    Capacity, ConnectionGeneration, DriveVector, DriverId, DriverSample, EndpointTarget, EntityId,
+    FixedAabb, FixedVec2, GateId, GateSignalPorts, GateType, HeatEnergy, Integrity, JunctionId,
+    LogicLevel, MainCoreId, MobileControlPorts, MobileId, Revision, RoutingDomain,
+    SimulationContract, SinkId, StateHash, Tick, TrackPosition, WireId,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MainCoreRenderRecord {
+    pub id: MainCoreId,
+    pub position: FixedVec2,
+    pub capacity: Capacity,
+    pub integrity: Integrity,
+    pub heat_energy: HeatEnergy,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FixedSubstrateRenderRecord {
@@ -110,6 +119,7 @@ pub(crate) struct RenderSnapshotSource<'a> {
     pub topology_revision: Revision,
     pub contract: SimulationContract,
     pub state_hash: StateHash,
+    pub main_core: Option<&'a crate::MainCoreState>,
     pub structural: &'a StructuralWorld,
     pub signal: &'a SignalWorld,
     pub logic_threshold: u64,
@@ -123,6 +133,7 @@ pub struct RenderSnapshot {
     contract: SimulationContract,
     primitive_count: u64,
     state_hash: StateHash,
+    main_core: Option<MainCoreRenderRecord>,
     fixed_substrates: Vec<FixedSubstrateRenderRecord>,
     mobiles: Vec<MobileRenderRecord>,
     gates: Vec<GateRenderRecord>,
@@ -144,6 +155,7 @@ impl Default for RenderSnapshot {
             },
             primitive_count: 0,
             state_hash: StateHash::default(),
+            main_core: None,
             fixed_substrates: Vec::new(),
             mobiles: Vec::new(),
             gates: Vec::new(),
@@ -178,6 +190,10 @@ impl RenderSnapshot {
         self.state_hash
     }
 
+    pub const fn main_core(&self) -> Option<&MainCoreRenderRecord> {
+        self.main_core.as_ref()
+    }
+
     pub fn fixed_substrates(&self) -> &[FixedSubstrateRenderRecord] {
         &self.fixed_substrates
     }
@@ -205,6 +221,7 @@ impl RenderSnapshot {
             topology_revision,
             contract,
             state_hash,
+            main_core,
             structural,
             signal,
             logic_threshold,
@@ -214,8 +231,15 @@ impl RenderSnapshot {
         self.next_tick = next_tick;
         self.topology_revision = topology_revision;
         self.contract = contract;
-        self.primitive_count = structural.live_primitive_count();
+        self.primitive_count = structural.live_primitive_count() + u64::from(main_core.is_some());
         self.state_hash = state_hash;
+        self.main_core = main_core.map(|core| MainCoreRenderRecord {
+            id: core.id(),
+            position: core.position(),
+            capacity: core.capacity(),
+            integrity: core.integrity(),
+            heat_energy: core.heat_energy(),
+        });
 
         self.fixed_substrates.clear();
         self.fixed_substrates

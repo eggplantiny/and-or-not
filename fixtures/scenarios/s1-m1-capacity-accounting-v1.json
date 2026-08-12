@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "scenarioId": "s1-m1-capacity-accounting-v1",
+  "semanticsVersion": "aon-semantics-v1",
+  "hashAlgorithm": "blake3-v1",
+  "initialWorld": {
+    "kind": "main-core-v1",
+    "position": {
+      "x": 0,
+      "y": 0
+    },
+    "integrity": 1000,
+    "heatEnergy": 0
+  },
+  "requiredFeatures": {
+    "signal": false,
+    "mobility": false,
+    "capacity": true,
+    "sensing": false,
+    "power": false,
+    "relay": false,
+    "payload": false,
+    "radiation": false
+  },
+  "profiles": {
+    "numeric": {
+      "path": "../../profiles/numeric/v1.json",
+      "profileId": "numeric-v1",
+      "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469"
+    },
+    "physicalScale": {
+      "path": "../../profiles/physical-scale/stage0-alpha.json",
+      "profileId": "physical-scale-stage0-alpha",
+      "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490"
+    },
+    "balance": {
+      "path": "../../profiles/balance/capacity-probe-alpha.json",
+      "profileId": "balance-capacity-probe-alpha",
+      "profileHash": "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c"
+    }
+  }
+}

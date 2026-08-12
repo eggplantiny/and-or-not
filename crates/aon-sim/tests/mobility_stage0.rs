@@ -702,7 +702,7 @@ fn local_mobile_geometry_is_hash_sensitive_without_changing_track_projection() {
 }
 
 #[test]
-fn track_heading_is_v4_hash_sensitive_at_the_same_edge_offset() {
+fn track_heading_is_v5_hash_sensitive_at_the_same_edge_offset() {
     let mut forward = simulation_with_track();
     let mut reverse = simulation_with_track();
     forward

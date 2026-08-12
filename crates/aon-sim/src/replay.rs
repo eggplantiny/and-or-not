@@ -13,7 +13,9 @@ use thiserror::Error;
 pub const REPLAY_FORMAT_VERSION_V1: u32 = 1;
 pub const STATE_HASH_VERSION_V3: &str = "aon-state-v3";
 pub const STATE_HASH_VERSION_V4: &str = "aon-state-v4";
+pub const STATE_HASH_VERSION_V5: &str = "aon-state-v5";
 pub const WORLD_GENERATOR_VERSION_EMPTY_V1: &str = "aon-empty-v1";
+pub const WORLD_GENERATOR_VERSION_MAIN_CORE_V1: &str = "aon-main-core-v1";
 
 const SEED_BYTE_LENGTH: usize = 32;
 const SEED_HEX_LENGTH: usize = SEED_BYTE_LENGTH * 2;
@@ -45,8 +47,9 @@ impl ReplayFormatVersion {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StateHashVersion {
     V3,
-    #[default]
     V4,
+    #[default]
+    V5,
 }
 
 impl StateHashVersion {
@@ -54,6 +57,7 @@ impl StateHashVersion {
         match self {
             Self::V3 => STATE_HASH_VERSION_V3,
             Self::V4 => STATE_HASH_VERSION_V4,
+            Self::V5 => STATE_HASH_VERSION_V5,
         }
     }
 
@@ -61,15 +65,16 @@ impl StateHashVersion {
         match actual {
             STATE_HASH_VERSION_V3 => Ok(Self::V3),
             STATE_HASH_VERSION_V4 => Ok(Self::V4),
+            STATE_HASH_VERSION_V5 => Ok(Self::V5),
             actual => Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V4,
+                expected: STATE_HASH_VERSION_V5,
                 actual: actual.to_owned(),
             }),
         }
     }
 
     pub(crate) const fn current() -> Self {
-        Self::V4
+        Self::V5
     }
 }
 
@@ -83,20 +88,23 @@ impl fmt::Display for StateHashVersion {
 pub enum WorldGeneratorVersion {
     #[default]
     EmptyV1,
+    MainCoreV1,
 }
 
 impl WorldGeneratorVersion {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::EmptyV1 => WORLD_GENERATOR_VERSION_EMPTY_V1,
+            Self::MainCoreV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_V1,
         }
     }
 
     fn parse(actual: &str) -> Result<Self, ReplayError> {
         match actual {
             WORLD_GENERATOR_VERSION_EMPTY_V1 => Ok(Self::EmptyV1),
+            WORLD_GENERATOR_VERSION_MAIN_CORE_V1 => Ok(Self::MainCoreV1),
             actual => Err(ReplayError::UnsupportedWorldGeneratorVersion {
-                expected: WORLD_GENERATOR_VERSION_EMPTY_V1,
+                expected: "aon-empty-v1 or aon-main-core-v1",
                 actual: actual.to_owned(),
             }),
         }
@@ -337,6 +345,11 @@ impl Replay {
         {
             return Err(ReplayError::NonzeroEmptyWorldSeed);
         }
+        if self.header.world_generator_version == WorldGeneratorVersion::MainCoreV1
+            && self.header.seed != Seed::ZERO
+        {
+            return Err(ReplayError::NonzeroMainCoreWorldSeed);
+        }
         if !self.world_inputs.is_empty() {
             return Err(ReplayError::UnsupportedWorldInputs {
                 count: self.world_inputs.len(),
@@ -543,6 +556,9 @@ pub enum ReplayError {
 
     #[error("aon-empty-v1 requires the all-zero Seed")]
     NonzeroEmptyWorldSeed,
+
+    #[error("aon-main-core-v1 requires the all-zero Seed")]
+    NonzeroMainCoreWorldSeed,
 
     #[error("Replay v1 does not support WorldInput events (got {count})")]
     UnsupportedWorldInputs { count: usize },
@@ -1213,9 +1229,21 @@ impl From<RoutingDomain> for RoutingDomainWire {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum EndpointTargetWire {
     Free,
-    Junction { junction: u64 },
-    GatePort { gate: u64, port: GatePortWire },
-    MobilePort { mobile: u64, port: MobilePortWire },
+    Junction {
+        junction: u64,
+    },
+    GatePort {
+        gate: u64,
+        port: GatePortWire,
+    },
+    MobilePort {
+        mobile: u64,
+        port: MobilePortWire,
+    },
+    MainCoreAnchor {
+        #[serde(rename = "mainCore")]
+        main_core: u64,
+    },
 }
 
 impl From<EndpointTargetWire> for EndpointTarget {
@@ -1233,6 +1261,9 @@ impl From<EndpointTargetWire> for EndpointTarget {
                 mobile: MobileId(EntityId(mobile)),
                 port: port.into(),
             }),
+            EndpointTargetWire::MainCoreAnchor { main_core } => {
+                Self::MainCoreAnchor(crate::MainCoreId(EntityId(main_core)))
+            }
         }
     }
 }
@@ -1251,6 +1282,9 @@ impl From<EndpointTarget> for EndpointTargetWire {
             EndpointTarget::MobilePort(reference) => Self::MobilePort {
                 mobile: reference.mobile.entity_id().0,
                 port: reference.port.into(),
+            },
+            EndpointTarget::MainCoreAnchor(core) => Self::MainCoreAnchor {
+                main_core: core.entity_id().0,
             },
         }
     }
@@ -1438,7 +1472,7 @@ mod tests {
                 "stateHashVersion",
                 serde_json::json!("aon-state-unsupported"),
                 ReplayError::UnsupportedStateHashVersion {
-                    expected: STATE_HASH_VERSION_V4,
+                    expected: STATE_HASH_VERSION_V5,
                     actual: "aon-state-unsupported".to_owned(),
                 },
             ),
@@ -1447,7 +1481,7 @@ mod tests {
                 "worldGeneratorVersion",
                 serde_json::json!("aon-generator-unsupported"),
                 ReplayError::UnsupportedWorldGeneratorVersion {
-                    expected: WORLD_GENERATOR_VERSION_EMPTY_V1,
+                    expected: "aon-empty-v1 or aon-main-core-v1",
                     actual: "aon-generator-unsupported".to_owned(),
                 },
             ),
@@ -1520,7 +1554,7 @@ mod tests {
     }
 
     #[test]
-    fn decoded_v3_replay_is_rejected_only_when_execution_requires_v4() {
+    fn decoded_v3_replay_is_rejected_only_when_execution_requires_v5() {
         let simulation = simulation();
         let mut v3 = empty_replay_json(&simulation);
         v3["header"]["stateHashVersion"] = serde_json::json!(STATE_HASH_VERSION_V3);
@@ -1533,7 +1567,7 @@ mod tests {
         assert_eq!(
             decoded.replay().validate_against(&simulation),
             Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V4,
+                expected: STATE_HASH_VERSION_V5,
                 actual: STATE_HASH_VERSION_V3.to_owned(),
             })
         );
@@ -1789,7 +1823,7 @@ mod tests {
         decoded
             .replay()
             .validate_against(&restarted)
-            .expect("V4 mobility Replay matches the fresh session");
+            .expect("V5 mobility Replay matches the fresh session");
         let mut restarted_trace = vec![restarted.state_hash()];
         for (tick, recorded) in recorded_reports.iter().enumerate() {
             let tick = Tick(u64::try_from(tick).expect("bounded Tick index fits u64"));
@@ -2330,9 +2364,9 @@ mod tests {
     }
 
     #[test]
-    fn replay_state_hash_version_tracks_canonical_v4() {
-        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 4);
-        assert_eq!(StateHashVersion::current(), StateHashVersion::V4);
-        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V4);
+    fn replay_state_hash_version_tracks_canonical_v5() {
+        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 5);
+        assert_eq!(StateHashVersion::current(), StateHashVersion::V5);
+        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V5);
     }
 }

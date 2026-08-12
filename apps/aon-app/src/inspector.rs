@@ -2,8 +2,8 @@ use crate::cell_buffer::TextPanel;
 use aon_sim::{
     CommandAcceptance, CommandRejection, DriveVector, DriverSample, EndpointTarget, EntityId,
     FixedAabb, FixedSubstrateRenderRecord, FixedVec2, GatePort, GatePortRef, GateRenderRecord,
-    LogicLevel, MobilePortRef, MobileRenderRecord, RenderSnapshot, RoutingDomain,
-    SignalArrivalKind, StepReport, Tick, WireEnd, WireRenderRecord,
+    LogicLevel, MainCoreRenderRecord, MobilePortRef, MobileRenderRecord, RenderSnapshot,
+    RoutingDomain, SignalArrivalKind, StepReport, Tick, WireEnd, WireRenderRecord,
 };
 
 /// A presentation-stable selection namespace.
@@ -136,7 +136,13 @@ fn append_selection(lines: &mut Vec<String>, input: InspectorInput<'_>) {
 
     lines.push(format!("selection={}", target_text(selection.target)));
     let entity = selection.target.parent_entity();
-    if let Some(gate) = input
+    if let Some(core) = input
+        .snapshot
+        .main_core()
+        .filter(|record| record.id.entity_id() == entity)
+    {
+        append_main_core(lines, core);
+    } else if let Some(gate) = input
         .snapshot
         .gates()
         .iter()
@@ -188,6 +194,17 @@ fn append_selection(lines: &mut Vec<String>, input: InspectorInput<'_>) {
     }
 
     append_command(lines, input.retained_reports, selection);
+}
+
+fn append_main_core(lines: &mut Vec<String>, core: &MainCoreRenderRecord) {
+    lines.push(format!("main_core.id={}", core.id.entity_id().0));
+    lines.push(format!(
+        "main_core.position={}",
+        fixed_vec2_text(core.position)
+    ));
+    lines.push(format!("main_core.capacity={}", core.capacity.0));
+    lines.push(format!("main_core.integrity={}", core.integrity.0));
+    lines.push(format!("main_core.heat_energy={}", core.heat_energy.0));
 }
 
 fn append_gate(lines: &mut Vec<String>, gate: &GateRenderRecord) {
@@ -557,6 +574,9 @@ fn endpoint_text(endpoint: EndpointTarget) -> String {
         ),
         EndpointTarget::MobilePort(port) => {
             format!("mobile-port:{}:{:?}", port.mobile.entity_id().0, port.port)
+        }
+        EndpointTarget::MainCoreAnchor(core) => {
+            format!("main-core-anchor:{}", core.entity_id().0)
         }
     }
 }

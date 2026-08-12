@@ -4,14 +4,19 @@ use crate::contract::{
 use crate::profile::{
     BalanceProfile, NumericProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
 };
-use crate::{ArtifactHash, JsonErrorCategory, ProfileHash};
+use crate::{
+    ArtifactHash, Fixed, FixedVec2, HeatEnergy, Integrity, JsonErrorCategory, ProfileHash,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 
-const SCENARIO_SCHEMA_VERSION_V1: u32 = 1;
-const SCENARIO_HASH_DOMAIN: &[u8] = b"AON\0SCENARIO\0V1\0";
-const SCENARIO_HASH_ENCODER_VERSION: u16 = 1;
+pub const SCENARIO_SCHEMA_VERSION_V1: u32 = 1;
+pub const SCENARIO_SCHEMA_VERSION_V2: u32 = 2;
+const SCENARIO_HASH_DOMAIN_V1: &[u8] = b"AON\0SCENARIO\0V1\0";
+const SCENARIO_HASH_DOMAIN_V2: &[u8] = b"AON\0SCENARIO\0V2\0";
+const SCENARIO_HASH_ENCODER_VERSION_V1: u16 = 1;
+const SCENARIO_HASH_ENCODER_VERSION_V2: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -59,6 +64,11 @@ impl fmt::Display for ArtifactKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialWorld {
     Empty,
+    MainCoreV1 {
+        position: FixedVec2,
+        integrity: Integrity,
+        heat_energy: HeatEnergy,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -88,12 +98,10 @@ impl StageFeatureSet {
         }
     }
 
-    pub(crate) const fn first_enabled(self) -> Option<&'static str> {
-        // Signal and mobility are implemented by Stage 0; only later-stage requirements are
-        // rejected here.
-        if self.capacity {
-            Some("capacity")
-        } else if self.sensing {
+    pub(crate) const fn first_unsupported(self) -> Option<&'static str> {
+        // Signal and mobility are implemented by Stage 0, and capacity accounting is implemented
+        // by S1-M1. Only remaining later-stage requirements are rejected here.
+        if self.sensing {
             Some("sensing")
         } else if self.power {
             Some("power")
@@ -179,7 +187,7 @@ impl ScenarioManifest {
         self.hash_algorithm
     }
 
-    pub(crate) fn initial_world(&self) -> &InitialWorld {
+    pub fn initial_world(&self) -> &InitialWorld {
         &self.initial_world
     }
 
@@ -198,8 +206,17 @@ impl ScenarioManifest {
     /// profile hashes are included.
     pub fn canonical_hash(&self) -> Result<ArtifactHash, ScenarioHashError> {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(SCENARIO_HASH_DOMAIN);
-        hasher.update(&SCENARIO_HASH_ENCODER_VERSION.to_le_bytes());
+        let (domain, encoder_version) = match self.schema_version {
+            SCENARIO_SCHEMA_VERSION_V1 => {
+                (SCENARIO_HASH_DOMAIN_V1, SCENARIO_HASH_ENCODER_VERSION_V1)
+            }
+            SCENARIO_SCHEMA_VERSION_V2 => {
+                (SCENARIO_HASH_DOMAIN_V2, SCENARIO_HASH_ENCODER_VERSION_V2)
+            }
+            _ => unreachable!("ScenarioManifest is created only by the strict decoder"),
+        };
+        hasher.update(domain);
+        hasher.update(&encoder_version.to_le_bytes());
         hasher.update(&self.schema_version.to_le_bytes());
         hash_text(&mut hasher, "scenarioId", &self.scenario_id)?;
         hash_text(
@@ -208,9 +225,22 @@ impl ScenarioManifest {
             self.semantics_version.as_str(),
         )?;
         hash_text(&mut hasher, "hashAlgorithm", self.hash_algorithm.as_str())?;
-        hasher.update(&[match &self.initial_world {
-            InitialWorld::Empty => 0,
-        }]);
+        match &self.initial_world {
+            InitialWorld::Empty => {
+                hasher.update(&[0]);
+            }
+            InitialWorld::MainCoreV1 {
+                position,
+                integrity,
+                heat_energy,
+            } => {
+                hasher.update(&[1]);
+                hasher.update(&position.x.0.to_le_bytes());
+                hasher.update(&position.y.0.to_le_bytes());
+                hasher.update(&integrity.0.to_le_bytes());
+                hasher.update(&heat_energy.0.to_le_bytes());
+            }
+        };
         for enabled in [
             self.required_features.signal,
             self.required_features.mobility,
@@ -257,9 +287,28 @@ struct ScenarioWire {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioSchemaEnvelope {
+    schema_version: u32,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum InitialWorldWire {
     Empty,
+    MainCoreV1 {
+        position: FixedVec2Wire,
+        integrity: u64,
+        #[serde(rename = "heatEnergy")]
+        heat_energy: u64,
+    },
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FixedVec2Wire {
+    x: i64,
+    y: i64,
 }
 
 #[derive(Deserialize)]
@@ -279,12 +328,21 @@ struct ProfileReferenceWire {
 }
 
 pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, crate::PackageError> {
+    // Schema support is a protocol-envelope decision and deterministically precedes decoding
+    // version-specific InitialWorld payloads. The second strict decode still rejects every
+    // unknown, duplicate, or ill-typed field for a supported schema.
+    let envelope: ScenarioSchemaEnvelope = decode_json(bytes, ArtifactKind::Scenario)?;
+    if !matches!(
+        envelope.schema_version,
+        SCENARIO_SCHEMA_VERSION_V1 | SCENARIO_SCHEMA_VERSION_V2
+    ) {
+        return Err(crate::PackageError::UnsupportedSchema {
+            artifact: ArtifactKind::Scenario,
+            expected: SCENARIO_SCHEMA_VERSION_V2,
+            actual: envelope.schema_version,
+        });
+    }
     let wire: ScenarioWire = decode_json(bytes, ArtifactKind::Scenario)?;
-    validate_schema(
-        ArtifactKind::Scenario,
-        SCENARIO_SCHEMA_VERSION_V1,
-        wire.schema_version,
-    )?;
     validate_non_empty(ArtifactKind::Scenario, "scenarioId", &wire.scenario_id)?;
 
     let semantics_version = SemanticsVersion::parse(&wire.semantics_version).map_err(|_| {
@@ -300,14 +358,48 @@ pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, crate:
         }
     })?;
 
+    let initial_world = match (wire.schema_version, wire.initial_world) {
+        (SCENARIO_SCHEMA_VERSION_V1, InitialWorldWire::Empty) => InitialWorld::Empty,
+        (
+            SCENARIO_SCHEMA_VERSION_V2,
+            InitialWorldWire::MainCoreV1 {
+                position,
+                integrity,
+                heat_energy,
+            },
+        ) => {
+            if integrity == 0 {
+                return Err(crate::PackageError::NonPositiveInitialWorldField {
+                    field: "initialWorld.integrity",
+                });
+            }
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed(position.x), Fixed(position.y)),
+                integrity: Integrity(integrity),
+                heat_energy: HeatEnergy(heat_energy),
+            }
+        }
+        (SCENARIO_SCHEMA_VERSION_V1, InitialWorldWire::MainCoreV1 { .. }) => {
+            return Err(crate::PackageError::UnsupportedInitialWorld {
+                schema_version: SCENARIO_SCHEMA_VERSION_V1,
+                initial_world: "main-core-v1",
+            });
+        }
+        (SCENARIO_SCHEMA_VERSION_V2, InitialWorldWire::Empty) => {
+            return Err(crate::PackageError::UnsupportedInitialWorld {
+                schema_version: SCENARIO_SCHEMA_VERSION_V2,
+                initial_world: "empty",
+            });
+        }
+        _ => unreachable!("unsupported Scenario schemas were rejected above"),
+    };
+
     Ok(ScenarioManifest {
         schema_version: wire.schema_version,
         scenario_id: wire.scenario_id,
         semantics_version,
         hash_algorithm,
-        initial_world: match wire.initial_world {
-            InitialWorldWire::Empty => InitialWorld::Empty,
-        },
+        initial_world,
         required_features: wire.required_features,
         profiles: ProfileReferences {
             numeric: decode_profile_reference(wire.profiles.numeric, ProfileKind::Numeric)?,
@@ -471,22 +563,6 @@ where
         line: error.line(),
         column: error.column(),
     })
-}
-
-fn validate_schema(
-    artifact: ArtifactKind,
-    expected: u32,
-    actual: u32,
-) -> Result<(), crate::PackageError> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(crate::PackageError::UnsupportedSchema {
-            artifact,
-            expected,
-            actual,
-        })
-    }
 }
 
 fn validate_non_empty(

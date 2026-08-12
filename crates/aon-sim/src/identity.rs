@@ -33,6 +33,7 @@ macro_rules! typed_entity_id {
 typed_entity_id!(GateId);
 typed_entity_id!(WireId);
 typed_entity_id!(JunctionId);
+typed_entity_id!(MainCoreId);
 typed_entity_id!(DriverId);
 typed_entity_id!(SinkId);
 typed_entity_id!(RelaySiteId);

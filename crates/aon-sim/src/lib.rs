@@ -2,6 +2,7 @@
 
 mod artifact;
 mod canonical;
+mod capacity;
 mod command;
 mod contract;
 mod error;
@@ -11,6 +12,7 @@ mod experiment_artifact;
 mod geometry;
 mod hash;
 mod identity;
+mod main_core;
 mod mobility;
 mod module;
 mod numeric;
@@ -27,9 +29,13 @@ mod topology;
 
 pub use artifact::{
     ArtifactBytes, ArtifactKind, InitialWorld, PhysicalScaleProfileArtifactError, ProfileKind,
-    ProfileReference, ProfileReferences, ScenarioHashError, ScenarioManifest, StageFeatureSet,
-    decode_balance_profile, decode_numeric_profile, decode_package, decode_physical_scale_profile,
+    ProfileReference, ProfileReferences, SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2,
+    ScenarioHashError, ScenarioManifest, StageFeatureSet, decode_balance_profile,
+    decode_numeric_profile, decode_package, decode_physical_scale_profile,
     decode_scenario_manifest, encode_physical_scale_profile,
+};
+pub use capacity::{
+    MainCoreCapacityContribution, NetworkAccounting, NetworkAnalyzerSnapshot, WireCapacityUsage,
 };
 pub use command::{
     BindPortCommand, Command, CommandAcceptance, CommandEncodingError, CommandEnvelope,
@@ -68,10 +74,11 @@ pub use hash::{HashParseError, ProfileHash, StateHash};
 pub use identity::{
     ConnectionGeneration, ConnectionGenerationError, ConstructionSiteIndex, DepositIndex, DriverId,
     EnemyIndex, EntityLocation, EntityRegistry, EntityRegistryError, FIRST_ENTITY_ID,
-    FixedSubstrateIndex, GateId, GateIndex, JunctionId, JunctionIndex, MobileId,
+    FixedSubstrateIndex, GateId, GateIndex, JunctionId, JunctionIndex, MainCoreId, MobileId,
     MobileSubstrateIndex, PowerSourceIndex, QuartzIndex, RESERVED_ENTITY_ID, RelaySiteId,
     RelaySiteIndex, SinkId, WireId, WireIndex,
 };
+pub use main_core::{MainCoreState, TopologyNodeId};
 pub use mobility::{
     Heading, JunctionDecisionKind, MobileControlPorts, MobileControlSample, MobileJunctionDecision,
     MobileMovementObservation, MobilePort, MobilePortRef, TrackPosition,
@@ -101,8 +108,9 @@ pub use profile::{
 pub use replay::{
     HashCheckpoint, REPLAY_FORMAT_VERSION_V1, Replay, ReplayArtifact, ReplayContractField,
     ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4,
-    Seed, SeedParseError, StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1,
-    WorldGeneratorVersion, WorldInputEvent, decode_replay_artifact, encode_replay_artifact,
+    STATE_HASH_VERSION_V5, Seed, SeedParseError, StateHashVersion,
+    WORLD_GENERATOR_VERSION_EMPTY_V1, WORLD_GENERATOR_VERSION_MAIN_CORE_V1, WorldGeneratorVersion,
+    WorldInputEvent, decode_replay_artifact, encode_replay_artifact,
 };
 pub use signal::{
     DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,
@@ -110,8 +118,9 @@ pub use signal::{
 };
 pub use simulation::{SignalArrivalObservation, Simulation, SimulationPackage, StepReport};
 pub use snapshot::{
-    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, MobileRenderRecord,
-    RenderSnapshot, SignalProbeSample, SignalProbeTarget, SignalProbeValue, WireRenderRecord,
+    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, MainCoreRenderRecord,
+    MobileRenderRecord, RenderSnapshot, SignalProbeSample, SignalProbeTarget, SignalProbeValue,
+    WireRenderRecord,
 };
 pub use topology::{
     EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,

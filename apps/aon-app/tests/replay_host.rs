@@ -297,3 +297,70 @@ fn retained_stage0_100k_replay_matches_headless_and_bevy_complete_trace() {
         .expect("retained 100k Replay runs through Bevy FixedUpdate");
     assert_same_trace(headless.checkpoints(), bevy.checkpoints());
 }
+
+#[test]
+fn retained_s1m1_capacity_replay_matches_headless_and_bevy_fixed_update() {
+    let (replay_path, package, replay) = retained_replay("s1-m1-capacity-accounting-v1.json");
+    let headless = run_replay_file(replay_path).expect("retained capacity Replay runs headlessly");
+    assert_eq!(headless.scenario_id(), "s1-m1-capacity-accounting-v1");
+    assert_eq!(headless.completed_ticks(), 3);
+    assert_eq!(headless.checkpoints().len(), 4);
+    assert_declared_checkpoints(&replay, headless.checkpoints());
+
+    let expected_accounting = [
+        (
+            Tick(0),
+            Tick(1),
+            10_u64 * FIXED_ONE as u64,
+            1_000_u64 * FIXED_ONE as u64,
+        ),
+        (
+            Tick(1),
+            Tick(2),
+            10_u64 * FIXED_ONE as u64,
+            1_000_u64 * FIXED_ONE as u64,
+        ),
+        (
+            Tick(2),
+            Tick(3),
+            12_u64 * FIXED_ONE as u64,
+            1_000_u64 * FIXED_ONE as u64,
+        ),
+    ];
+
+    let assert_reports = |reports: &[aon_sim::StepReport]| {
+        assert_eq!(reports.len(), expected_accounting.len());
+        for (report, (completed, next, used, supported)) in reports.iter().zip(expected_accounting)
+        {
+            assert_eq!((report.completed_tick, report.next_tick), (completed, next));
+            assert!(report.command_rejections.is_empty());
+            let accounting = report
+                .network_accounting
+                .expect("capacity Replay reports Phase 4 accounting");
+            assert_eq!(
+                (accounting.used().0, accounting.supported().0),
+                (used, supported)
+            );
+            let checkpoint = usize::try_from(next.0).expect("retained Tick fits usize");
+            assert_eq!(report.state_hash, headless.checkpoints()[checkpoint]);
+        }
+    };
+
+    for presentation_updates in [0, 1, 7] {
+        let bevy =
+            run_replay_host_harness(package.clone(), replay.clone(), presentation_updates, true)
+                .expect("retained capacity Replay runs with the presenter");
+        assert_same_trace(headless.checkpoints(), bevy.checkpoints());
+        assert_reports(bevy.reports());
+    }
+
+    let without_presenter = run_replay_host_harness(package.clone(), replay.clone(), 7, false)
+        .expect("retained capacity Replay runs without the presenter");
+    assert_same_trace(headless.checkpoints(), without_presenter.checkpoints());
+    assert_reports(without_presenter.reports());
+
+    let one_frame = run_paced_replay_host_harness(package, replay, &[Duration::from_millis(150)])
+        .expect("one frame preserves all capacity Replay Ticks");
+    assert_same_trace(headless.checkpoints(), one_frame.checkpoints());
+    assert_reports(one_frame.reports());
+}

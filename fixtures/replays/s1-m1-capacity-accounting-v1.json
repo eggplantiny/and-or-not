@@ -1,0 +1,293 @@
+{
+  "scenarioPath": "../scenarios/s1-m1-capacity-accounting-v1.json",
+  "header": {
+    "formatVersion": 1,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c",
+    "stateHashVersion": "aon-state-v5",
+    "worldGeneratorVersion": "aon-main-core-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 262144,
+            "y": 0
+          },
+          {
+            "x": 458752,
+            "y": 0
+          },
+          {
+            "x": 655360,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "main-core-anchor",
+          "mainCore": 1
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 1,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 2,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "position": {
+          "x": 131072,
+          "y": 1048576
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 3,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "position": {
+          "x": 327680,
+          "y": 1048576
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 4,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "position": {
+          "x": 524288,
+          "y": 1048576
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 2
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 5,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 1048576
+          },
+          {
+            "x": 65536,
+            "y": 1048576
+          },
+          {
+            "x": 131072,
+            "y": 1048576
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 4
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 6,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 131072,
+            "y": 1048576
+          },
+          {
+            "x": 327680,
+            "y": 1048576
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 4
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 5
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 7,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 327680,
+            "y": 1048576
+          },
+          {
+            "x": 524288,
+            "y": 1048576
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 5
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 6
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 8,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 524288,
+            "y": 1048576
+          },
+          {
+            "x": 655360,
+            "y": 1048576
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 6
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 3
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 262144
+          },
+          {
+            "x": 131072,
+            "y": 262144
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "7598152049dc0f10fc8798a9b6feb3ef98d63649f3ecb05db16949570b767845"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "4891d29198b6762f4dfc29dbff2b1e629d38ba307ab9f91c9f8db0f72b156d0f"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "cbe2f28ada7d5b969de8e220e694996a76391c2d5bf5605c55f28dab803150df"
+    }
+  ]
+}

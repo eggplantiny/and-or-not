@@ -301,6 +301,9 @@ fn encode_endpoint_target(target: EndpointTarget, write: &mut dyn FnMut(&[u8])) 
             encode_entity_id(reference.mobile.entity_id(), write);
             write_u8(reference.port.canonical_tag(), write);
         }
+        EndpointTarget::MainCoreAnchor(core) => {
+            encode_entity_id(core.entity_id(), write);
+        }
     }
 }
 

@@ -1,19 +1,22 @@
 use aon_sim::{
     ArtifactBytes, HASH_ALGORITHM_ID_BLAKE3_V1, REPLAY_FORMAT_VERSION_V1, ReplayError,
-    SEMANTICS_VERSION_V1, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4, Seed, Simulation,
-    StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1, decode_package, decode_replay_artifact,
-    encode_replay_artifact,
+    SEMANTICS_VERSION_V1, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5,
+    Seed, Simulation, StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1, decode_package,
+    decode_replay_artifact, encode_replay_artifact,
 };
 
 const FEEDBACK_RING: &[u8] = include_bytes!("../../../fixtures/replays/feedback-ring-v1.json");
 const STAGE0_100K: &[u8] = include_bytes!("../../../fixtures/replays/stage0-100k-v1.json");
+const S1_M1_CAPACITY: &[u8] =
+    include_bytes!("../../../fixtures/replays/s1-m1-capacity-accounting-v1.json");
 const RETAINED_V3_EMPTY: &[u8] = include_bytes!("fixtures/replay-v3-empty-v1.json");
+const RETAINED_V4_EMPTY: &[u8] = include_bytes!("fixtures/replay-v4-empty-v1.json");
 const SCENARIO: &[u8] = include_bytes!("../../../fixtures/scenarios/empty.json");
 const NUMERIC: &[u8] = include_bytes!("../../../profiles/numeric/v1.json");
 const PHYSICAL: &[u8] = include_bytes!("../../../profiles/physical-scale/stage0-alpha.json");
 const BALANCE: &[u8] = include_bytes!("../../../profiles/balance/stage0-alpha.json");
 
-const INITIAL_STATE_HASH: &str = "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3";
+const INITIAL_STATE_HASH: &str = "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561";
 const NUMERIC_PROFILE_HASH: &str =
     "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469";
 const PHYSICAL_SCALE_PROFILE_HASH: &str =
@@ -44,13 +47,59 @@ fn retained_v3_empty_artifact_strictly_decodes_and_round_trips_exactly() {
         balance_profile: BALANCE,
     })
     .expect("reference package decodes");
-    let simulation = Simulation::new(package).expect("fresh V4 simulation starts");
+    let simulation = Simulation::new(package).expect("fresh V5 simulation starts");
     assert_eq!(
         artifact.replay().validate_against(&simulation),
         Err(ReplayError::UnsupportedStateHashVersion {
-            expected: STATE_HASH_VERSION_V4,
+            expected: STATE_HASH_VERSION_V5,
             actual: STATE_HASH_VERSION_V3.to_owned(),
         })
+    );
+}
+
+#[test]
+fn retained_v4_empty_artifact_strictly_decodes_round_trips_and_is_execution_rejected() {
+    let artifact =
+        decode_replay_artifact(RETAINED_V4_EMPTY).expect("retained V4 Replay strictly decodes");
+
+    assert_eq!(
+        artifact.replay().header().state_hash_version.as_str(),
+        STATE_HASH_VERSION_V4
+    );
+    assert!(artifact.replay().commands().is_empty());
+    assert_eq!(artifact.replay().checkpoints().len(), 1);
+    assert_eq!(
+        encode_replay_artifact(&artifact).expect("retained V4 Replay canonically encodes"),
+        RETAINED_V4_EMPTY
+    );
+
+    let package = decode_package(ArtifactBytes {
+        scenario: SCENARIO,
+        numeric_profile: NUMERIC,
+        physical_scale_profile: PHYSICAL,
+        balance_profile: BALANCE,
+    })
+    .expect("reference package decodes");
+    let simulation = Simulation::new(package).expect("fresh V5 simulation starts");
+    assert_eq!(
+        artifact.replay().validate_against(&simulation),
+        Err(ReplayError::UnsupportedStateHashVersion {
+            expected: STATE_HASH_VERSION_V5,
+            actual: STATE_HASH_VERSION_V4.to_owned(),
+        })
+    );
+}
+
+#[test]
+fn main_core_v1_replay_rejects_a_nonzero_seed_before_execution() {
+    let mut document: serde_json::Value =
+        serde_json::from_slice(S1_M1_CAPACITY).expect("retained Main Core Replay JSON parses");
+    document["header"]["seed"] = serde_json::Value::String(format!("1{}", "0".repeat(63)));
+    let bytes = serde_json::to_vec(&document).expect("mutated Replay JSON encodes");
+
+    assert_eq!(
+        decode_replay_artifact(&bytes),
+        Err(ReplayError::NonzeroMainCoreWorldSeed)
     );
 }
 
@@ -75,7 +124,7 @@ fn retained_feedback_ring_is_the_exact_canonical_replay_encoding() {
             .last()
             .expect("feedback Replay has a final checkpoint")
             .state_hash,
-        StateHash::from_hex("db7b87e385d33bf3b9e771717420b0a8ab439fbbf5ca24d1210cbbc19dfed866")
+        StateHash::from_hex("3e9cc996465f0849244ba84adbf1f7637e0415689d58da2558c5b85c714e9319")
             .expect("feedback final golden is canonical")
     );
 }
@@ -106,7 +155,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
         header.balance_profile_hash.to_string(),
         BALANCE_PROFILE_HASH
     );
-    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V4);
+    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V5);
     assert_eq!(
         header.world_generator_version.as_str(),
         WORLD_GENERATOR_VERSION_EMPTY_V1
@@ -132,7 +181,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
     assert_eq!(final_checkpoint.next_tick, Tick(100_000));
     assert_eq!(
         final_checkpoint.state_hash,
-        StateHash::from_hex("eda68c2223e47399ac7b0196034f94409b71f43ae260c8945af6d1111b469519")
+        StateHash::from_hex("61d49248320f1c9cb803325945e18fc19d59cf80e33ab7d877543e3b4fc75f32")
             .expect("100k final golden is canonical")
     );
 }

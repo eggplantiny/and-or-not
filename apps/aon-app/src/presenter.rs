@@ -360,6 +360,14 @@ pub fn project_snapshot(
     }
 
     if matches!(view, ViewMode::Network) {
+        draw_main_core(
+            snapshot,
+            pitch,
+            bounds,
+            &mut buffer,
+            &mut ranked_picks,
+            &mut diagnostics,
+        );
         draw_mobiles(
             snapshot,
             pitch,
@@ -411,6 +419,39 @@ pub fn project_snapshot(
         picks,
         diagnostics,
     })
+}
+
+fn draw_main_core(
+    snapshot: &RenderSnapshot,
+    pitch: Fixed,
+    bounds: GridBounds,
+    buffer: &mut CellBuffer,
+    picks: &mut BTreeMap<CellPoint, Vec<RankedPick>>,
+    diagnostics: &mut Vec<PresenterDiagnostic>,
+) {
+    let Some(core) = snapshot.main_core() else {
+        return;
+    };
+    let entity = core.id.entity_id();
+    let Some(at) = project_fixed_point(core.position, FixedVec2::default(), pitch)
+        .and_then(GridPoint::to_cell)
+    else {
+        diagnostics.push(PresenterDiagnostic::CoordinateOutsideHostRange { entity });
+        return;
+    };
+    if !bounds.contains(GridPoint::new(i64::from(at.x), i64::from(at.y))) {
+        return;
+    }
+    buffer.write(CellWrite::new(
+        at,
+        CellLayer::MainCore,
+        CellVisual::new(
+            '@',
+            CellTone::Neutral,
+            Some(PresentationSource::Canonical(entity)),
+        ),
+    ));
+    push_pick(picks, at, CellLayer::MainCore, PickTarget::Entity(entity));
 }
 
 fn domain_visible(domain: RoutingDomain, view: ViewMode) -> bool {
@@ -961,7 +1002,8 @@ fn bound_gate_ports(snapshot: &RenderSnapshot) -> BTreeSet<GatePortRef> {
             aon_sim::EndpointTarget::GatePort(port) => Some(port),
             aon_sim::EndpointTarget::Free
             | aon_sim::EndpointTarget::Junction(_)
-            | aon_sim::EndpointTarget::MobilePort(_) => None,
+            | aon_sim::EndpointTarget::MobilePort(_)
+            | aon_sim::EndpointTarget::MainCoreAnchor(_) => None,
         })
         .collect()
 }

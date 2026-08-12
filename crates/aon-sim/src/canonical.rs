@@ -6,11 +6,11 @@ use crate::signal::{DriveVector, SignalWorld};
 use crate::structural::StructuralWorld;
 use crate::{
     EndpointTarget, EntityLocation, EntityRegistry, FixedAabb, FixedVec2, Heading, LogicLevel,
-    Revision, RoutingDomain, SimulationContract, StateHash, Tick, TrackPosition,
+    MainCoreState, Revision, RoutingDomain, SimulationContract, StateHash, Tick, TrackPosition,
 };
 
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V4\0";
-pub(crate) const STATE_ENCODER_VERSION: u16 = 4;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V5\0";
+pub(crate) const STATE_ENCODER_VERSION: u16 = 5;
 const RESERVED_EMPTY_STORE_COUNT: usize = 3;
 
 #[derive(Clone, Copy)]
@@ -18,6 +18,7 @@ pub(crate) struct StateView<'a> {
     pub contract: &'a SimulationContract,
     pub next_tick: Tick,
     pub topology_revision: Revision,
+    pub main_core: Option<&'a MainCoreState>,
     pub structural: &'a StructuralWorld,
     pub signal: &'a SignalWorld,
     pub event_payloads: &'a EventPayloadAllocator,
@@ -32,6 +33,7 @@ struct StateComponents<'a> {
     next_tick: Tick,
     topology_revision: Revision,
     entities: &'a EntityRegistry,
+    main_core: Option<&'a MainCoreState>,
     structural: Option<&'a StructuralWorld>,
     signal: &'a SignalWorld,
     event_payloads: &'a EventPayloadAllocator,
@@ -55,6 +57,7 @@ fn encode_state(state: StateView<'_>, write: &mut dyn FnMut(&[u8])) {
             next_tick: state.next_tick,
             topology_revision: state.topology_revision,
             entities: state.structural.entities(),
+            main_core: state.main_core,
             structural: Some(state.structural),
             signal: state.signal,
             event_payloads: state.event_payloads,
@@ -88,6 +91,24 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
         }
     }
 
+    match state.main_core {
+        Some(core) => {
+            write_u8(1, write);
+            write_u64(core.id().entity_id().0, write);
+            encode_point(core.position(), write);
+            match core.anchor_node() {
+                crate::TopologyNodeId::MainCoreAnchor(id) => {
+                    write_u8(0, write);
+                    write_u64(id.entity_id().0, write);
+                }
+            }
+            write_u64(core.capacity().0, write);
+            write_u64(core.integrity().0, write);
+            write_u64(core.heat_energy().0, write);
+        }
+        None => write_u8(0, write),
+    }
+
     if let Some(structural) = state.structural {
         encode_structural_stores(structural, write);
     } else {
@@ -101,7 +122,7 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     encode_driver_events(state.driver_events, write);
     encode_signal_events(state.signal_events, write);
 
-    // Destruction, radiation, and relay stores remain reserved in V4.
+    // Destruction, radiation, and relay stores remain reserved in V5.
     for _ in 0..RESERVED_EMPTY_STORE_COUNT {
         write_u64(0, write);
     }
@@ -444,6 +465,7 @@ fn encode_endpoint(endpoint: EndpointTarget, write: &mut dyn FnMut(&[u8])) {
             write_u64(reference.mobile.entity_id().0, write);
             write_u8(reference.port.canonical_tag(), write);
         }
+        EndpointTarget::MainCoreAnchor(core) => write_u64(core.entity_id().0, write),
     }
 }
 
@@ -540,6 +562,7 @@ mod tests {
                 contract,
                 next_tick,
                 topology_revision,
+                main_core: None,
                 structural,
                 signal: &self.signal,
                 event_payloads: &self.payloads,
@@ -559,6 +582,7 @@ mod tests {
                 next_tick: Tick(0),
                 topology_revision: Revision(0),
                 entities,
+                main_core: None,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -600,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn state_encoding_v4_has_exact_contract_tick_revision_and_identity_order() {
+    fn state_encoding_v5_has_exact_contract_tick_revision_and_identity_order() {
         let mut entities = EntityRegistry::new();
         entities
             .allocate(EntityLocation::Gate(GateIndex(7)))
@@ -618,6 +642,7 @@ mod tests {
                 next_tick: Tick(5),
                 topology_revision: Revision(3),
                 entities: &entities,
+                main_core: None,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -629,8 +654,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V4\0");
-        expected.extend_from_slice(&4_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V5\0");
+        expected.extend_from_slice(&5_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -644,9 +669,129 @@ mod tests {
         expected.push(2);
         expected.extend_from_slice(&2_u64.to_le_bytes());
         expected.push(0);
+        expected.push(0);
         append_empty_runtime(&mut expected);
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn main_core_v5_section_has_exact_anchor_order_and_is_hash_sensitive() {
+        let mut entities = EntityRegistry::new();
+        let id = crate::MainCoreId(
+            entities
+                .allocate(EntityLocation::MainCore)
+                .expect("Main Core allocation succeeds"),
+        );
+        let core = MainCoreState::new(
+            id,
+            point(-65_536, 131_072),
+            crate::Capacity(65_536_000),
+            crate::Integrity(77),
+            crate::HeatEnergy(9),
+        );
+        let runtime = TestRuntime::new();
+        let encode = |core: MainCoreState| {
+            let mut bytes = Vec::new();
+            encode_state_components(
+                StateComponents {
+                    contract: &contract(),
+                    next_tick: Tick(0),
+                    topology_revision: Revision(0),
+                    entities: &entities,
+                    main_core: Some(&core),
+                    structural: None,
+                    signal: &runtime.signal,
+                    event_payloads: &runtime.payloads,
+                    driver_events: &runtime.driver_events,
+                    signal_events: &runtime.signal_events,
+                    path_certificates: &runtime.path_certificates,
+                },
+                &mut |part| bytes.extend_from_slice(part),
+            );
+            bytes
+        };
+
+        let baseline = encode(core);
+        let header_len = STATE_DOMAIN.len() + 2 + 1 + 32 * 3 + 8 * 4 + 10;
+        let mut expected = vec![1];
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        append_point(&mut expected, point(-65_536, 131_072));
+        expected.push(0);
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&65_536_000_u64.to_le_bytes());
+        expected.extend_from_slice(&77_u64.to_le_bytes());
+        expected.extend_from_slice(&9_u64.to_le_bytes());
+        assert_eq!(&baseline[header_len..header_len + expected.len()], expected);
+
+        let mut full_expected = Vec::new();
+        full_expected.extend_from_slice(b"AON\0STATE\0V5\0");
+        full_expected.extend_from_slice(&5_u16.to_le_bytes());
+        full_expected.push(0);
+        full_expected.extend_from_slice(&[0x11; 32]);
+        full_expected.extend_from_slice(&[0x22; 32]);
+        full_expected.extend_from_slice(&[0x33; 32]);
+        full_expected.extend_from_slice(&0_u64.to_le_bytes());
+        full_expected.extend_from_slice(&0_u64.to_le_bytes());
+        full_expected.extend_from_slice(&2_u64.to_le_bytes());
+        full_expected.extend_from_slice(&1_u64.to_le_bytes());
+        full_expected.extend_from_slice(&1_u64.to_le_bytes());
+        full_expected.push(1);
+        full_expected.push(0);
+        full_expected.extend_from_slice(&expected);
+        append_empty_runtime(&mut full_expected);
+        assert_eq!(baseline, full_expected);
+
+        assert_ne!(
+            baseline,
+            encode(core.with_id_for_test(crate::MainCoreId(EntityId(2))))
+        );
+
+        for changed in [
+            MainCoreState::new(
+                id,
+                point(-64_512, 131_072),
+                crate::Capacity(65_536_000),
+                crate::Integrity(77),
+                crate::HeatEnergy(9),
+            ),
+            MainCoreState::new(
+                id,
+                point(-65_536, 132_096),
+                crate::Capacity(65_536_000),
+                crate::Integrity(77),
+                crate::HeatEnergy(9),
+            ),
+            MainCoreState::new(
+                id,
+                point(-65_536, 131_072),
+                crate::Capacity(65_536_001),
+                crate::Integrity(77),
+                crate::HeatEnergy(9),
+            ),
+            MainCoreState::new(
+                id,
+                point(-65_536, 131_072),
+                crate::Capacity(65_536_000),
+                crate::Integrity(78),
+                crate::HeatEnergy(9),
+            ),
+            MainCoreState::new(
+                id,
+                point(-65_536, 131_072),
+                crate::Capacity(65_536_000),
+                crate::Integrity(77),
+                crate::HeatEnergy(10),
+            ),
+        ] {
+            assert_ne!(baseline, encode(changed));
+        }
+
+        let hash = StateHash::from_bytes(*blake3::hash(&baseline).as_bytes());
+        assert_eq!(
+            hash.to_string(),
+            "2c5bc081e8adeca01a63770fe0a2be0335d9bc0a2ca96ae8dc691e8cf6b5d125"
+        );
     }
 
     #[test]
@@ -809,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_state_encoding_has_exact_entity_order_records_and_raw_vertices() {
+    fn structural_state_encoding_has_exact_v5_entity_order_records_and_raw_vertices() {
         const WORLD_PITCH: i64 = 65_536;
         let physical = PhysicalScaleProfile::stage0_alpha("canonical-structural-test");
         let mut world = StructuralWorld::new();
@@ -887,8 +1032,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V4\0");
-        expected.extend_from_slice(&4_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V5\0");
+        expected.extend_from_slice(&5_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -900,6 +1045,8 @@ mod tests {
             expected.extend_from_slice(&id.to_le_bytes());
             expected.extend_from_slice(&[1, kind]);
         }
+
+        expected.push(0);
 
         expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.extend_from_slice(&2_u64.to_le_bytes());
@@ -940,12 +1087,12 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(
             state_hash(runtime.view(&contract, Tick(3), Revision(2), &world)).to_string(),
-            "4ea6f2535f070e8a7dd470cd3e9987da08aaf8b0dafd018300af1f09688aff4a"
+            "268e9b354667b0f4c66cb8954f8dd8c0da3f3dfb3cb5f854cd39d7ca32081818"
         );
     }
 
     #[test]
-    fn mobile_track_positions_have_exact_v4_bytes_and_field_boundaries() {
+    fn mobile_track_positions_have_exact_v5_bytes_and_field_boundaries() {
         const EDGE_LENGTH: i64 = 65_536;
         let edge = |edge, offset, heading| TrackPosition::Edge {
             edge: WireId(EntityId(edge)),
@@ -1038,7 +1185,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Forward,
             }),
-            "Edge identity reaches the full V4 state hash"
+            "Edge identity reaches the full V5 state hash"
         );
         assert_ne!(
             baseline,
@@ -1047,7 +1194,7 @@ mod tests {
                 offset: Fixed(WORLD_PITCH),
                 heading: Heading::Forward,
             }),
-            "the exact edge-length offset boundary reaches the full V4 state hash"
+            "the exact edge-length offset boundary reaches the full V5 state hash"
         );
         assert_ne!(
             baseline,
@@ -1056,7 +1203,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Reverse,
             }),
-            "Heading reaches the full V4 state hash"
+            "Heading reaches the full V5 state hash"
         );
 
         let at_junction = TrackPosition::Junction {
@@ -1066,7 +1213,7 @@ mod tests {
         let junction_hash = hash(at_junction);
         assert_ne!(
             baseline, junction_hash,
-            "Edge/Junction discriminant reaches the full V4 state hash"
+            "Edge/Junction discriminant reaches the full V5 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1074,7 +1221,7 @@ mod tests {
                 junction: junction_b,
                 incoming_edge: edge_a,
             }),
-            "Junction identity reaches the full V4 state hash"
+            "Junction identity reaches the full V5 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1082,12 +1229,12 @@ mod tests {
                 junction: junction_a,
                 incoming_edge: edge_b,
             }),
-            "incoming Edge identity reaches the full V4 state hash"
+            "incoming Edge identity reaches the full V5 state hash"
         );
     }
 
     #[test]
-    fn populated_mobile_control_sink_map_has_exact_v4_signal_bytes() {
+    fn populated_mobile_control_sink_map_has_exact_v5_signal_bytes() {
         let mobile = MobileId(EntityId(17));
         let mut signal = SignalWorld::new();
         let ports = signal
@@ -1128,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_port_endpoint_has_exact_v4_bytes_for_all_control_sinks() {
+    fn mobile_port_endpoint_has_exact_v5_bytes_for_all_control_sinks() {
         let endpoint = |mobile, port| {
             endpoint_bytes(EndpointTarget::MobilePort(MobilePortRef {
                 mobile: MobileId(EntityId(mobile)),
@@ -1150,6 +1297,19 @@ mod tests {
             endpoint(30, MobilePort::Stop),
             "Mobile endpoint owner identity is canonical"
         );
+    }
+
+    #[test]
+    fn main_core_anchor_endpoint_has_exact_v5_bytes() {
+        let endpoint = |id| {
+            endpoint_bytes(EndpointTarget::MainCoreAnchor(crate::MainCoreId(EntityId(
+                id,
+            ))))
+        };
+        let mut expected = vec![4];
+        expected.extend_from_slice(&29_u64.to_le_bytes());
+        assert_eq!(endpoint(29), expected);
+        assert_ne!(endpoint(29), endpoint(30));
     }
 
     #[test]
@@ -1383,6 +1543,7 @@ mod tests {
             contract: &contract,
             next_tick: Tick(3),
             topology_revision: Revision(0),
+            main_core: None,
             structural: &structural,
             signal: &signal,
             event_payloads: &left_payloads,
@@ -1397,6 +1558,7 @@ mod tests {
                 contract: &contract,
                 next_tick: Tick(3),
                 topology_revision: Revision(0),
+                main_core: None,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1418,6 +1580,7 @@ mod tests {
                 contract: &contract,
                 next_tick: Tick(3),
                 topology_revision: Revision(0),
+                main_core: None,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1432,6 +1595,7 @@ mod tests {
             contract: &contract,
             next_tick: Tick(5),
             topology_revision: Revision(0),
+            main_core: None,
             structural: &structural,
             signal: &signal,
             event_payloads: &fresh_payloads,
@@ -1678,6 +1842,7 @@ mod tests {
             contract: &contract,
             next_tick: Tick(0),
             topology_revision: Revision(0),
+            main_core: None,
             structural: &structural,
             signal: &signal,
             event_payloads: &payloads,

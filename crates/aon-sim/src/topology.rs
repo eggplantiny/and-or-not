@@ -1,7 +1,7 @@
 use crate::mobility::MobilePortRef;
 use crate::{
     ConnectionGeneration, EntityId, FixedSubstrateIndex, FixedVec2, GateId, GateIndex, JunctionId,
-    JunctionIndex, NumericError, WireId, WireIndex,
+    JunctionIndex, MainCoreId, NumericError, WireId, WireIndex,
 };
 use std::ops::Range;
 use thiserror::Error;
@@ -86,6 +86,7 @@ pub enum EndpointTarget {
     Junction(JunctionId),
     GatePort(GatePortRef),
     MobilePort(MobilePortRef),
+    MainCoreAnchor(MainCoreId),
 }
 
 impl EndpointTarget {
@@ -95,6 +96,7 @@ impl EndpointTarget {
             Self::Junction(_) => 1,
             Self::GatePort(_) => 2,
             Self::MobilePort(_) => 3,
+            Self::MainCoreAnchor(_) => 4,
         }
     }
 }
