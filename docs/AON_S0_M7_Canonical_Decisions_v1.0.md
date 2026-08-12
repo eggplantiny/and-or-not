@@ -335,7 +335,10 @@ remain separate required evidence.
 
 ## Non-normative implementation evidence
 
-The current Windows-native workspace contains executable evidence for gates 1–15, the retained V4
-Mobility Replay, and native mobile-probe smoke. Formal completion remains pending the final
-committed fresh clean-checkout portion of gate 16. Stage 0 product acceptance remains a separate
-user-direct play verdict documented in `AON_Stage0_Product_Gate_Playtest_v1.0.md`.
+Implementation commit `bf651c9e63aed41e6db7e0f7b2767345834ff94e` contains executable
+evidence for gates 1–15 and passed gate 16 in an independent Windows-native
+`git clone --no-local` fresh clean-checkout: offline format/metadata/check, strict Clippy, every
+workspace test, dependency boundary, native link, default editor smoke, and F5/F6 Network/Circuit
+mobile-probe smoke. S0-M7 is complete. Stage 0 product acceptance separately passed by explicit
+user-direct play verdict on 2026-08-12 as recorded in
+`AON_Stage0_Product_Gate_Playtest_v1.0.md`.

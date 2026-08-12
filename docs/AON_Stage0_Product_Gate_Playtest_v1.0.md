@@ -87,7 +87,7 @@ Rationale: <한두 문장>
 ```md
 Date: 2026-08-12
 Environment: Windows native
-Commit: working-tree immediately preceding the Stage 0 closure commit
+Commit: bf651c9e63aed41e6db7e0f7b2767345834ff94e
 
 - F5/F6의 SET 타임라인과 pulse 직후 행동이 동일하다는 점이 명확했는가: YES
 - 같은 현재 LOW 입력에서 retained State 유무만으로 최종 행동이 갈라졌는가: YES

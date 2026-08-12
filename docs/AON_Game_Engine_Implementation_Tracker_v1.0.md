@@ -16,8 +16,8 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 - [x] S0-M3 — Signal Topology / Event Runtime
 - [x] S0-M4 — Topology Sync / Path Certificate
 - [x] S0-M5 — Feedback / Replay
-- [ ] S0-M6 — Bevy ASCII Probe *(implementation and Windows-native smoke complete; final committed fresh clean-checkout evidence pending)*
-- [ ] S0-M7 — Mobility *(implementation, retained Replay, and Windows-native mobile smoke complete; final committed fresh clean-checkout evidence pending)*
+- [x] S0-M6 — Bevy ASCII Probe *(committed fresh clean-checkout and Windows-native smoke passed)*
+- [x] S0-M7 — Mobility *(committed fresh clean-checkout, retained Replay, and Windows-native smoke passed)*
 - [x] Stage 0 technical gate *(Windows-native `scripts/stage0-technical-gate.ps1` passed)*
 - [x] Stage 0 product gate *(user direct-play A/B PASS recorded 2026-08-12)*
 
@@ -356,10 +356,12 @@ committed fresh clean-checkout evidence.
 
 ## Stage 0 closure status
 
-As of 2026-08-12, the Windows-native workspace has executable S0-M6/S0-M7 evidence, matched
+As of 2026-08-12, Stage 0 is complete. The Windows-native workspace has executable S0-M6/S0-M7 evidence, matched
 current-input-only and retained-state V4 Mobility Replays, an F5/F6 direct-play A/B probe, native
-probe smoke evidence, and a passing fail-closed Stage 0 technical gate.
-Formal S0-M6/S0-M7 closure still requires the final committed fresh clean-checkout gates. The
-Stage 0 product gate passed by explicit user direct-play verdict on 2026-08-12 using
-`docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`. Stage 1 may begin after the committed fresh
-clean-checkout gates close S0-M6/S0-M7.
+probe smoke evidence, and a passing fail-closed Stage 0 technical gate. Implementation commit
+`bf651c9e63aed41e6db7e0f7b2767345834ff94e` passed an independent `git clone --no-local`
+detached Windows-native offline run: format, metadata, all-target check, strict Clippy, every
+workspace test, 25 exact technical-gate tests, the canonical dependency boundary, native link,
+and a clean post-run status. The same clean binary passed the default editor and F5/F6 Network/
+Circuit Mobile GUI smokes. The Stage 0 product gate passed by explicit user direct-play verdict
+on 2026-08-12 using `docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`. Stage 1 may begin.

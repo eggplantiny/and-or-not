@@ -2,10 +2,10 @@
 
 A/O/N은 AND, OR, NOT과 하나의 범용 Wire로 감지, 이동, 물류, 방어와 계산을 구성하는 결정론적 시뮬레이션 게임이다.
 
-**`S0-M0`부터 `S0-M5`까지 정식 완료됐고, 현재 Windows-native workspace에는 S0-M6 Bevy
-ASCII Probe와 S0-M7 Mobility 구현 및 통과한 Stage 0 technical gate가 있다.** S0-M6/M7의
-정식 종료에는 최종 커밋의 fresh clean-checkout 검증이 남아 있다. Stage 0 product gate도
-2026-08-12 사용자 직접 A/B 플레이에서 PASS했다. Stage 0과 전체 엔진은 아직 완료되지 않았으며, 현황은
+**Stage 0 Emergence Probe 전체가 정식 완료됐다.** S0-M6 Bevy ASCII Probe와 S0-M7
+Mobility는 커밋 `bf651c9e63aed41e6db7e0f7b2767345834ff94e`의 독립 Windows-native
+fresh clean-checkout offline 게이트와 실제 GUI 스모크를 통과했고, Stage 0 product gate는
+2026-08-12 사용자 직접 A/B 플레이에서 PASS했다. 전체 엔진은 아직 완료되지 않았으며, 현황은
 `docs/AON_Game_Engine_Implementation_Tracker_v1.0.md`에서 추적한다.
 
 ## Source baseline

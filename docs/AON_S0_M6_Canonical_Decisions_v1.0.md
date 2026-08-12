@@ -727,7 +727,9 @@ mandatory.
 
 ## Non-normative implementation evidence
 
-The current Windows-native workspace contains the S0-M6 implementation and native-window smoke
-evidence. Formal completion remains pending the final committed fresh clean-checkout run required
-by gate 17. S0-M7 subsequently extends the editor with Mobile placement and Mobile Circuit View;
-that extension does not rewrite the frozen S0-M6 slice boundary.
+Implementation commit `bf651c9e63aed41e6db7e0f7b2767345834ff94e` passed the gate 17
+Windows-native native-window smoke and independent `git clone --no-local` fresh clean-checkout
+offline format/metadata/check, strict Clippy, workspace tests, dependency boundary, and native
+link verification on 2026-08-12. S0-M6 is complete. S0-M7 subsequently extends the editor with
+Mobile placement and Mobile Circuit View; that extension does not rewrite the frozen S0-M6 slice
+boundary.
