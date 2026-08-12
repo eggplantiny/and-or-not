@@ -1,11 +1,13 @@
 use aon_fuzz_harness::{
     CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
-    MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES,
-    MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
-    MobilityRuntimeExecutionObservation, SignalRuntimeExecutionObservation,
-    StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
-    exercise_decoder, exercise_geometry, exercise_mobility_runtime, exercise_replay_decoder,
-    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
+    MAX_EXPERIMENT_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES,
+    MAX_MODULE_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
+    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, MobilityRuntimeExecutionObservation,
+    SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
+    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder,
+    exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
+    exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
+    exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::io::Read;
 
@@ -16,6 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_limit = MAX_DECODER_INPUT_BYTES
         .max(MAX_GEOMETRY_INPUT_BYTES)
         .max(MAX_REPLAY_INPUT_BYTES)
+        .max(MAX_EXPERIMENT_INPUT_BYTES)
+        .max(MAX_MODULE_INPUT_BYTES)
         .max(MAX_COMMAND_INPUT_BYTES)
         .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
         .max(MAX_MOBILITY_RUNTIME_INPUT_BYTES)
@@ -29,6 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "decoder" => print_decoder(&input),
         "geometry" => print_geometry(&input),
         "replay" => print_replay(&input),
+        "experiment" => print_experiment(&input),
+        "module" => print_module(&input),
         "commands" => print_commands(&input)?,
         "signal" => print_signal_runtime(&input)?,
         "topology" => print_topology_runtime(&input)?,
@@ -41,6 +47,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "all" => {
             print_decoder(&input);
             print_geometry(&input);
+            print_replay(&input);
+            print_experiment(&input);
+            print_module(&input);
             print_commands(&input)?;
             print_signal_runtime(&input)?;
             print_topology_runtime(&input)?;
@@ -48,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, replay, geometry, commands, signal, topology, mobility, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, both, or all"
             )
             .into());
         }
@@ -279,6 +288,34 @@ const fn topology_runtime_result(execution: &TopologyRuntimeExecutionObservation
         TopologyRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
         TopologyRuntimeExecutionObservation::ExpectationMismatch { .. } => "expectation-mismatch",
         TopologyRuntimeExecutionObservation::Completed => "completed",
+    }
+}
+
+fn print_experiment(input: &[u8]) {
+    let observation = exercise_experiment_decoder(input);
+    match observation.result {
+        Ok(()) => println!(
+            "experiment payload_bytes={} result=accepted",
+            observation.payload_len
+        ),
+        Err(error) => println!(
+            "experiment payload_bytes={} result=rejected error={error}",
+            observation.payload_len
+        ),
+    }
+}
+
+fn print_module(input: &[u8]) {
+    let observation = exercise_module_decoder(input);
+    match observation.result {
+        Ok(()) => println!(
+            "module payload_bytes={} result=accepted",
+            observation.payload_len
+        ),
+        Err(error) => println!(
+            "module payload_bytes={} result=rejected error={error}",
+            observation.payload_len
+        ),
     }
 }
 

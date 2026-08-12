@@ -4,13 +4,16 @@ use crate::contract::{
 use crate::profile::{
     BalanceProfile, NumericProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
 };
-use crate::{JsonErrorCategory, ProfileHash};
-use serde::Deserialize;
+use crate::{ArtifactHash, JsonErrorCategory, ProfileHash};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use thiserror::Error;
 
 const SCENARIO_SCHEMA_VERSION_V1: u32 = 1;
+const SCENARIO_HASH_DOMAIN: &[u8] = b"AON\0SCENARIO\0V1\0";
+const SCENARIO_HASH_ENCODER_VERSION: u16 = 1;
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProfileKind {
     Numeric,
@@ -187,6 +190,50 @@ impl ScenarioManifest {
     pub fn profiles(&self) -> &ProfileReferences {
         &self.profiles
     }
+
+    /// Hashes the portable semantic identity of this Scenario manifest.
+    ///
+    /// Artifact paths and display profile IDs are deliberately excluded. The logical
+    /// `scenarioId`, declared features, initial-world kind, and all three declared semantic
+    /// profile hashes are included.
+    pub fn canonical_hash(&self) -> Result<ArtifactHash, ScenarioHashError> {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(SCENARIO_HASH_DOMAIN);
+        hasher.update(&SCENARIO_HASH_ENCODER_VERSION.to_le_bytes());
+        hasher.update(&self.schema_version.to_le_bytes());
+        hash_text(&mut hasher, "scenarioId", &self.scenario_id)?;
+        hash_text(
+            &mut hasher,
+            "semanticsVersion",
+            self.semantics_version.as_str(),
+        )?;
+        hash_text(&mut hasher, "hashAlgorithm", self.hash_algorithm.as_str())?;
+        hasher.update(&[match &self.initial_world {
+            InitialWorld::Empty => 0,
+        }]);
+        for enabled in [
+            self.required_features.signal,
+            self.required_features.mobility,
+            self.required_features.capacity,
+            self.required_features.sensing,
+            self.required_features.power,
+            self.required_features.relay,
+            self.required_features.payload,
+            self.required_features.radiation,
+        ] {
+            hasher.update(&[u8::from(enabled)]);
+        }
+        hasher.update(self.profiles.numeric.profile_hash.as_bytes());
+        hasher.update(self.profiles.physical_scale.profile_hash.as_bytes());
+        hasher.update(self.profiles.balance.profile_hash.as_bytes());
+        Ok(ArtifactHash::from_bytes(*hasher.finalize().as_bytes()))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum ScenarioHashError {
+    #[error("Scenario field `{field}` exceeds the canonical u32 byte-length boundary")]
+    TextLengthOverflow { field: &'static str },
 }
 
 #[derive(Clone, Copy)]
@@ -310,6 +357,45 @@ pub fn decode_package(
     ))
 }
 
+/// Strictly decodes and validates one standalone Physical Scale Profile artifact.
+pub fn decode_physical_scale_profile(
+    bytes: &[u8],
+) -> Result<PhysicalScaleProfile, crate::PackageError> {
+    decode_typed_profile(bytes, ProfileKind::PhysicalScale)
+}
+
+/// Strictly decodes and validates one standalone Numeric Profile artifact.
+pub fn decode_numeric_profile(bytes: &[u8]) -> Result<NumericProfile, crate::PackageError> {
+    decode_typed_profile(bytes, ProfileKind::Numeric)
+}
+
+/// Strictly decodes and validates one standalone Balance Profile artifact.
+pub fn decode_balance_profile(bytes: &[u8]) -> Result<BalanceProfile, crate::PackageError> {
+    decode_typed_profile(bytes, ProfileKind::Balance)
+}
+
+/// Validates and emits the canonical pretty JSON form of a Physical Scale Profile.
+///
+/// This representation is an artifact transport encoding only. It does not change the
+/// independent canonical profile-hash encoder or its V1 domain.
+pub fn encode_physical_scale_profile(
+    profile: &PhysicalScaleProfile,
+) -> Result<Vec<u8>, PhysicalScaleProfileArtifactError> {
+    profile.validate()?;
+    let mut encoded = serde_json::to_vec_pretty(profile)?;
+    encoded.push(b'\n');
+    Ok(encoded)
+}
+
+#[derive(Debug, Error)]
+pub enum PhysicalScaleProfileArtifactError {
+    #[error(transparent)]
+    Validation(#[from] ProfileValidationError),
+
+    #[error("unable to encode Physical Scale Profile JSON: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
 fn decode_profile_reference(
     wire: ProfileReferenceWire,
     profile: ProfileKind,
@@ -413,6 +499,18 @@ fn validate_non_empty(
     } else {
         Ok(())
     }
+}
+
+fn hash_text(
+    hasher: &mut blake3::Hasher,
+    field: &'static str,
+    value: &str,
+) -> Result<(), ScenarioHashError> {
+    let length =
+        u32::try_from(value.len()).map_err(|_| ScenarioHashError::TextLengthOverflow { field })?;
+    hasher.update(&length.to_le_bytes());
+    hasher.update(value.as_bytes());
+    Ok(())
 }
 
 const fn profile_path_field(profile: ProfileKind) -> &'static str {

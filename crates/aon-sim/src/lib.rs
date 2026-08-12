@@ -6,10 +6,13 @@ mod command;
 mod contract;
 mod error;
 mod event;
+mod experiment;
+mod experiment_artifact;
 mod geometry;
 mod hash;
 mod identity;
 mod mobility;
+mod module;
 mod numeric;
 mod path_certificate;
 mod profile;
@@ -23,8 +26,10 @@ mod structural_geometry;
 mod topology;
 
 pub use artifact::{
-    ArtifactBytes, ArtifactKind, InitialWorld, ProfileKind, ProfileReference, ProfileReferences,
-    ScenarioManifest, StageFeatureSet, decode_package, decode_scenario_manifest,
+    ArtifactBytes, ArtifactKind, InitialWorld, PhysicalScaleProfileArtifactError, ProfileKind,
+    ProfileReference, ProfileReferences, ScenarioHashError, ScenarioManifest, StageFeatureSet,
+    decode_balance_profile, decode_numeric_profile, decode_package, decode_physical_scale_profile,
+    decode_scenario_manifest, encode_physical_scale_profile,
 };
 pub use command::{
     BindPortCommand, Command, CommandAcceptance, CommandEncodingError, CommandEnvelope,
@@ -43,6 +48,19 @@ pub use event::{
     FIRST_EVENT_PAYLOAD_ORDER, RESERVED_EVENT_PAYLOAD_ORDER, SIGNAL_ARRIVAL_KIND_ORDER,
     SignalArrival, SignalArrivalKind,
 };
+pub use experiment::{
+    ArtifactHash, ExperimentAxis, ExperimentPlan, ExperimentPlanError, ExperimentRunId,
+    ExperimentRunSpec, ExperimentTextField, GateGeometryVariant, LongWireDesign,
+    MAX_EXPERIMENT_RUNS, MAX_PHYSICAL_SCALE_PROFILES, PhysicalScaleMatrix, ResolvedExperimentPlan,
+    ResolvedPhysicalScaleProfile,
+};
+pub use experiment_artifact::{
+    EXPERIMENT_PLAN_FORMAT_VERSION_V1, EXPERIMENT_STAGE_S1_M0, ExperimentArtifactBytes,
+    ExperimentArtifactError, ExperimentArtifactReference, ExperimentPlanArtifact,
+    ExperimentProfileReference, ExperimentStage, LONG_WIRE_DESIGN_DERIVATION_VERSION_V1,
+    decode_experiment_plan_artifact, encode_experiment_plan_artifact,
+    resolve_experiment_plan_artifact,
+};
 pub use geometry::{
     FixedVec2, GeometryError, cell_coordinate, polyline_length, segment_length, validate_quantized,
 };
@@ -57,6 +75,12 @@ pub use identity::{
 pub use mobility::{
     Heading, JunctionDecisionKind, MobileControlPorts, MobileControlSample, MobileJunctionDecision,
     MobileMovementObservation, MobilePort, MobilePortRef, TrackPosition,
+};
+pub use module::{
+    AbsoluteModuleGeometry, GateBlueprint, JunctionBlueprint, MODULE_FORMAT_VERSION_V1,
+    ModuleBlueprint, ModuleContract, ModuleEndpoint, ModuleError, ModuleFormatVersion,
+    ModuleIoBinding, ModuleLocalId, ModuleProvenance, ModuleRoutingDomain, SubstrateBlueprint,
+    WireBlueprint, decode_module_artifact, encode_module_artifact, validate_module_against,
 };
 pub use numeric::{
     Capacity, DriveStrength, Energy, EntityId, FIXED_ONE, Fixed, HeatEnergy, Integrity,

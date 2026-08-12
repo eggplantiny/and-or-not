@@ -1,7 +1,8 @@
 use aon_sim::{
-    ArtifactBytes, ArtifactKind, BalanceProfile, JsonErrorCategory, PackageError,
+    ArtifactBytes, ArtifactKind, BalanceProfile, JsonErrorCategory, NumericProfile, PackageError,
     PhysicalScaleProfile, ProfileKind, ProfileValidationError, SEMANTICS_VERSION_V1, Simulation,
-    SimulationError, decode_package, decode_scenario_manifest,
+    SimulationError, decode_balance_profile, decode_numeric_profile, decode_package,
+    decode_physical_scale_profile, decode_scenario_manifest, encode_physical_scale_profile,
 };
 
 const SCENARIO: &[u8] = include_bytes!(concat!(
@@ -186,6 +187,77 @@ fn physical_and_balance_hashes_ignore_json_order_whitespace_and_profile_id() {
     assert_eq!(
         original_balance.canonical_hash(),
         rewritten_balance.canonical_hash()
+    );
+}
+
+#[test]
+fn standalone_physical_profile_artifact_round_trip_is_canonical_and_hash_stable() {
+    let decoded = decode_physical_scale_profile(PHYSICAL).expect("reference profile decodes");
+    let expected_hash = decoded.canonical_hash().expect("reference profile hashes");
+
+    let canonical = encode_physical_scale_profile(&decoded).expect("valid profile encodes");
+    assert!(canonical.ends_with(b"\n"));
+    assert!(!canonical.windows(2).any(|pair| pair == b"\r\n"));
+
+    let reparsed = decode_physical_scale_profile(&canonical).expect("canonical profile decodes");
+    assert_eq!(reparsed, decoded);
+    assert_eq!(reparsed.canonical_hash(), Ok(expected_hash));
+    assert_eq!(
+        encode_physical_scale_profile(&reparsed).expect("reparsed profile re-encodes"),
+        canonical
+    );
+}
+
+#[test]
+fn standalone_numeric_and_balance_profile_decoders_are_strict_and_validated() {
+    assert_eq!(
+        decode_numeric_profile(NUMERIC)
+            .expect("reference Numeric Profile decodes")
+            .canonical_hash(),
+        NumericProfile::reference_v1("metadata-only-id").canonical_hash()
+    );
+    assert_eq!(
+        decode_balance_profile(BALANCE)
+            .expect("reference Balance Profile decodes")
+            .canonical_hash(),
+        BalanceProfile::stage0_alpha("metadata-only-id").canonical_hash()
+    );
+}
+
+#[test]
+fn scenario_semantic_hash_includes_identity_but_excludes_paths_and_profile_ids() {
+    let original = decode_scenario_manifest(SCENARIO).expect("reference Scenario decodes");
+    let original_hash = original
+        .canonical_hash()
+        .expect("reference Scenario hashes");
+    assert_eq!(
+        original_hash.to_string(),
+        "46a41702ea9dd3f404aa50f0c4952e5d773472c9a7f3410e8cacc8d68bde9ddd"
+    );
+
+    let mut relocated: serde_json::Value =
+        serde_json::from_slice(SCENARIO).expect("reference Scenario JSON");
+    for profile in ["numeric", "physicalScale", "balance"] {
+        relocated["profiles"][profile]["path"] = format!("relocated/{profile}.json").into();
+        relocated["profiles"][profile]["profileId"] = format!("display-{profile}").into();
+    }
+    let relocated = serde_json::to_vec(&relocated).expect("relocated Scenario serializes");
+    assert_eq!(
+        decode_scenario_manifest(&relocated)
+            .expect("relocated Scenario decodes")
+            .canonical_hash(),
+        Ok(original_hash)
+    );
+
+    let mut renamed: serde_json::Value =
+        serde_json::from_slice(SCENARIO).expect("reference Scenario JSON");
+    renamed["scenarioId"] = "different-logical-scenario".into();
+    let renamed = serde_json::to_vec(&renamed).expect("renamed Scenario serializes");
+    assert_ne!(
+        decode_scenario_manifest(&renamed)
+            .expect("renamed Scenario decodes")
+            .canonical_hash(),
+        Ok(original_hash)
     );
 }
 

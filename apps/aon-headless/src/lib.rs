@@ -1,8 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod experiment;
+
+pub use experiment::{
+    EXPERIMENT_RUN_MANIFEST_SCHEMA_VERSION_V1, ExperimentMaterializationSummary,
+    materialize_experiment_plan,
+};
+
 use aon_sim::{
-    ArtifactBytes, PackageError, Replay, ReplayArtifact, ReplayError, Simulation, SimulationError,
-    SimulationPackage, StateHash, decode_package, decode_replay_artifact, decode_scenario_manifest,
+    ArtifactBytes, ExperimentArtifactError, PackageError, PhysicalScaleProfileArtifactError,
+    Replay, ReplayArtifact, ReplayError, Simulation, SimulationError, SimulationPackage, StateHash,
+    decode_package, decode_replay_artifact, decode_scenario_manifest,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,7 +38,7 @@ impl From<std::io::ErrorKind> for FileErrorKind {
 #[derive(Debug, Error)]
 pub enum HeadlessError {
     #[error(
-        "usage: aon-headless scenario <scenario-path> --ticks <non-negative-integer>\n       aon-headless replay <replay-path>"
+        "usage: aon-headless scenario <scenario-path> --ticks <non-negative-integer>\n       aon-headless replay <replay-path>\n       aon-headless experiment-plan <plan-path> --output <directory>"
     )]
     Usage,
 
@@ -49,6 +57,31 @@ pub enum HeadlessError {
 
     #[error(transparent)]
     Replay(#[from] ReplayError),
+
+    #[error(transparent)]
+    ExperimentArtifact(#[from] ExperimentArtifactError),
+
+    #[error(transparent)]
+    ExperimentProfileEncoding(#[from] PhysicalScaleProfileArtifactError),
+
+    #[error("unable to encode Experiment run manifest JSON: {0}")]
+    ExperimentManifestEncoding(#[from] serde_json::Error),
+
+    #[error("Experiment output directory already exists: `{path}`")]
+    ExperimentOutputExists { path: PathBuf },
+
+    #[error("invalid Experiment output directory: `{path}`")]
+    InvalidExperimentOutputDirectory { path: PathBuf },
+
+    #[error("unable to {action} at `{path}`: {kind:?}")]
+    ExperimentOutputIo {
+        action: &'static str,
+        path: PathBuf,
+        kind: FileErrorKind,
+    },
+
+    #[error("unable to reserve a unique Experiment staging directory under `{parent}`")]
+    ExperimentOutputStagingExhausted { parent: PathBuf },
 }
 
 impl HeadlessError {
@@ -58,6 +91,13 @@ impl HeadlessError {
             Self::File { .. } | Self::Package(_) => 3,
             Self::Simulation(_) => 4,
             Self::Replay(_) => 5,
+            Self::ExperimentArtifact(_)
+            | Self::ExperimentProfileEncoding(_)
+            | Self::ExperimentManifestEncoding(_)
+            | Self::ExperimentOutputExists { .. }
+            | Self::InvalidExperimentOutputDirectory { .. }
+            | Self::ExperimentOutputIo { .. }
+            | Self::ExperimentOutputStagingExhausted { .. } => 6,
         }
     }
 }
@@ -215,7 +255,7 @@ fn verify_current_checkpoint(
     Ok(())
 }
 
-fn read_artifact(path: &Path, artifact: &'static str) -> Result<Vec<u8>, HeadlessError> {
+pub(crate) fn read_artifact(path: &Path, artifact: &'static str) -> Result<Vec<u8>, HeadlessError> {
     fs::read(path).map_err(|error| HeadlessError::File {
         artifact,
         path: path.to_path_buf(),

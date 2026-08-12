@@ -150,6 +150,8 @@ name = "aon-headless"
 version = "0.1.0"
 dependencies = [
  "aon-sim",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

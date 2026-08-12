@@ -19,6 +19,7 @@ fresh clean-checkout offline 게이트와 실제 GUI 스모크를 통과했고, 
 - S0-M6 implementation authority: `docs/AON_S0_M6_Canonical_Decisions_v1.0.md`
 - S0-M7 implementation authority: `docs/AON_S0_M7_Canonical_Decisions_v1.0.md`
 - Stage 0 product playtest: `docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`
+- S1-M0 implementation authority: `docs/AON_S1_M0_Canonical_Decisions_v1.0.md`
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -77,6 +78,20 @@ cargo run -p aon-headless --locked --offline -- `
   replay fixtures/replays/mobility-retained-stop-v1.json
 ```
 
+Materialize the retained S1-M0 Physical Scale experiment plan:
+
+```powershell
+cargo run -p aon-headless --locked --offline -- `
+  experiment-plan fixtures/experiments/s1-m0-physical-scale-v1.json `
+  --output target/s1-m0-materialized
+```
+
+The retained plan expands two explicit Gate geometries, two Circuit pitches, and two World
+pitches into eight hash-sorted Physical Scale profiles. Two absolute long-wire distances reuse
+those eight profile hashes and produce sixteen distinct canonical Run IDs. Distance is design
+geometry, not a Physical Scale Profile field, and no profile or Module geometry is silently
+scaled.
+
 Native Bevy host:
 
 ```bash
@@ -105,6 +120,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo test --workspace --locked --offline -- --test-threads=1
 powershell -NoProfile -File .\scripts\stage0-technical-gate.ps1
+powershell -NoProfile -File .\scripts\s1-m0-technical-gate.ps1
 cargo test -p aon-sim --test signal_conformance --locked --offline
 cargo test -p aon-sim --test feedback_conformance --locked --offline
 cargo test -p aon-sim --test replay_golden --locked --offline
@@ -146,3 +162,7 @@ Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event 
   Command variant, strict JSON, normalized Tick scheduling, sparse hash checkpoint를 제공한다.
 - Headless는 `replay <path>`로 artifact 기준 상대 Scenario를 로드하고, Bevy harness는 같은
   Command Log를 canonical Tick 기준 `FixedUpdate`에 제출한다.
+- S1-M0 Core는 strict Physical Scale matrix, versioned Experiment plan/Run identity, Scenario와
+  long-wire Design artifact hash, strict absolute-geometry Module v1을 제공한다. Headless의
+  `experiment-plan`은 선언된 artifact를 모두 검증한 뒤 canonical profile/Run 파일을
+  임시 sibling directory에서 완성하고 한 번에 게시한다.

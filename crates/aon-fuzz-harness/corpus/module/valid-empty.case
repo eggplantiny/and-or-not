@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1,
+  "hashAlgorithmId": "blake3-v1",
+  "name": "fuzz-empty",
+  "contract": {
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "physicalScaleProfileHash": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "geometry": {
+    "substrates": [],
+    "gates": [],
+    "junctions": [],
+    "wires": []
+  },
+  "ioBindings": [],
+  "provenance": {}
+}

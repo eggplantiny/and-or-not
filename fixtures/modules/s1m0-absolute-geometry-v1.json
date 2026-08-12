@@ -1,0 +1,114 @@
+{
+  "formatVersion": 1,
+  "hashAlgorithmId": "blake3-v1",
+  "name": "retained-and",
+  "contract": {
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490"
+  },
+  "balanceProfileHash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "geometry": {
+    "substrates": [
+      {
+        "id": 1,
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -65536,
+            "y": -65536
+          },
+          "max": {
+            "x": 65536,
+            "y": 65536
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -131072,
+            "y": -131072
+          },
+          "max": {
+            "x": 131072,
+            "y": 131072
+          }
+        }
+      }
+    ],
+    "gates": [
+      {
+        "id": 2,
+        "substrate": 1,
+        "gateType": "and",
+        "origin": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "junctions": [
+      {
+        "id": 3,
+        "routingDomain": {
+          "kind": "substrate",
+          "substrate": 1
+        },
+        "position": {
+          "x": 65536,
+          "y": 0
+        }
+      }
+    ],
+    "wires": [
+      {
+        "id": 4,
+        "routingDomain": {
+          "kind": "substrate",
+          "substrate": 1
+        },
+        "points": [
+          {
+            "x": 16384,
+            "y": 0
+          },
+          {
+            "x": 65536,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "gatePort",
+          "gate": 2,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 3
+        }
+      }
+    ]
+  },
+  "ioBindings": [
+    {
+      "name": "in",
+      "endpoint": {
+        "kind": "gatePort",
+        "gate": 2,
+        "port": "inputA"
+      }
+    },
+    {
+      "name": "out",
+      "endpoint": {
+        "kind": "junction",
+        "junction": 3
+      }
+    }
+  ],
+  "provenance": {
+    "source": "tests/fixture-v1"
+  }
+}

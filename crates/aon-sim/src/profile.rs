@@ -1,5 +1,5 @@
 use crate::{FIXED_ONE, Fixed, ProfileHash, ProfileKind};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use thiserror::Error;
 
@@ -114,21 +114,21 @@ impl NumericProfile {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GateFootprint {
     pub width: Fixed,
     pub height: Fixed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PortAnchor {
     pub x: Fixed,
     pub y: Fixed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BinaryGatePortAnchors {
     pub input_a: PortAnchor,
@@ -137,7 +137,7 @@ pub struct BinaryGatePortAnchors {
     pub power: PortAnchor,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UnaryGatePortAnchors {
     pub input: PortAnchor,
@@ -145,7 +145,7 @@ pub struct UnaryGatePortAnchors {
     pub power: PortAnchor,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GateFootprintTable {
     #[serde(rename = "and")]
@@ -156,7 +156,7 @@ pub struct GateFootprintTable {
     pub not_gate: GateFootprint,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GatePortTable {
     #[serde(rename = "and")]
@@ -167,7 +167,7 @@ pub struct GatePortTable {
     pub not_gate: UnaryGatePortAnchors,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PhysicalScaleProfile {
     pub schema_version: u32,
@@ -1106,6 +1106,15 @@ impl<'de> Deserialize<'de> for Fixed {
         D: Deserializer<'de>,
     {
         i64::deserialize(deserializer).map(Self)
+    }
+}
+
+impl Serialize for Fixed {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(self.0)
     }
 }
 

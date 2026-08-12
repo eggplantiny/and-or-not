@@ -14,6 +14,11 @@ retained corpus includes a valid Empty-world Replay plus truncated and unknown-f
 CI preserves both the accepted path and stable rejection paths without treating typed decode
 errors as harness failures.
 
+The `experiment` and `module` targets independently supply at most 16 KiB to the strict Experiment
+Plan v1 and Module v1 decoders. The Module boundary rejects invalid UTF-8 without replacement.
+Their retained corpora preserve valid inputs plus truncated and unknown-field rejection paths, and
+the regression tests require identical typed outcomes when an input is replayed.
+
 The geometry target maps at most 4 KiB to no more than 64 points. It derives a positive power-of-two
 quantum and signed 32-bit coordinate multiples from the input, then runs every point through
 `validate_quantized` and the complete polyline through `polyline_length`. Short inputs cycle their
@@ -86,6 +91,8 @@ Replay an arbitrary stream from standard input with:
 ```sh
 cargo run -p aon-fuzz-harness --locked -- decoder < input.bin
 cargo run -p aon-fuzz-harness --locked -- replay < input.bin
+cargo run -p aon-fuzz-harness --locked -- experiment < input.bin
+cargo run -p aon-fuzz-harness --locked -- module < input.bin
 cargo run -p aon-fuzz-harness --locked -- geometry < input.bin
 cargo run -p aon-fuzz-harness --locked -- commands < input.bin
 cargo run -p aon-fuzz-harness --locked -- signal < input.bin
@@ -99,6 +106,6 @@ command targets are accepted. The signal, topology, and mobility targets treat e
 run error as a failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
 disagreement between the two command encoders fails CI and CLI replay. Add every minimized
 reproducer under `corpus/decoder`, `corpus/replay`, `corpus/geometry`, `corpus/command`,
-`corpus/signal-runtime`, `corpus/topology-runtime`, or `corpus/mobility-runtime` and register it in
-`tests/regression_corpus.rs` so CI replays it
+`corpus/experiment`, `corpus/module`, `corpus/signal-runtime`, `corpus/topology-runtime`, or
+`corpus/mobility-runtime` and register it in `tests/regression_corpus.rs` so CI replays it
 permanently.

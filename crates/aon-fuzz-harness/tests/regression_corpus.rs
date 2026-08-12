@@ -1,7 +1,8 @@
 use aon_fuzz_harness::{
     MobilityRuntimeExecutionObservation, SignalRuntimeExecutionObservation,
-    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
-    exercise_mobility_runtime, exercise_replay_decoder, exercise_signal_runtime,
+    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder,
+    exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
+    exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
     exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -58,6 +59,42 @@ const REPLAY_CORPUS: &[(&str, &[u8], bool)] = &[
     (
         "unknown-field",
         include_bytes!("../corpus/replay/unknown-field.case"),
+        false,
+    ),
+];
+
+const EXPERIMENT_CORPUS: &[(&str, &[u8], bool)] = &[
+    (
+        "valid-physical-scale-matrix",
+        include_bytes!("../../../fixtures/experiments/s1-m0-physical-scale-v1.json"),
+        true,
+    ),
+    (
+        "truncated",
+        include_bytes!("../corpus/experiment/truncated.case"),
+        false,
+    ),
+    (
+        "unknown-field",
+        include_bytes!("../corpus/experiment/unknown-field.case"),
+        false,
+    ),
+];
+
+const MODULE_CORPUS: &[(&str, &[u8], bool)] = &[
+    (
+        "valid-empty",
+        include_bytes!("../corpus/module/valid-empty.case"),
+        true,
+    ),
+    (
+        "truncated",
+        include_bytes!("../corpus/module/truncated.case"),
+        false,
+    ),
+    (
+        "unknown-field",
+        include_bytes!("../corpus/module/unknown-field.case"),
         false,
     ),
 ];
@@ -364,6 +401,48 @@ fn retained_topology_case_reaches_verified_s0_m4_paths() {
     assert!(coverage.removed_slot_outcomes > 0);
     assert!(coverage.checked_max_sample_outcomes > 0);
     assert!(coverage.slot_revision_observations > 0);
+}
+
+#[test]
+fn experiment_regression_corpus_never_panics_and_preserves_exact_outcome() {
+    for &(name, bytes, expected_acceptance) in EXPERIMENT_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_experiment_decoder(bytes)));
+        let Ok(observation) = result else {
+            panic!("Experiment regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.result.is_ok(),
+            expected_acceptance,
+            "Experiment regression case `{name}` changed acceptance class: {:?}",
+            observation.result
+        );
+        assert_eq!(
+            exercise_experiment_decoder(bytes),
+            observation,
+            "Experiment regression case `{name}` changed its typed outcome on replay"
+        );
+    }
+}
+
+#[test]
+fn module_regression_corpus_never_panics_and_preserves_exact_outcome() {
+    for &(name, bytes, expected_acceptance) in MODULE_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_module_decoder(bytes)));
+        let Ok(observation) = result else {
+            panic!("Module regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.result.is_ok(),
+            expected_acceptance,
+            "Module regression case `{name}` changed acceptance class: {:?}",
+            observation.result
+        );
+        assert_eq!(
+            exercise_module_decoder(bytes),
+            observation,
+            "Module regression case `{name}` changed its typed outcome on replay"
+        );
+    }
 }
 
 #[test]
