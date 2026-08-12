@@ -14,8 +14,9 @@ pub const NOTO_SANS_MONO_LICENSE: &[u8] = include_bytes!(concat!(
 ));
 
 const REQUIRED_GLYPHS: &[char] = &[
-    '·', '#', '■', '&', '|', '!', '●', '○', '◉', '╳', '─', '│', '└', '┘', '┌', '┐', '┬', '┴', '├',
-    '┤', '┼', '◇', '0', '1', 'X', 'r', 'A', 'S', '?', '[', ']', ':', '-', '+', '/', ' ',
+    '·', '#', '■', '&', '|', '!', '●', '○', '◉', '╳', '>', '<', '^', 'v', '─', '│', '└', '┘', '┌',
+    '┐', '┬', '┴', '├', '┤', '┼', '0', '1', 'X', 'r', 'A', 'S', 'L', 'R', '?', '[', ']', ':', '-',
+    '+', '/', ' ',
 ];
 
 const FONT_SIZE_PX: f32 = 15.0;
@@ -203,6 +204,29 @@ impl NativeProbeDocument {
         }
     }
 
+    /// Places the tone-preserving CellBuffer on the left and stacks ordinary TextPanels in one
+    /// neutral column on the right. This keeps waveform and inspector evidence visible in a
+    /// bounded native window even when the world grid is wide.
+    pub fn replace_cell_buffer_with_stacked_panels(
+        &mut self,
+        buffer_title: &str,
+        buffer: &CellBuffer,
+        panels: &[TextPanel],
+        horizontal_gap: usize,
+        vertical_gap: usize,
+    ) {
+        let buffer_block = styled_cell_buffer_panel(buffer_title, buffer);
+        let panel_blocks = panels.iter().map(styled_plain_panel).collect::<Vec<_>>();
+        let panel_column = compose_styled_block_column(&panel_blocks, vertical_gap);
+        let next = Self::from_styled_rows(compose_styled_blocks(
+            &[buffer_block, panel_column],
+            horizontal_gap,
+        ));
+        if *self != next {
+            *self = next;
+        }
+    }
+
     fn from_styled_rows(rows: Vec<Vec<StyledGlyph>>) -> Self {
         let row_count = rows.len();
         let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -297,9 +321,6 @@ pub enum NativeProbeError {
     #[error("the embedded Noto Sans Mono asset is missing required glyph U+{codepoint:04X}")]
     MissingRequiredGlyph { codepoint: u32 },
 
-    #[error("the embedded Noto Sans Mono asset does not declare fixed-pitch metrics")]
-    EmbeddedFontIsNotMonospaced,
-
     #[error("required glyph U+{codepoint:04X} does not share the embedded monospaced advance")]
     InconsistentRequiredGlyphAdvance { codepoint: u32 },
 
@@ -345,9 +366,6 @@ pub fn install_native_probe_renderer(app: &mut App) -> Result<(), NativeProbeErr
 fn measure_font_bytes(bytes: &[u8]) -> Result<NativeProbeMetrics, NativeProbeError> {
     let font = FontRef::new(bytes).map_err(|_| NativeProbeError::InvalidEmbeddedFont)?;
     let global = font.metrics(Size::new(FONT_SIZE_PX), LocationRef::default());
-    if !global.is_monospace {
-        return Err(NativeProbeError::EmbeddedFontIsNotMonospaced);
-    }
 
     let charmap = font.charmap();
     let glyph_metrics = font.glyph_metrics(Size::new(FONT_SIZE_PX), LocationRef::default());
@@ -450,6 +468,40 @@ fn compose_styled_blocks(blocks: &[Vec<Vec<StyledGlyph>>], gap: usize) -> Vec<Ve
             ));
         }
         rows.push(row);
+    }
+    rows
+}
+
+fn compose_styled_block_column(
+    blocks: &[Vec<Vec<StyledGlyph>>],
+    gap: usize,
+) -> Vec<Vec<StyledGlyph>> {
+    let width = blocks
+        .iter()
+        .flat_map(|block| block.iter().map(Vec::len))
+        .max()
+        .unwrap_or(0);
+    let total_rows = blocks
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>()
+        .saturating_add(gap.saturating_mul(blocks.len().saturating_sub(1)));
+    let mut rows = Vec::with_capacity(total_rows);
+    for (block_index, block) in blocks.iter().enumerate() {
+        if block_index != 0 {
+            rows.extend(std::iter::repeat_n(
+                vec![StyledGlyph::neutral(' '); width],
+                gap,
+            ));
+        }
+        rows.extend(block.iter().map(|source| {
+            let mut row = source.clone();
+            row.extend(std::iter::repeat_n(
+                StyledGlyph::neutral(' '),
+                width.saturating_sub(row.len()),
+            ));
+            row
+        }));
     }
     rows
 }

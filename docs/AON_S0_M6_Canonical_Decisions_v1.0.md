@@ -724,3 +724,10 @@ native smoke test:
 Passing this list completes only S0-M6. S0-M7 mobility, the remaining Stage 0 technical/product
 gates, later stages, MVP integration, native UX acceptance, and release verification remain
 mandatory.
+
+## Non-normative implementation evidence
+
+The current Windows-native workspace contains the S0-M6 implementation and native-window smoke
+evidence. Formal completion remains pending the final committed fresh clean-checkout run required
+by gate 17. S0-M7 subsequently extends the editor with Mobile placement and Mobile Circuit View;
+that extension does not rewrite the frozen S0-M6 slice boundary.

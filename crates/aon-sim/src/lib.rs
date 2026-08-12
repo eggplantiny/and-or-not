@@ -9,6 +9,7 @@ mod event;
 mod geometry;
 mod hash;
 mod identity;
+mod mobility;
 mod numeric;
 mod path_certificate;
 mod profile;
@@ -53,6 +54,10 @@ pub use identity::{
     MobileSubstrateIndex, PowerSourceIndex, QuartzIndex, RESERVED_ENTITY_ID, RelaySiteId,
     RelaySiteIndex, SinkId, WireId, WireIndex,
 };
+pub use mobility::{
+    Heading, JunctionDecisionKind, MobileControlPorts, MobileControlSample, MobileJunctionDecision,
+    MobileMovementObservation, MobilePort, MobilePortRef, TrackPosition,
+};
 pub use numeric::{
     Capacity, DriveStrength, Energy, EntityId, FIXED_ONE, Fixed, HeatEnergy, Integrity,
     NumericError, Revision, Tick, ceil_div_nonnegative, ceil_isqrt, floor_div,
@@ -61,18 +66,19 @@ pub use numeric::{
 pub use path_certificate::PathCertificateId;
 pub use profile::{
     BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile, DivisionProfile, GateFootprint,
-    GateFootprintTable, GatePortTable, GeometryLengthProfile, NumericProfile,
-    OrientationBoundaryMultipliers, OrientationWeightTable, OverflowPolicy,
-    PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2, PhysicalScaleProfile, PortAnchor,
-    ProfileBundle, ProfileHashes, ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH,
-    REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM,
-    REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
+    GateFootprintTable, GatePortTable, GeometryLengthProfile,
+    MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile, OrientationBoundaryMultipliers,
+    OrientationWeightTable, OverflowPolicy, PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2,
+    PhysicalScaleProfile, PortAnchor, ProfileBundle, ProfileHashes, ProfileValidationError,
+    REFERENCE_CIRCUIT_ROUTING_PITCH, REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS,
+    REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile,
+    Rational, UnaryGatePortAnchors,
 };
 pub use replay::{
     HashCheckpoint, REPLAY_FORMAT_VERSION_V1, Replay, ReplayArtifact, ReplayContractField,
-    ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3, Seed, SeedParseError,
-    StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1, WorldGeneratorVersion, WorldInputEvent,
-    decode_replay_artifact, encode_replay_artifact,
+    ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4,
+    Seed, SeedParseError, StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1,
+    WorldGeneratorVersion, WorldInputEvent, decode_replay_artifact, encode_replay_artifact,
 };
 pub use signal::{
     DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,
@@ -80,8 +86,8 @@ pub use signal::{
 };
 pub use simulation::{SignalArrivalObservation, Simulation, SimulationPackage, StepReport};
 pub use snapshot::{
-    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, RenderSnapshot,
-    SignalProbeSample, SignalProbeTarget, SignalProbeValue, WireRenderRecord,
+    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, MobileRenderRecord,
+    RenderSnapshot, SignalProbeSample, SignalProbeTarget, SignalProbeValue, WireRenderRecord,
 };
 pub use topology::{
     EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,

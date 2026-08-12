@@ -1,10 +1,11 @@
 use aon_fuzz_harness::{
     CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
-    MAX_GEOMETRY_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
-    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, SignalRuntimeExecutionObservation,
+    MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES,
+    MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
+    MobilityRuntimeExecutionObservation, SignalRuntimeExecutionObservation,
     StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
-    exercise_decoder, exercise_geometry, exercise_replay_decoder, exercise_signal_runtime,
-    exercise_stateful_commands, exercise_topology_runtime,
+    exercise_decoder, exercise_geometry, exercise_mobility_runtime, exercise_replay_decoder,
+    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::io::Read;
 
@@ -17,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max(MAX_REPLAY_INPUT_BYTES)
         .max(MAX_COMMAND_INPUT_BYTES)
         .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
+        .max(MAX_MOBILITY_RUNTIME_INPUT_BYTES)
         .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
@@ -30,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "commands" => print_commands(&input)?,
         "signal" => print_signal_runtime(&input)?,
         "topology" => print_topology_runtime(&input)?,
+        "mobility" => print_mobility_runtime(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -41,13 +44,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_commands(&input)?;
             print_signal_runtime(&input)?;
             print_topology_runtime(&input)?;
+            print_mobility_runtime(&input)?;
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, replay, geometry, commands, signal, topology, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, geometry, commands, signal, topology, mobility, both, or all"
             )
             .into());
         }
+    }
+    Ok(())
+}
+
+fn print_mobility_runtime(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let observation = exercise_mobility_runtime(input);
+    let coverage = observation.coverage;
+    println!(
+        "mobility input_bytes={} scenarios={} steps={} encodings={} hashes={} result={} permuted={} placed={} placement_rejections={} mobile_bindings={} track_bindings={} occupied={} mobile_removals={} track_removals={} straight={} left={} right={} reverse={} movements={} checked_max={} checked_min={}",
+        observation.consumed_len,
+        observation.generated_scenarios,
+        observation.generated_steps,
+        observation.encodings.len(),
+        observation.state_hashes.len(),
+        mobility_runtime_result(&observation.execution),
+        coverage.permuted_command_batches,
+        coverage.mobile_placements,
+        coverage.placement_rejections,
+        coverage.mobile_port_bindings,
+        coverage.explicit_track_bindings,
+        coverage.occupied_track_rejections,
+        coverage.mobile_removals,
+        coverage.track_removals,
+        coverage.straight_turns,
+        coverage.left_turns,
+        coverage.right_turns,
+        coverage.reverse_turns,
+        coverage.movement_observations,
+        coverage.checked_maximum_coordinate_paths,
+        coverage.checked_minimum_coordinate_paths,
+    );
+    if let Some(failure) = observation.invariant_failure() {
+        return Err(format!("mobility-runtime harness invariant failed: {failure}").into());
     }
     Ok(())
 }
@@ -242,5 +279,17 @@ const fn topology_runtime_result(execution: &TopologyRuntimeExecutionObservation
         TopologyRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
         TopologyRuntimeExecutionObservation::ExpectationMismatch { .. } => "expectation-mismatch",
         TopologyRuntimeExecutionObservation::Completed => "completed",
+    }
+}
+
+const fn mobility_runtime_result(execution: &MobilityRuntimeExecutionObservation) -> &'static str {
+    match execution {
+        MobilityRuntimeExecutionObservation::PackageRejected(_) => "package-rejected",
+        MobilityRuntimeExecutionObservation::SimulationRejected { .. } => "simulation-rejected",
+        MobilityRuntimeExecutionObservation::RunError { .. } => "run-error",
+        MobilityRuntimeExecutionObservation::EncoderMismatch { .. } => "encoder-mismatch",
+        MobilityRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
+        MobilityRuntimeExecutionObservation::ExpectationMismatch { .. } => "expectation-mismatch",
+        MobilityRuntimeExecutionObservation::Completed => "completed",
     }
 }

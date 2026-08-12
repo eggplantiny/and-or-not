@@ -1,3 +1,4 @@
+use crate::mobility::MobilePortRef;
 use crate::{
     ConnectionGeneration, EntityId, FixedSubstrateIndex, FixedVec2, GateId, GateIndex, JunctionId,
     JunctionIndex, NumericError, WireId, WireIndex,
@@ -84,6 +85,7 @@ pub enum EndpointTarget {
     Free,
     Junction(JunctionId),
     GatePort(GatePortRef),
+    MobilePort(MobilePortRef),
 }
 
 impl EndpointTarget {
@@ -92,6 +94,7 @@ impl EndpointTarget {
             Self::Free => 0,
             Self::Junction(_) => 1,
             Self::GatePort(_) => 2,
+            Self::MobilePort(_) => 3,
         }
     }
 }

@@ -6,8 +6,8 @@ use crate::pacing::{HostRate, HostRunMode, PacingError, TickPacer};
 use crate::presenter::{PickTarget, ViewMode};
 use crate::probe::{ProbeError, ProbeId, ProbeRack, ProbeTarget};
 use aon_sim::{
-    Command, CommandEnvelope, EntityId, RenderSnapshot, Replay, ReplayError, Simulation,
-    SimulationError, SimulationPackage, StateHash, StepReport, Tick,
+    Command, CommandEnvelope, DriveStrength, EntityId, RenderSnapshot, Replay, ReplayError,
+    Simulation, SimulationError, SimulationPackage, StateHash, StepReport, Tick,
 };
 use std::time::Duration;
 use thiserror::Error;
@@ -218,6 +218,10 @@ impl LaboratorySession {
 
     pub const fn next_tick(&self) -> Tick {
         self.latest_snapshot.next_tick()
+    }
+
+    pub fn nominal_external_drive_strength(&self) -> DriveStrength {
+        DriveStrength(self.simulation.profiles().balance().nominal_gate_drive)
     }
 
     pub const fn latest_snapshot(&self) -> &RenderSnapshot {
@@ -473,6 +477,11 @@ impl LaboratorySession {
             .fixed_substrates()
             .binary_search_by_key(&substrate, |record| record.id)
             .is_ok()
+            || self
+                .latest_snapshot
+                .mobiles()
+                .binary_search_by_key(&substrate, |record| record.id.entity_id())
+                .is_ok()
     }
 
     fn normalize_view_after_snapshot(&mut self) {

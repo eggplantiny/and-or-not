@@ -1,11 +1,12 @@
 use aon_app::{
     HostError, embedded_empty_package, run_paced_replay_host_harness, run_replay_host_harness,
 };
-use aon_headless::{load_package, load_replay, run_replay_file};
+use aon_headless::{load_package, load_replay, run_replay, run_replay_file};
 use aon_sim::{
-    Command, CommandEnvelope, FIXED_ONE, Fixed, FixedVec2, GateType, HashCheckpoint,
-    PlaceGateCommand, Replay, ReplayError, RoutingDomain, Simulation, SimulationPackage, StateHash,
-    Tick,
+    Command, CommandEnvelope, EndpointTarget, FIXED_ONE, Fixed, FixedAabb, FixedVec2, GateType,
+    HashCheckpoint, JunctionId, PlaceGateCommand, PlaceJunctionCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, Replay, ReplayError, RoutingDomain, Simulation,
+    SimulationPackage, StateHash, Tick,
 };
 use std::path::PathBuf;
 use std::time::Duration;
@@ -61,6 +62,94 @@ fn place_not(target_tick: Tick, ordinal: u64, origin: FixedVec2) -> CommandEnvel
             routing_domain: RoutingDomain::OpenWorld,
         }),
     }
+}
+
+fn recorded_mobility_replay() -> (SimulationPackage, Replay, Vec<StateHash>) {
+    let package = embedded_empty_package().expect("embedded package is valid");
+    let mut recorder = Simulation::new(package.clone()).expect("simulation bootstraps");
+    let header = recorder.replay_header();
+    let pitch = recorder.profiles().physical_scale.world_routing_pitch.0;
+    let point = |x| FixedVec2::new(Fixed(x * pitch), Fixed::ZERO);
+    let bounds = FixedAabb::new(
+        FixedVec2::new(Fixed(-pitch), Fixed(-pitch)),
+        FixedVec2::new(Fixed(pitch), Fixed(pitch)),
+    );
+    let junction = JunctionId(aon_sim::EntityId(1));
+    let commands = vec![
+        CommandEnvelope {
+            target_tick: Tick(0),
+            ordinal: 0,
+            command: Command::PlaceJunction(PlaceJunctionCommand {
+                routing_domain: RoutingDomain::OpenWorld,
+                position: point(2),
+            }),
+        },
+        CommandEnvelope {
+            target_tick: Tick(1),
+            ordinal: 0,
+            command: Command::PlaceWire(PlaceWireCommand {
+                routing_domain: RoutingDomain::OpenWorld,
+                points: vec![point(0), point(2)],
+                endpoint_a: EndpointTarget::Free,
+                endpoint_b: EndpointTarget::Junction(junction),
+            }),
+        },
+        CommandEnvelope {
+            target_tick: Tick(1),
+            ordinal: 1,
+            command: Command::PlaceWire(PlaceWireCommand {
+                routing_domain: RoutingDomain::OpenWorld,
+                points: vec![point(2), point(4)],
+                endpoint_a: EndpointTarget::Junction(junction),
+                endpoint_b: EndpointTarget::Free,
+            }),
+        },
+        CommandEnvelope {
+            target_tick: Tick(2),
+            ordinal: 0,
+            command: Command::PlaceMobileSubstrate(PlaceMobileSubstrateCommand {
+                origin: point(1),
+                routing_area: bounds,
+                footprint: bounds,
+            }),
+        },
+        CommandEnvelope {
+            target_tick: Tick(2),
+            ordinal: 1,
+            command: Command::PlaceMobileSubstrate(PlaceMobileSubstrateCommand {
+                origin: point(3),
+                routing_area: bounds,
+                footprint: bounds,
+            }),
+        },
+    ];
+    let mut checkpoints = vec![HashCheckpoint {
+        next_tick: Tick(0),
+        state_hash: recorder.state_hash(),
+    }];
+    for tick in 0..8 {
+        let batch = commands
+            .iter()
+            .filter(|command| command.target_tick == Tick(tick))
+            .cloned()
+            .collect::<Vec<_>>();
+        let report = recorder.step(&batch).expect("mobility recording succeeds");
+        assert!(
+            report.command_rejections.is_empty(),
+            "mobility fixture rejected Tick {tick}: {:?}",
+            report.command_rejections
+        );
+        checkpoints.push(HashCheckpoint {
+            next_tick: report.next_tick,
+            state_hash: report.state_hash,
+        });
+    }
+    let trace = checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.state_hash)
+        .collect::<Vec<_>>();
+    let replay = Replay::new(header, commands, checkpoints).expect("mobility replay is valid");
+    (package, replay, trace)
 }
 
 fn retained_replay(name: &str) -> (PathBuf, SimulationPackage, Replay) {
@@ -157,6 +246,35 @@ fn replay_checkpoint_divergence_is_a_host_error() {
             ..
         })
     ));
+}
+
+#[test]
+fn mobility_replay_matches_headless_bevy_presenter_and_frame_partitions() {
+    let (package, replay, expected) = recorded_mobility_replay();
+    let headless = run_replay(package.clone(), &replay).expect("mobility replay runs headlessly");
+    assert_same_trace(&expected, headless.checkpoints());
+
+    for presentation_updates in [0, 1, 7] {
+        let bevy =
+            run_replay_host_harness(package.clone(), replay.clone(), presentation_updates, true)
+                .expect("mobility replay runs with presenter");
+        assert_same_trace(&expected, bevy.checkpoints());
+    }
+    let without_presenter = run_replay_host_harness(package.clone(), replay.clone(), 7, false)
+        .expect("mobility replay runs without presenter");
+    assert_same_trace(&expected, without_presenter.checkpoints());
+
+    let one_long_frame = run_paced_replay_host_harness(
+        package.clone(),
+        replay.clone(),
+        &[Duration::from_millis(450)],
+    )
+    .expect("long frame preserves mobility Tick debt");
+    assert_same_trace(&expected, one_long_frame.checkpoints());
+    let split_frames =
+        run_paced_replay_host_harness(package, replay, &[Duration::from_millis(50); 8])
+            .expect("split frames preserve mobility trace");
+    assert_same_trace(&expected, split_frames.checkpoints());
 }
 
 #[test]

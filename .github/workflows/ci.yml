@@ -31,24 +31,15 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      - name: Stage 0 conformance
-        run: cargo test -p aon-sim --test conformance_stage0 --locked
+      - name: Stage 0 technical gate
+        shell: pwsh
+        run: ./scripts/stage0-technical-gate.ps1
 
       - name: Deterministic fuzz regression corpus
         run: cargo test -p aon-fuzz-harness --locked
 
       - name: Cross-host determinism
         run: cargo test -p aon-app --test cross_host_determinism --locked
-
-      - name: Canonical core dependency boundary
-        shell: bash
-        run: |
-          tree_output="$(cargo tree -p aon-sim --edges all --prefix none --locked)"
-          printf '%s\n' "$tree_output"
-          if printf '%s\n' "$tree_output" | grep -E '^(bevy|winit|wgpu)($|[-_ ])'; then
-            echo 'aon-sim must not depend on Bevy, winit, or wgpu' >&2
-            exit 1
-          fi
 
       - name: Reject Windows zone metadata
         shell: bash
@@ -57,3 +48,29 @@ jobs:
             echo 'Zone.Identifier metadata must not be tracked' >&2
             exit 1
           fi
+
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          rustc --version --verbose
+          cargo --version
+
+      - name: Native workspace check
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Native strict Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Native workspace tests
+        run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Native app link
+        run: cargo build -p aon-app --locked
+
+      - name: Native Stage 0 technical gate
+        shell: pwsh
+        run: ./scripts/stage0-technical-gate.ps1

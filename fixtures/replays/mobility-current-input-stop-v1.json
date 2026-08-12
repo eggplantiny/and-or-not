@@ -1,0 +1,552 @@
+{
+  "scenarioPath": "../scenarios/empty.json",
+  "header": {
+    "formatVersion": 1,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
+    "stateHashVersion": "aon-state-v4",
+    "worldGeneratorVersion": "aon-empty-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "position": {
+          "x": 2097152,
+          "y": 0
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 2097152,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 1
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 2097152,
+            "y": 0
+          },
+          {
+            "x": 4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 1
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -196608,
+            "y": -196608
+          },
+          "max": {
+            "x": 196608,
+            "y": 196608
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -196608,
+            "y": -196608
+          },
+          "max": {
+            "x": 196608,
+            "y": 196608
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 0,
+      "command": {
+        "type": "place-gate",
+        "gateType": "or",
+        "origin": {
+          "x": 0,
+          "y": -65536
+        },
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 1,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": {
+          "x": 65536,
+          "y": -65536
+        },
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 2,
+      "command": {
+        "type": "place-gate",
+        "gateType": "or",
+        "origin": {
+          "x": 0,
+          "y": 65536
+        },
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 3,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": {
+          "x": 65536,
+          "y": 65536
+        },
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 4,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "position": {
+          "x": 32768,
+          "y": 65536
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 16384,
+            "y": -65536
+          },
+          {
+            "x": 49152,
+            "y": -65536
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 5,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 6,
+          "port": "input-a"
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 16384,
+            "y": 65536
+          },
+          {
+            "x": 32768,
+            "y": 65536
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 7,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 9
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 2,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 32768,
+            "y": 65536
+          },
+          {
+            "x": 49152,
+            "y": 65536
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 9
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 8,
+          "port": "input-a"
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 3,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 32768,
+            "y": 65536
+          },
+          {
+            "x": 32768,
+            "y": 163840
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 9
+        },
+        "endpointB": {
+          "kind": "mobile-port",
+          "mobile": 4,
+          "port": "stop"
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 4,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 81920,
+            "y": -65536
+          },
+          {
+            "x": 98304,
+            "y": -65536
+          },
+          {
+            "x": 98304,
+            "y": 114688
+          },
+          {
+            "x": -32768,
+            "y": 114688
+          },
+          {
+            "x": -32768,
+            "y": 65536
+          },
+          {
+            "x": -16384,
+            "y": 57344
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 6,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 7,
+          "port": "input-a"
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 5,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 81920,
+            "y": 65536
+          },
+          {
+            "x": 114688,
+            "y": 65536
+          },
+          {
+            "x": 114688,
+            "y": -98304
+          },
+          {
+            "x": -32768,
+            "y": -98304
+          },
+          {
+            "x": -32768,
+            "y": -65536
+          },
+          {
+            "x": -16384,
+            "y": -57344
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 8,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 5,
+          "port": "input-b"
+        }
+      }
+    },
+    {
+      "targetTick": 4,
+      "ordinal": 6,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 1,
+        "level": "high",
+        "strength": 100
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 10
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 1,
+      "command": {
+        "type": "remove-entity",
+        "target": 14
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 2,
+      "command": {
+        "type": "remove-entity",
+        "target": 15
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 3,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "mobile-substrate",
+          "substrate": 4
+        },
+        "points": [
+          {
+            "x": 81920,
+            "y": 65536
+          },
+          {
+            "x": 114688,
+            "y": 65536
+          },
+          {
+            "x": 114688,
+            "y": -114688
+          },
+          {
+            "x": 32768,
+            "y": -114688
+          },
+          {
+            "x": 32768,
+            "y": -65536
+          },
+          {
+            "x": 49152,
+            "y": -65536
+          }
+        ],
+        "endpointA": {
+          "kind": "gate-port",
+          "gate": 8,
+          "port": "output"
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 6,
+          "port": "input-a"
+        }
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 4,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 1,
+        "level": "low",
+        "strength": 0
+      }
+    },
+    {
+      "targetTick": 70,
+      "ordinal": 0,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 7,
+        "level": "high",
+        "strength": 100
+      }
+    },
+    {
+      "targetTick": 97,
+      "ordinal": 0,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 7,
+        "level": "low",
+        "strength": 0
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "d38728eecf3689c031b8a57d69961c3f2b820915b6f174e1f6c7837d59b4c1f3"
+    },
+    {
+      "nextTick": 24,
+      "stateHash": "53a091d320f3dbeff9cbbf6366a216aeb769802e2388bc58b764b54483714fca"
+    },
+    {
+      "nextTick": 70,
+      "stateHash": "a50b0b34cdd44ae15d7c2e3321b221ffd49404fb16e0f29284814c336dcaf327"
+    },
+    {
+      "nextTick": 81,
+      "stateHash": "62c9a05d446e96c6290b1706f18ed7706f1ec15f8c8fa10f8048ee02b1d1bad2"
+    },
+    {
+      "nextTick": 97,
+      "stateHash": "957dcd8876af43525830879911f1af904edc4bb5f6082bb89f948bc5186cef8e"
+    },
+    {
+      "nextTick": 98,
+      "stateHash": "c10a27a38cd3cecc7b0b1a9aa94bf8177cae598361c624ad8f0a7d519f6be59d"
+    },
+    {
+      "nextTick": 162,
+      "stateHash": "d3915d1586e7e4b109858c2d702e68373c94b34456ecdeb78997686ba3fb244d"
+    }
+  ]
+}

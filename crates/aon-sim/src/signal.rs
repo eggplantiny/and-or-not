@@ -1,7 +1,7 @@
 use crate::event::DriverSample;
 use crate::{
     DriveStrength, DriverId, Energy, EntityId, GateId, GateType, HeatEnergy, LogicLevel,
-    NumericError, Revision, SinkId, Tick, WireId,
+    MobileControlPorts, MobileId, NumericError, Revision, SinkId, Tick, WireId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -34,6 +34,9 @@ impl DriverRole {
 pub enum SinkRole {
     InputA,
     InputB,
+    MobileStop,
+    MobileLeft,
+    MobileRight,
 }
 
 impl SinkRole {
@@ -41,6 +44,9 @@ impl SinkRole {
         match self {
             Self::InputA => 0,
             Self::InputB => 1,
+            Self::MobileStop => 2,
+            Self::MobileLeft => 3,
+            Self::MobileRight => 4,
         }
     }
 }
@@ -155,7 +161,7 @@ impl From<NumericError> for SignalError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DriverRecord {
     pub id: DriverId,
-    pub owner: GateId,
+    pub owner: EntityId,
     pub role: DriverRole,
     pub sample: DriverSample,
 }
@@ -163,7 +169,7 @@ pub(crate) struct DriverRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SinkRecord {
     pub id: SinkId,
-    pub owner: GateId,
+    pub owner: EntityId,
     pub role: SinkRole,
     pub resolved_level: LogicLevel,
     pub dirty: bool,
@@ -220,7 +226,7 @@ impl Default for DriverStore {
 impl DriverStore {
     fn allocate(
         &mut self,
-        owner: GateId,
+        owner: EntityId,
         role: DriverRole,
         tick: Tick,
     ) -> Result<DriverId, SignalError> {
@@ -298,7 +304,7 @@ impl Default for SinkStore {
 }
 
 impl SinkStore {
-    fn allocate(&mut self, owner: GateId, role: SinkRole) -> Result<SinkId, SignalError> {
+    fn allocate(&mut self, owner: EntityId, role: SinkRole) -> Result<SinkId, SignalError> {
         let raw = self.next_id;
         let next = raw.checked_add(1).ok_or(SignalError::NumericOverflow)?;
         let index = usize::try_from(raw).map_err(|_| SignalError::NumericOverflow)?;
@@ -386,6 +392,7 @@ pub(crate) struct SignalWorld {
     drivers: DriverStore,
     sinks: SinkStore,
     gates: BTreeMap<GateId, GateSignalRecord>,
+    mobiles: BTreeMap<MobileId, MobileControlPorts>,
     wires: BTreeMap<WireId, WireSignalSnapshot>,
     slots: BTreeMap<(SinkId, DriverId), SinkDriverSlot>,
 }
@@ -405,21 +412,23 @@ impl SignalWorld {
             return Err(SignalError::InvalidCanonicalState);
         }
 
-        let external_a = self
-            .drivers
-            .allocate(gate, DriverRole::ExternalInputA, tick)?;
+        let external_a =
+            self.drivers
+                .allocate(gate.entity_id(), DriverRole::ExternalInputA, tick)?;
         let external_b = if matches!(gate_type, GateType::And | GateType::Or) {
             Some(
                 self.drivers
-                    .allocate(gate, DriverRole::ExternalInputB, tick)?,
+                    .allocate(gate.entity_id(), DriverRole::ExternalInputB, tick)?,
             )
         } else {
             None
         };
-        let output = self.drivers.allocate(gate, DriverRole::GateOutput, tick)?;
-        let sink_a = self.sinks.allocate(gate, SinkRole::InputA)?;
+        let output = self
+            .drivers
+            .allocate(gate.entity_id(), DriverRole::GateOutput, tick)?;
+        let sink_a = self.sinks.allocate(gate.entity_id(), SinkRole::InputA)?;
         let sink_b = if matches!(gate_type, GateType::And | GateType::Or) {
-            Some(self.sinks.allocate(gate, SinkRole::InputB)?)
+            Some(self.sinks.allocate(gate.entity_id(), SinkRole::InputB)?)
         } else {
             None
         };
@@ -497,6 +506,36 @@ impl SignalWorld {
         Ok(())
     }
 
+    pub fn activate_mobile(&mut self, mobile: MobileId) -> Result<MobileControlPorts, SignalError> {
+        if self.mobiles.contains_key(&mobile) {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        let owner = mobile.entity_id();
+        let ports = MobileControlPorts {
+            stop: self.sinks.allocate(owner, SinkRole::MobileStop)?,
+            left: self.sinks.allocate(owner, SinkRole::MobileLeft)?,
+            right: self.sinks.allocate(owner, SinkRole::MobileRight)?,
+        };
+        if self.mobiles.insert(mobile, ports).is_some() {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        Ok(ports)
+    }
+
+    pub fn remove_mobile(&mut self, mobile: MobileId) -> Result<(), SignalError> {
+        let ports = self
+            .mobiles
+            .remove(&mobile)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        let removed_sinks = BTreeSet::from([ports.stop, ports.left, ports.right]);
+        for sink in &removed_sinks {
+            self.sinks.remove(*sink)?;
+        }
+        self.slots
+            .retain(|(sink, _), _| !removed_sinks.contains(sink));
+        Ok(())
+    }
+
     pub fn activate_wire(&mut self, wire: WireId) -> Result<(), SignalError> {
         if self
             .wires
@@ -558,6 +597,10 @@ impl SignalWorld {
         self.gates.get(&gate).map(|record| record.ports)
     }
 
+    pub fn mobile_ports(&self, mobile: MobileId) -> Option<MobileControlPorts> {
+        self.mobiles.get(&mobile).copied()
+    }
+
     pub fn gate_snapshot(&self, gate: GateId) -> Option<GateSignalSnapshot> {
         self.gates
             .get(&gate)
@@ -616,7 +659,7 @@ impl SignalWorld {
         if record.role == DriverRole::GateOutput {
             let gate = self
                 .gates
-                .get_mut(&record.owner)
+                .get_mut(&GateId(record.owner))
                 .ok_or(SignalError::InvalidCanonicalState)?;
             gate.current_output = level;
         }
@@ -856,6 +899,10 @@ impl SignalWorld {
 
     pub fn iter_gate_entries(&self) -> impl Iterator<Item = (GateId, GateSignalRecord)> + '_ {
         self.gates.iter().map(|(key, gate)| (*key, *gate))
+    }
+
+    pub fn iter_mobile_entries(&self) -> impl Iterator<Item = (MobileId, MobileControlPorts)> + '_ {
+        self.mobiles.iter().map(|(id, ports)| (*id, *ports))
     }
 
     #[cfg(test)]

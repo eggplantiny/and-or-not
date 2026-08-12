@@ -3,9 +3,10 @@ use crate::cell_buffer::{
     PresentationSource, WireConnections,
 };
 use aon_sim::{
-    EntityId, Fixed, FixedAabb, FixedVec2, GatePort, GatePortRef, GateRenderRecord, GateType,
-    LogicLevel, PhysicalScaleProfile, PortAnchor, RenderSnapshot, RoutingDomain, WireEnd, WireId,
-    WireRenderRecord, floor_div,
+    EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GatePort, GatePortRef, GateRenderRecord,
+    GateType, Heading, LogicLevel, MobilePort, MobilePortRef, MobileRenderRecord,
+    PhysicalScaleProfile, PortAnchor, RenderSnapshot, RoutingDomain, TrackPosition, WireEnd,
+    WireId, WireRenderRecord, floor_div, polyline_length,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,6 +64,7 @@ impl Viewport {
 pub enum PickTarget {
     Entity(EntityId),
     GatePort(GatePortRef),
+    MobilePort(MobilePortRef),
     WireEnd { wire: WireId, end: WireEnd },
 }
 
@@ -71,13 +73,14 @@ impl PickTarget {
         match self {
             Self::Entity(entity) => entity,
             Self::GatePort(port) => port.gate.entity_id(),
+            Self::MobilePort(port) => port.mobile.entity_id(),
             Self::WireEnd { wire, .. } => wire.entity_id(),
         }
     }
 
     const fn subtarget_rank(self) -> u8 {
         match self {
-            Self::GatePort(_) => 0,
+            Self::GatePort(_) | Self::MobilePort(_) => 0,
             Self::WireEnd { .. } => 1,
             Self::Entity(_) => 2,
         }
@@ -129,6 +132,12 @@ impl SnapshotPresentation {
 
     pub fn primary_pick(&self, point: CellPoint) -> Option<PickTarget> {
         self.pick_targets(point).first().copied()
+    }
+
+    pub fn pick_points(&self, target: PickTarget) -> impl Iterator<Item = CellPoint> + '_ {
+        self.picks
+            .iter()
+            .filter_map(move |(point, targets)| targets.contains(&target).then_some(*point))
     }
 
     pub fn diagnostics(&self) -> &[PresenterDiagnostic] {
@@ -253,13 +262,31 @@ pub fn project_snapshot(
     let (pitch, coordinate_origin, circuit_substrate) = match view {
         ViewMode::Network => (physical.world_routing_pitch, FixedVec2::default(), None),
         ViewMode::Circuit { substrate } => {
-            let record = snapshot
+            if let Some(record) = snapshot
                 .fixed_substrates()
                 .iter()
                 .find(|record| record.id == substrate)
                 .copied()
-                .ok_or(PresenterError::MissingCircuitSubstrate { substrate })?;
-            (physical.circuit_routing_pitch, record.origin, Some(record))
+            {
+                (
+                    physical.circuit_routing_pitch,
+                    record.origin,
+                    Some((record.routing_area, record.footprint)),
+                )
+            } else if let Some(record) = snapshot
+                .mobiles()
+                .iter()
+                .find(|record| record.id.entity_id() == substrate)
+                .copied()
+            {
+                (
+                    physical.circuit_routing_pitch,
+                    FixedVec2::default(),
+                    Some((record.routing_area, record.footprint)),
+                )
+            } else {
+                return Err(PresenterError::MissingCircuitSubstrate { substrate });
+            }
         }
     };
     if pitch.0 <= 0 {
@@ -278,7 +305,9 @@ pub fn project_snapshot(
             &mut ranked_picks,
             &mut diagnostics,
         ),
-        Some(substrate) => draw_circuit_background(substrate, pitch, bounds, &mut buffer),
+        Some((routing_area, footprint)) => {
+            draw_circuit_background(routing_area, footprint, pitch, bounds, &mut buffer)
+        }
     }
 
     let mut wire_cells = BTreeMap::<CellPoint, BTreeMap<EntityId, VisibleWireStroke>>::new();
@@ -330,6 +359,33 @@ pub fn project_snapshot(
         );
     }
 
+    if matches!(view, ViewMode::Network) {
+        draw_mobiles(
+            snapshot,
+            pitch,
+            bounds,
+            &mut buffer,
+            &mut ranked_picks,
+            &mut diagnostics,
+        );
+    }
+
+    if let ViewMode::Circuit { substrate } = view
+        && let Some(mobile) = snapshot
+            .mobiles()
+            .iter()
+            .find(|mobile| mobile.id.entity_id() == substrate)
+    {
+        draw_mobile_ports(
+            *mobile,
+            pitch,
+            bounds,
+            &mut buffer,
+            &mut ranked_picks,
+            &mut diagnostics,
+        );
+    }
+
     let bound_ports = bound_gate_ports(snapshot);
     for gate in snapshot
         .gates()
@@ -365,6 +421,12 @@ fn domain_visible(domain: RoutingDomain, view: ViewMode) -> bool {
                 substrate: selected,
             },
             RoutingDomain::FixedSubstrate(actual),
+        ) => selected == actual,
+        (
+            ViewMode::Circuit {
+                substrate: selected,
+            },
+            RoutingDomain::MobileSubstrate(actual),
         ) => selected == actual,
         _ => false,
     }
@@ -427,8 +489,185 @@ fn draw_network_substrates(
     }
 }
 
+fn draw_mobiles(
+    snapshot: &RenderSnapshot,
+    pitch: Fixed,
+    bounds: GridBounds,
+    buffer: &mut CellBuffer,
+    picks: &mut BTreeMap<CellPoint, Vec<RankedPick>>,
+    diagnostics: &mut Vec<PresenterDiagnostic>,
+) {
+    for mobile in snapshot.mobiles() {
+        let entity = mobile.id.entity_id();
+        let Some(at) = project_fixed_point(mobile.world_position, FixedVec2::default(), pitch)
+            .and_then(GridPoint::to_cell)
+        else {
+            diagnostics.push(PresenterDiagnostic::CoordinateOutsideHostRange { entity });
+            continue;
+        };
+        if !bounds.contains(GridPoint::new(i64::from(at.x), i64::from(at.y))) {
+            continue;
+        }
+        let glyph = mobile_direction(snapshot, *mobile)
+            .map(direction_glyph)
+            .unwrap_or('>');
+        let tone = match mobile.stop {
+            LogicLevel::Low => CellTone::Neutral,
+            LogicLevel::High => CellTone::High,
+            LogicLevel::X => CellTone::Unknown,
+        };
+        buffer.write(CellWrite::new(
+            at,
+            CellLayer::Mobile,
+            CellVisual::new(glyph, tone, Some(PresentationSource::Canonical(entity))),
+        ));
+        push_pick(picks, at, CellLayer::Mobile, PickTarget::Entity(entity));
+    }
+}
+
+fn draw_mobile_ports(
+    mobile: MobileRenderRecord,
+    pitch: Fixed,
+    bounds: GridBounds,
+    buffer: &mut CellBuffer,
+    picks: &mut BTreeMap<CellPoint, Vec<RankedPick>>,
+    diagnostics: &mut Vec<PresenterDiagnostic>,
+) {
+    let entity = mobile.id.entity_id();
+    let ports = [
+        (MobilePort::Stop, mobile.routing_area.min, 'S', mobile.stop),
+        (
+            MobilePort::Left,
+            FixedVec2::new(mobile.routing_area.max.x, mobile.routing_area.min.y),
+            'L',
+            mobile.left,
+        ),
+        (
+            MobilePort::Right,
+            mobile.routing_area.max,
+            'R',
+            mobile.right,
+        ),
+    ];
+    for (port, point, glyph, level) in ports {
+        let Some(at) =
+            project_fixed_point(point, FixedVec2::default(), pitch).and_then(GridPoint::to_cell)
+        else {
+            diagnostics.push(PresenterDiagnostic::CoordinateOutsideHostRange { entity });
+            continue;
+        };
+        if !bounds.contains(GridPoint::new(i64::from(at.x), i64::from(at.y))) {
+            continue;
+        }
+        buffer.write(CellWrite::new(
+            at,
+            CellLayer::GatePort,
+            CellVisual::new(
+                glyph,
+                tone_for_logic(level),
+                Some(PresentationSource::Canonical(entity)),
+            ),
+        ));
+        push_pick(
+            picks,
+            at,
+            CellLayer::GatePort,
+            PickTarget::MobilePort(MobilePortRef {
+                mobile: mobile.id,
+                port,
+            }),
+        );
+    }
+}
+
+fn mobile_direction(snapshot: &RenderSnapshot, mobile: MobileRenderRecord) -> Option<(i128, i128)> {
+    match mobile.track_position {
+        TrackPosition::Edge {
+            edge,
+            offset,
+            heading,
+        } => {
+            let wire = snapshot.wires().iter().find(|wire| wire.id == edge)?;
+            edge_direction_at_offset(&wire.points, offset, heading)
+        }
+        TrackPosition::Junction {
+            junction,
+            incoming_edge,
+        } => {
+            let wire = snapshot
+                .wires()
+                .iter()
+                .find(|wire| wire.id == incoming_edge)?;
+            match (wire.endpoint_a, wire.endpoint_b) {
+                (EndpointTarget::Junction(bound), _) if bound == junction => {
+                    vector(wire.points.get(1).copied()?, *wire.points.first()?)
+                }
+                (_, EndpointTarget::Junction(bound)) if bound == junction => {
+                    let end = wire.points.len().checked_sub(1)?;
+                    vector(
+                        *wire.points.get(end.checked_sub(1)?)?,
+                        *wire.points.get(end)?,
+                    )
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+fn edge_direction_at_offset(
+    points: &[FixedVec2],
+    offset: Fixed,
+    heading: Heading,
+) -> Option<(i128, i128)> {
+    if offset.0 < 0 {
+        return None;
+    }
+    let mut cumulative = Fixed::ZERO;
+    let mut terminal = None;
+    for (index, segment) in points.windows(2).enumerate() {
+        let end = polyline_length(points.get(..index.checked_add(2)?)?).ok()?;
+        let direction = match heading {
+            Heading::Forward => vector(segment[0], segment[1]),
+            Heading::Reverse => vector(segment[1], segment[0]),
+        };
+        terminal = direction;
+        let inside = offset >= cumulative
+            && match heading {
+                // At an internal vertex Forward enters the following segment.
+                Heading::Forward => offset < end,
+                // At an internal vertex Reverse enters the preceding segment.
+                Heading::Reverse => offset <= end,
+            };
+        if inside {
+            return direction;
+        }
+        cumulative = end;
+    }
+    (offset == cumulative).then_some(terminal?)
+}
+
+fn vector(start: FixedVec2, end: FixedVec2) -> Option<(i128, i128)> {
+    let vector = (
+        i128::from(end.x.0) - i128::from(start.x.0),
+        i128::from(end.y.0) - i128::from(start.y.0),
+    );
+    (vector != (0, 0)).then_some(vector)
+}
+
+fn direction_glyph((x, y): (i128, i128)) -> char {
+    if x.unsigned_abs() >= y.unsigned_abs() {
+        if x >= 0 { '>' } else { '<' }
+    } else if y >= 0 {
+        '^'
+    } else {
+        'v'
+    }
+}
+
 fn draw_circuit_background(
-    substrate: aon_sim::FixedSubstrateRenderRecord,
+    routing_area: FixedAabb,
+    footprint: FixedAabb,
     pitch: Fixed,
     bounds: GridBounds,
     buffer: &mut CellBuffer,
@@ -436,7 +675,7 @@ fn draw_circuit_background(
     let local_origin = FixedVec2::default();
     let excluded = BTreeSet::new();
     draw_aabb_background(
-        aabb_i128(substrate.footprint),
+        aabb_i128(footprint),
         local_origin,
         pitch,
         bounds,
@@ -444,7 +683,7 @@ fn draw_circuit_background(
         &excluded,
     );
     draw_aabb_background(
-        aabb_i128(substrate.routing_area),
+        aabb_i128(routing_area),
         local_origin,
         pitch,
         bounds,
@@ -720,7 +959,9 @@ fn bound_gate_ports(snapshot: &RenderSnapshot) -> BTreeSet<GatePortRef> {
         .flat_map(|wire| [wire.endpoint_a, wire.endpoint_b])
         .filter_map(|endpoint| match endpoint {
             aon_sim::EndpointTarget::GatePort(port) => Some(port),
-            aon_sim::EndpointTarget::Free | aon_sim::EndpointTarget::Junction(_) => None,
+            aon_sim::EndpointTarget::Free
+            | aon_sim::EndpointTarget::Junction(_)
+            | aon_sim::EndpointTarget::MobilePort(_) => None,
         })
         .collect()
 }

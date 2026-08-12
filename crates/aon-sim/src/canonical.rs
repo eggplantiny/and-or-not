@@ -5,13 +5,13 @@ use crate::path_certificate::{PathCertificateArena, PathElementStamp};
 use crate::signal::{DriveVector, SignalWorld};
 use crate::structural::StructuralWorld;
 use crate::{
-    EndpointTarget, EntityLocation, EntityRegistry, FixedAabb, FixedVec2, LogicLevel, Revision,
-    RoutingDomain, SimulationContract, StateHash, Tick,
+    EndpointTarget, EntityLocation, EntityRegistry, FixedAabb, FixedVec2, Heading, LogicLevel,
+    Revision, RoutingDomain, SimulationContract, StateHash, Tick, TrackPosition,
 };
 
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V3\0";
-pub(crate) const STATE_ENCODER_VERSION: u16 = 3;
-const RESERVED_EMPTY_STORE_COUNT: usize = 4;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V4\0";
+pub(crate) const STATE_ENCODER_VERSION: u16 = 4;
+const RESERVED_EMPTY_STORE_COUNT: usize = 3;
 
 #[derive(Clone, Copy)]
 pub(crate) struct StateView<'a> {
@@ -91,7 +91,7 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     if let Some(structural) = state.structural {
         encode_structural_stores(structural, write);
     } else {
-        for _ in 0..4 {
+        for _ in 0..5 {
             write_u64(0, write);
         }
     }
@@ -101,7 +101,7 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     encode_driver_events(state.driver_events, write);
     encode_signal_events(state.signal_events, write);
 
-    // Mobile substrate, destruction, radiation, and relay stores remain reserved in V3.
+    // Destruction, radiation, and relay stores remain reserved in V4.
     for _ in 0..RESERVED_EMPTY_STORE_COUNT {
         write_u64(0, write);
     }
@@ -145,7 +145,7 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         match record {
             Some(record) => {
                 write_u8(1, write);
-                write_u64(record.owner.entity_id().0, write);
+                write_u64(record.owner.0, write);
                 write_u8(record.role.canonical_tag(), write);
                 encode_driver_sample(record.sample, write);
             }
@@ -160,7 +160,7 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         match record {
             Some(record) => {
                 write_u8(1, write);
-                write_u64(record.owner.entity_id().0, write);
+                write_u64(record.owner.0, write);
                 write_u8(record.role.canonical_tag(), write);
                 write_u8(logic_level_tag(record.resolved_level), write);
                 write_u8(u8::from(record.dirty), write);
@@ -191,6 +191,15 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         encode_optional_level(gate.pending_level, write);
         encode_optional_u64(gate.pending_switch_energy.map(|energy| energy.0), write);
         write_u64(gate.cancelled_switching_heat.0, write);
+    }
+
+    let mobiles: Vec<_> = signal.iter_mobile_entries().collect();
+    write_u64(mobiles.len() as u64, write);
+    for (mobile, ports) in mobiles {
+        write_u64(mobile.entity_id().0, write);
+        write_u64(ports.stop.entity_id().0, write);
+        write_u64(ports.left.entity_id().0, write);
+        write_u64(ports.right.entity_id().0, write);
     }
 
     let wires: Vec<_> = signal.iter_wires().collect();
@@ -357,6 +366,49 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         encode_aabb(record.routing_area, write);
         encode_aabb(record.footprint, write);
     }
+
+    let mut mobiles: Vec<_> = structural
+        .mobile_substrates()
+        .iter_alive()
+        .map(|(_, record)| record)
+        .collect();
+    mobiles.sort_unstable_by_key(|record| record.id.entity_id());
+    write_u64(mobiles.len() as u64, write);
+    for record in mobiles {
+        write_u64(record.id.entity_id().0, write);
+        encode_track_position(record.track_position, write);
+        encode_aabb(record.routing_area, write);
+        encode_aabb(record.footprint, write);
+    }
+}
+
+fn encode_track_position(position: TrackPosition, write: &mut dyn FnMut(&[u8])) {
+    match position {
+        TrackPosition::Edge {
+            edge,
+            offset,
+            heading,
+        } => {
+            write_u8(0, write);
+            write_u64(edge.entity_id().0, write);
+            write_i64(offset.0, write);
+            write_u8(
+                match heading {
+                    Heading::Forward => 0,
+                    Heading::Reverse => 1,
+                },
+                write,
+            );
+        }
+        TrackPosition::Junction {
+            junction,
+            incoming_edge,
+        } => {
+            write_u8(1, write);
+            write_u64(junction.entity_id().0, write);
+            write_u64(incoming_edge.entity_id().0, write);
+        }
+    }
 }
 
 fn encode_point(point: FixedVec2, write: &mut dyn FnMut(&[u8])) {
@@ -386,6 +438,10 @@ fn encode_endpoint(endpoint: EndpointTarget, write: &mut dyn FnMut(&[u8])) {
         EndpointTarget::Junction(id) => write_u64(id.entity_id().0, write),
         EndpointTarget::GatePort(reference) => {
             write_u64(reference.gate.entity_id().0, write);
+            write_u8(reference.port.canonical_tag(), write);
+        }
+        EndpointTarget::MobilePort(reference) => {
+            write_u64(reference.mobile.entity_id().0, write);
             write_u8(reference.port.canonical_tag(), write);
         }
     }
@@ -439,9 +495,10 @@ mod tests {
     use crate::{
         Command, CommandEnvelope, ConnectionGeneration, EndpointTarget, EntityId, EntityLocation,
         Fixed, FixedAabb, FixedSubstrateIndex, GateId, GateIndex, GatePort, GatePortRef, GateType,
-        JunctionId, JunctionIndex, PhysicalScaleProfile, PlaceFixedSubstrateCommand,
-        PlaceGateCommand, PlaceJunctionCommand, PlaceWireCommand, ProfileHash, RoutingDomain,
-        WireId, WireIndex,
+        JunctionId, JunctionIndex, MobileId, MobilePort, MobilePortRef, MobileSubstrateIndex,
+        PhysicalScaleProfile, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+        PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileHash, RoutingDomain, SinkId, WireId,
+        WireIndex,
     };
 
     fn contract() -> SimulationContract {
@@ -543,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn state_encoding_v3_has_exact_contract_tick_revision_and_identity_order() {
+    fn state_encoding_v4_has_exact_contract_tick_revision_and_identity_order() {
         let mut entities = EntityRegistry::new();
         entities
             .allocate(EntityLocation::Gate(GateIndex(7)))
@@ -572,8 +629,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V3\0");
-        expected.extend_from_slice(&3_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V4\0");
+        expected.extend_from_slice(&4_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -830,8 +887,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V3\0");
-        expected.extend_from_slice(&3_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V4\0");
+        expected.extend_from_slice(&4_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -877,12 +934,221 @@ mod tests {
         append_point(&mut expected, point(0, 0));
         append_aabb(&mut expected, substrate_bounds);
         append_aabb(&mut expected, substrate_bounds);
+        expected.extend_from_slice(&0_u64.to_le_bytes());
         append_empty_signal_and_events(&mut expected);
 
         assert_eq!(actual, expected);
         assert_eq!(
             state_hash(runtime.view(&contract, Tick(3), Revision(2), &world)).to_string(),
-            "0cea384b0e845419bf243164dc2c85b4fbf85adc4dc81fb6ef8ed8283565387c"
+            "4ea6f2535f070e8a7dd470cd3e9987da08aaf8b0dafd018300af1f09688aff4a"
+        );
+    }
+
+    #[test]
+    fn mobile_track_positions_have_exact_v4_bytes_and_field_boundaries() {
+        const EDGE_LENGTH: i64 = 65_536;
+        let edge = |edge, offset, heading| TrackPosition::Edge {
+            edge: WireId(EntityId(edge)),
+            offset: Fixed(offset),
+            heading,
+        };
+        let junction = |junction, incoming_edge| TrackPosition::Junction {
+            junction: JunctionId(EntityId(junction)),
+            incoming_edge: WireId(EntityId(incoming_edge)),
+        };
+
+        let baseline = track_position_bytes(edge(7, 0, Heading::Forward));
+        let mut expected = vec![0];
+        expected.extend_from_slice(&7_u64.to_le_bytes());
+        expected.extend_from_slice(&0_i64.to_le_bytes());
+        expected.push(0);
+        assert_eq!(baseline, expected, "Edge/offset-zero/Forward bytes");
+
+        let edge_changed = track_position_bytes(edge(8, 0, Heading::Forward));
+        let mut expected = vec![0];
+        expected.extend_from_slice(&8_u64.to_le_bytes());
+        expected.extend_from_slice(&0_i64.to_le_bytes());
+        expected.push(0);
+        assert_eq!(edge_changed, expected, "Edge identity bytes");
+
+        let edge_end = track_position_bytes(edge(7, EDGE_LENGTH, Heading::Forward));
+        let mut expected = vec![0];
+        expected.extend_from_slice(&7_u64.to_le_bytes());
+        expected.extend_from_slice(&EDGE_LENGTH.to_le_bytes());
+        expected.push(0);
+        assert_eq!(edge_end, expected, "inclusive edge-length boundary bytes");
+
+        let reversed = track_position_bytes(edge(7, 0, Heading::Reverse));
+        let mut expected = vec![0];
+        expected.extend_from_slice(&7_u64.to_le_bytes());
+        expected.extend_from_slice(&0_i64.to_le_bytes());
+        expected.push(1);
+        assert_eq!(reversed, expected, "Reverse heading bytes");
+
+        let at_junction = track_position_bytes(junction(11, 7));
+        let mut expected = vec![1];
+        expected.extend_from_slice(&11_u64.to_le_bytes());
+        expected.extend_from_slice(&7_u64.to_le_bytes());
+        assert_eq!(at_junction, expected, "Junction discriminant and IDs");
+
+        let junction_changed = track_position_bytes(junction(12, 7));
+        let incoming_changed = track_position_bytes(junction(11, 8));
+        assert_ne!(baseline, edge_changed, "Edge ID is canonical");
+        assert_ne!(baseline, edge_end, "Edge offset is canonical");
+        assert_ne!(baseline, reversed, "Heading is canonical");
+        assert_ne!(
+            baseline, at_junction,
+            "Edge/Junction discriminant is canonical"
+        );
+        assert_ne!(at_junction, junction_changed, "Junction ID is canonical");
+        assert_ne!(
+            at_junction, incoming_changed,
+            "incoming Edge ID is canonical"
+        );
+    }
+
+    #[test]
+    fn populated_mobile_state_hash_is_sensitive_to_every_track_position_field() {
+        const WORLD_PITCH: i64 = 65_536;
+        let (world, runtime, mobile_index) = populated_mobile_fixture();
+        let contract = contract();
+        let mobile = MobileId(EntityId(5));
+        let edge_a = WireId(EntityId(3));
+        let edge_b = WireId(EntityId(4));
+        let junction_a = JunctionId(EntityId(1));
+        let junction_b = JunctionId(EntityId(2));
+        let hash = |position| {
+            let mut changed = world.clone();
+            changed
+                .commit_mobile_positions(&[(mobile_index, mobile, position)])
+                .expect("test Mobile position updates");
+            state_hash(runtime.view(&contract, Tick(3), Revision(3), &changed))
+        };
+
+        let edge_zero = TrackPosition::Edge {
+            edge: edge_a,
+            offset: Fixed(0),
+            heading: Heading::Forward,
+        };
+        let baseline = hash(edge_zero);
+        assert_ne!(
+            baseline,
+            hash(TrackPosition::Edge {
+                edge: edge_b,
+                offset: Fixed(0),
+                heading: Heading::Forward,
+            }),
+            "Edge identity reaches the full V4 state hash"
+        );
+        assert_ne!(
+            baseline,
+            hash(TrackPosition::Edge {
+                edge: edge_a,
+                offset: Fixed(WORLD_PITCH),
+                heading: Heading::Forward,
+            }),
+            "the exact edge-length offset boundary reaches the full V4 state hash"
+        );
+        assert_ne!(
+            baseline,
+            hash(TrackPosition::Edge {
+                edge: edge_a,
+                offset: Fixed(0),
+                heading: Heading::Reverse,
+            }),
+            "Heading reaches the full V4 state hash"
+        );
+
+        let at_junction = TrackPosition::Junction {
+            junction: junction_a,
+            incoming_edge: edge_a,
+        };
+        let junction_hash = hash(at_junction);
+        assert_ne!(
+            baseline, junction_hash,
+            "Edge/Junction discriminant reaches the full V4 state hash"
+        );
+        assert_ne!(
+            junction_hash,
+            hash(TrackPosition::Junction {
+                junction: junction_b,
+                incoming_edge: edge_a,
+            }),
+            "Junction identity reaches the full V4 state hash"
+        );
+        assert_ne!(
+            junction_hash,
+            hash(TrackPosition::Junction {
+                junction: junction_a,
+                incoming_edge: edge_b,
+            }),
+            "incoming Edge identity reaches the full V4 state hash"
+        );
+    }
+
+    #[test]
+    fn populated_mobile_control_sink_map_has_exact_v4_signal_bytes() {
+        let mobile = MobileId(EntityId(17));
+        let mut signal = SignalWorld::new();
+        let ports = signal
+            .activate_mobile(mobile)
+            .expect("Mobile control sinks activate");
+        assert_eq!(
+            ports,
+            crate::MobileControlPorts {
+                stop: SinkId(EntityId(1)),
+                left: SinkId(EntityId(2)),
+                right: SinkId(EntityId(3)),
+            },
+            "STOP/LEFT/RIGHT retain distinct canonical Sink identities"
+        );
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u64.to_le_bytes()); // Driver frontier.
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Driver count.
+        expected.extend_from_slice(&4_u64.to_le_bytes()); // Sink frontier.
+        expected.extend_from_slice(&3_u64.to_le_bytes()); // Sink count.
+        for (sink, role) in [(1_u64, 2_u8), (2, 3), (3, 4)] {
+            expected.extend_from_slice(&sink.to_le_bytes());
+            expected.push(1); // Live Sink slot.
+            expected.extend_from_slice(&17_u64.to_le_bytes());
+            expected.push(role);
+            expected.push(0); // LogicLevel::Low.
+            expected.push(0); // Clean.
+        }
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Gate count.
+        expected.extend_from_slice(&1_u64.to_le_bytes()); // Mobile map count.
+        for value in [17_u64, 1, 2, 3] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Wire count.
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Sink/Driver slot count.
+
+        assert_eq!(signal_bytes(&signal), expected);
+    }
+
+    #[test]
+    fn mobile_port_endpoint_has_exact_v4_bytes_for_all_control_sinks() {
+        let endpoint = |mobile, port| {
+            endpoint_bytes(EndpointTarget::MobilePort(MobilePortRef {
+                mobile: MobileId(EntityId(mobile)),
+                port,
+            }))
+        };
+        for (port, tag) in [
+            (MobilePort::Stop, 0_u8),
+            (MobilePort::Left, 1),
+            (MobilePort::Right, 2),
+        ] {
+            let mut expected = vec![3]; // EndpointTarget::MobilePort.
+            expected.extend_from_slice(&29_u64.to_le_bytes());
+            expected.push(tag);
+            assert_eq!(endpoint(29, port), expected);
+        }
+        assert_ne!(
+            endpoint(29, MobilePort::Stop),
+            endpoint(30, MobilePort::Stop),
+            "Mobile endpoint owner identity is canonical"
         );
     }
 
@@ -1265,7 +1531,7 @@ mod tests {
     }
 
     fn append_empty_runtime(output: &mut Vec<u8>) {
-        for _ in 0..4 {
+        for _ in 0..5 {
             output.extend_from_slice(&0_u64.to_le_bytes());
         }
         append_empty_signal_and_events(output);
@@ -1275,6 +1541,124 @@ mod tests {
         let mut bytes = Vec::new();
         encode_signal_stores(signal, &mut |part| bytes.extend_from_slice(part));
         bytes
+    }
+
+    fn track_position_bytes(position: TrackPosition) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        encode_track_position(position, &mut |part| bytes.extend_from_slice(part));
+        bytes
+    }
+
+    fn endpoint_bytes(endpoint: EndpointTarget) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        encode_endpoint(endpoint, &mut |part| bytes.extend_from_slice(part));
+        bytes
+    }
+
+    fn populated_mobile_fixture() -> (StructuralWorld, TestRuntime, MobileSubstrateIndex) {
+        const WORLD_PITCH: i64 = 65_536;
+        const CIRCUIT_PITCH: i64 = 16_384;
+        let physical = PhysicalScaleProfile::stage0_alpha("canonical-mobile-test");
+        let mut world = StructuralWorld::new();
+        let mut runtime = TestRuntime::new();
+
+        let junctions = world
+            .apply_phase0_with_signal(
+                &mut runtime.signal,
+                Tick(0),
+                &[
+                    envelope(
+                        0,
+                        0,
+                        Command::PlaceJunction(PlaceJunctionCommand {
+                            routing_domain: RoutingDomain::OpenWorld,
+                            position: point(0, 0),
+                        }),
+                    ),
+                    envelope(
+                        0,
+                        1,
+                        Command::PlaceJunction(PlaceJunctionCommand {
+                            routing_domain: RoutingDomain::OpenWorld,
+                            position: point(WORLD_PITCH, 0),
+                        }),
+                    ),
+                ],
+                &physical,
+            )
+            .expect("Mobile fixture Junctions place");
+        assert!(junctions.rejections.is_empty());
+
+        let wires = world
+            .apply_phase0_with_signal(
+                &mut runtime.signal,
+                Tick(1),
+                &[
+                    envelope(
+                        1,
+                        0,
+                        Command::PlaceWire(PlaceWireCommand {
+                            routing_domain: RoutingDomain::OpenWorld,
+                            points: vec![point(0, 0), point(WORLD_PITCH, 0)],
+                            endpoint_a: EndpointTarget::Junction(JunctionId(EntityId(1))),
+                            endpoint_b: EndpointTarget::Junction(JunctionId(EntityId(2))),
+                        }),
+                    ),
+                    envelope(
+                        1,
+                        1,
+                        Command::PlaceWire(PlaceWireCommand {
+                            routing_domain: RoutingDomain::OpenWorld,
+                            points: vec![point(0, 0), point(0, WORLD_PITCH)],
+                            endpoint_a: EndpointTarget::Junction(JunctionId(EntityId(1))),
+                            endpoint_b: EndpointTarget::Free,
+                        }),
+                    ),
+                ],
+                &physical,
+            )
+            .expect("Mobile fixture Edges place");
+        assert!(wires.rejections.is_empty());
+
+        let bounds = FixedAabb::new(
+            point(-4 * CIRCUIT_PITCH, -4 * CIRCUIT_PITCH),
+            point(4 * CIRCUIT_PITCH, 4 * CIRCUIT_PITCH),
+        );
+        let mobile = world
+            .apply_phase0_with_signal(
+                &mut runtime.signal,
+                Tick(2),
+                &[envelope(
+                    2,
+                    0,
+                    Command::PlaceMobileSubstrate(PlaceMobileSubstrateCommand {
+                        origin: point(WORLD_PITCH / 2, 0),
+                        routing_area: bounds,
+                        footprint: bounds,
+                    }),
+                )],
+                &physical,
+            )
+            .expect("Mobile fixture substrate places");
+        assert!(mobile.rejections.is_empty());
+        assert_eq!(mobile.acceptances[0].created_entity, Some(EntityId(5)));
+        let EntityLocation::MobileSubstrate(index) = world
+            .entities()
+            .location(EntityId(5))
+            .copied()
+            .expect("Mobile fixture entity is live")
+        else {
+            panic!("Mobile fixture identity maps to its substrate slot");
+        };
+        assert_eq!(
+            runtime.signal.mobile_ports(MobileId(EntityId(5))),
+            Some(crate::MobileControlPorts {
+                stop: SinkId(EntityId(1)),
+                left: SinkId(EntityId(2)),
+                right: SinkId(EntityId(3)),
+            })
+        );
+        (world, runtime, index)
     }
 
     fn certificate_bytes(certificates: &PathCertificateArena) -> Vec<u8> {
@@ -1304,7 +1688,7 @@ mod tests {
     }
 
     fn append_empty_signal_and_events(output: &mut Vec<u8>) {
-        for value in [1_u64, 0, 1, 0, 0, 0, 0, 1, 0, 0] {
+        for value in [1_u64, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0] {
             output.extend_from_slice(&value.to_le_bytes());
         }
         for _ in 0..RESERVED_EMPTY_STORE_COUNT {

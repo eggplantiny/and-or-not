@@ -1,10 +1,10 @@
 use crate::{
     BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength, DriverId,
     EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId, GatePort, GatePortRef, GateType,
-    HashAlgorithmId, HashParseError, JsonErrorCategory, LogicLevel, PlaceFixedSubstrateCommand,
-    PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
-    ProfileHash, RemoveEntityCommand, RoutingDomain, SemanticsVersion, SetExternalDriverCommand,
-    Simulation, StateHash, Tick, WireEnd, WireId,
+    HashAlgorithmId, HashParseError, JsonErrorCategory, LogicLevel, MobileId, MobilePort,
+    MobilePortRef, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileHash, RemoveEntityCommand, RoutingDomain,
+    SemanticsVersion, SetExternalDriverCommand, Simulation, StateHash, Tick, WireEnd, WireId,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -12,6 +12,7 @@ use thiserror::Error;
 
 pub const REPLAY_FORMAT_VERSION_V1: u32 = 1;
 pub const STATE_HASH_VERSION_V3: &str = "aon-state-v3";
+pub const STATE_HASH_VERSION_V4: &str = "aon-state-v4";
 pub const WORLD_GENERATOR_VERSION_EMPTY_V1: &str = "aon-empty-v1";
 
 const SEED_BYTE_LENGTH: usize = 32;
@@ -43,29 +44,32 @@ impl ReplayFormatVersion {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StateHashVersion {
-    #[default]
     V3,
+    #[default]
+    V4,
 }
 
 impl StateHashVersion {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V3 => STATE_HASH_VERSION_V3,
+            Self::V4 => STATE_HASH_VERSION_V4,
         }
     }
 
     fn parse(actual: &str) -> Result<Self, ReplayError> {
         match actual {
             STATE_HASH_VERSION_V3 => Ok(Self::V3),
+            STATE_HASH_VERSION_V4 => Ok(Self::V4),
             actual => Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V3,
+                expected: STATE_HASH_VERSION_V4,
                 actual: actual.to_owned(),
             }),
         }
     }
 
     pub(crate) const fn current() -> Self {
-        Self::V3
+        Self::V4
     }
 }
 
@@ -260,11 +264,12 @@ impl Replay {
             self.header.balance_profile_hash.to_string(),
             actual.balance_profile_hash.to_string(),
         )?;
-        compare_header_field(
-            ReplayContractField::StateHashVersion,
-            self.header.state_hash_version.to_string(),
-            actual.state_hash_version.to_string(),
-        )?;
+        if self.header.state_hash_version != actual.state_hash_version {
+            return Err(ReplayError::UnsupportedStateHashVersion {
+                expected: actual.state_hash_version.as_str(),
+                actual: self.header.state_hash_version.to_string(),
+            });
+        }
         compare_header_field(
             ReplayContractField::WorldGeneratorVersion,
             self.header.world_generator_version.to_string(),
@@ -1045,6 +1050,34 @@ impl From<GatePort> for GatePortWire {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+enum MobilePortWire {
+    Stop,
+    Left,
+    Right,
+}
+
+impl From<MobilePortWire> for MobilePort {
+    fn from(value: MobilePortWire) -> Self {
+        match value {
+            MobilePortWire::Stop => Self::Stop,
+            MobilePortWire::Left => Self::Left,
+            MobilePortWire::Right => Self::Right,
+        }
+    }
+}
+
+impl From<MobilePort> for MobilePortWire {
+    fn from(value: MobilePort) -> Self {
+        match value {
+            MobilePort::Stop => Self::Stop,
+            MobilePort::Left => Self::Left,
+            MobilePort::Right => Self::Right,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 enum WireEndWire {
     A,
     B,
@@ -1182,6 +1215,7 @@ enum EndpointTargetWire {
     Free,
     Junction { junction: u64 },
     GatePort { gate: u64, port: GatePortWire },
+    MobilePort { mobile: u64, port: MobilePortWire },
 }
 
 impl From<EndpointTargetWire> for EndpointTarget {
@@ -1193,6 +1227,10 @@ impl From<EndpointTargetWire> for EndpointTarget {
             }
             EndpointTargetWire::GatePort { gate, port } => Self::GatePort(GatePortRef {
                 gate: GateId(EntityId(gate)),
+                port: port.into(),
+            }),
+            EndpointTargetWire::MobilePort { mobile, port } => Self::MobilePort(MobilePortRef {
+                mobile: MobileId(EntityId(mobile)),
                 port: port.into(),
             }),
         }
@@ -1208,6 +1246,10 @@ impl From<EndpointTarget> for EndpointTargetWire {
             },
             EndpointTarget::GatePort(reference) => Self::GatePort {
                 gate: reference.gate.entity_id().0,
+                port: reference.port.into(),
+            },
+            EndpointTarget::MobilePort(reference) => Self::MobilePort {
+                mobile: reference.mobile.entity_id().0,
                 port: reference.port.into(),
             },
         }
@@ -1396,7 +1438,7 @@ mod tests {
                 "stateHashVersion",
                 serde_json::json!("aon-state-unsupported"),
                 ReplayError::UnsupportedStateHashVersion {
-                    expected: STATE_HASH_VERSION_V3,
+                    expected: STATE_HASH_VERSION_V4,
                     actual: "aon-state-unsupported".to_owned(),
                 },
             ),
@@ -1474,6 +1516,26 @@ mod tests {
         assert_eq!(
             decode_json(&world_inputs),
             Err(ReplayError::UnsupportedWorldInputs { count: 1 })
+        );
+    }
+
+    #[test]
+    fn decoded_v3_replay_is_rejected_only_when_execution_requires_v4() {
+        let simulation = simulation();
+        let mut v3 = empty_replay_json(&simulation);
+        v3["header"]["stateHashVersion"] = serde_json::json!(STATE_HASH_VERSION_V3);
+
+        let decoded = decode_json(&v3).expect("retained V3 schema remains strictly decodable");
+        assert_eq!(
+            decoded.replay().header().state_hash_version,
+            StateHashVersion::V3
+        );
+        assert_eq!(
+            decoded.replay().validate_against(&simulation),
+            Err(ReplayError::UnsupportedStateHashVersion {
+                expected: STATE_HASH_VERSION_V4,
+                actual: STATE_HASH_VERSION_V3.to_owned(),
+            })
         );
     }
 
@@ -1569,6 +1631,18 @@ mod tests {
                     strength: DriveStrength(u64::MAX),
                 }),
             },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 8,
+                command: Command::BindPort(BindPortCommand {
+                    wire: WireId(EntityId(u64::MAX - 1)),
+                    end: WireEnd::A,
+                    target: EndpointTarget::MobilePort(MobilePortRef {
+                        mobile: MobileId(EntityId(u64::MAX)),
+                        port: MobilePort::Right,
+                    }),
+                }),
+            },
         ];
         let mut reversed = commands.clone();
         reversed.reverse();
@@ -1590,6 +1664,159 @@ mod tests {
         let artifact = ReplayArtifact::new("scenario.json", replay).unwrap();
         let decoded = decode_replay_artifact(&encode_replay_artifact(&artifact).unwrap()).unwrap();
         assert_eq!(decoded.replay().commands(), commands);
+        let Command::BindPort(binding) = &decoded.replay().commands()[8].command else {
+            panic!("ordinal 8 remains the MobilePort BindPort command");
+        };
+        assert_eq!(
+            binding.target,
+            EndpointTarget::MobilePort(MobilePortRef {
+                mobile: MobileId(EntityId(u64::MAX)),
+                port: MobilePort::Right,
+            })
+        );
+    }
+
+    #[test]
+    fn mobility_json_artifact_round_trip_restarts_with_identical_reports_hashes_and_snapshot() {
+        const WORLD_PITCH: i64 = 65_536;
+        const CIRCUIT_PITCH: i64 = 16_384;
+        const FINAL_NEXT_TICK: u64 = 12;
+
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let local_bounds = FixedAabb::new(
+            point(-4 * CIRCUIT_PITCH, -4 * CIRCUIT_PITCH),
+            point(4 * CIRCUIT_PITCH, 4 * CIRCUIT_PITCH),
+        );
+        let mobile = MobileId(EntityId(2));
+        let gate = GateId(EntityId(3));
+        let commands = vec![
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: Command::PlaceWire(PlaceWireCommand {
+                    routing_domain: RoutingDomain::OpenWorld,
+                    points: vec![point(0, 0), point(32 * WORLD_PITCH, 0)],
+                    endpoint_a: EndpointTarget::Free,
+                    endpoint_b: EndpointTarget::Free,
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(1),
+                ordinal: 0,
+                command: Command::PlaceMobileSubstrate(PlaceMobileSubstrateCommand {
+                    origin: point(4 * WORLD_PITCH, 0),
+                    routing_area: local_bounds,
+                    footprint: local_bounds,
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(2),
+                ordinal: 0,
+                command: Command::PlaceGate(PlaceGateCommand {
+                    gate_type: GateType::Not,
+                    origin: point(0, 0),
+                    routing_domain: RoutingDomain::MobileSubstrate(mobile.entity_id()),
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(3),
+                ordinal: 0,
+                command: Command::PlaceWire(PlaceWireCommand {
+                    routing_domain: RoutingDomain::MobileSubstrate(mobile.entity_id()),
+                    points: vec![point(CIRCUIT_PITCH, 0), point(3 * CIRCUIT_PITCH, 0)],
+                    endpoint_a: EndpointTarget::GatePort(GatePortRef {
+                        gate,
+                        port: GatePort::Output,
+                    }),
+                    endpoint_b: EndpointTarget::MobilePort(MobilePortRef {
+                        mobile,
+                        port: MobilePort::Stop,
+                    }),
+                }),
+            },
+        ];
+
+        let mut recorder = simulation();
+        let header = recorder.replay_header();
+        let mut trace = vec![recorder.state_hash()];
+        let mut recorded_reports = Vec::new();
+        for tick in 0..FINAL_NEXT_TICK {
+            let batch = commands
+                .iter()
+                .filter(|command| command.target_tick == Tick(tick))
+                .cloned()
+                .collect::<Vec<_>>();
+            let report = recorder.step(&batch).expect("mobility recording Tick runs");
+            assert!(report.command_rejections.is_empty());
+            trace.push(report.state_hash);
+            recorded_reports.push(report);
+        }
+        let checkpoints = trace
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(next_tick, state_hash)| HashCheckpoint {
+                next_tick: Tick(u64::try_from(next_tick).expect("bounded Tick index fits u64")),
+                state_hash,
+            })
+            .collect();
+        let artifact = ReplayArtifact::new(
+            "../scenarios/empty.json",
+            Replay::new(header, commands.clone(), checkpoints).expect("mobility Replay is valid"),
+        )
+        .expect("mobility Replay locator is portable");
+
+        let encoded = encode_replay_artifact(&artifact).expect("mobility Replay JSON encodes");
+        let json: serde_json::Value =
+            serde_json::from_slice(&encoded).expect("mobility Replay encoding is JSON");
+        assert_eq!(
+            json["commands"][3]["command"]["endpointB"]["kind"],
+            serde_json::json!("mobile-port")
+        );
+        assert_eq!(
+            json["commands"][3]["command"]["endpointB"]["port"],
+            serde_json::json!("stop")
+        );
+
+        let decoded = decode_replay_artifact(&encoded).expect("mobility Replay JSON decodes");
+        assert_eq!(decoded, artifact);
+        assert_eq!(
+            encode_replay_artifact(&decoded).expect("decoded mobility Replay re-encodes"),
+            encoded
+        );
+
+        let mut restarted = simulation();
+        decoded
+            .replay()
+            .validate_against(&restarted)
+            .expect("V4 mobility Replay matches the fresh session");
+        let mut restarted_trace = vec![restarted.state_hash()];
+        for (tick, recorded) in recorded_reports.iter().enumerate() {
+            let tick = Tick(u64::try_from(tick).expect("bounded Tick index fits u64"));
+            let batch = decoded
+                .replay()
+                .commands_for_tick(tick)
+                .cloned()
+                .collect::<Vec<_>>();
+            let report = restarted
+                .step(&batch)
+                .expect("decoded mobility Replay Tick runs");
+            assert_eq!(&report, recorded);
+            restarted_trace.push(report.state_hash);
+        }
+        decoded
+            .replay()
+            .verify_trace(&restarted_trace)
+            .expect("restarted mobility trace matches every JSON checkpoint");
+        assert_eq!(restarted_trace, trace);
+
+        let mut recorded_snapshot = RenderSnapshot::default();
+        let mut restarted_snapshot = RenderSnapshot::default();
+        recorder.write_render_snapshot(&mut recorded_snapshot);
+        restarted.write_render_snapshot(&mut restarted_snapshot);
+        assert_eq!(restarted_snapshot, recorded_snapshot);
+        assert_eq!(restarted_snapshot.mobiles().len(), 1);
+        assert_eq!(restarted_snapshot.mobiles()[0].stop, LogicLevel::High);
     }
 
     #[test]
@@ -2103,9 +2330,9 @@ mod tests {
     }
 
     #[test]
-    fn replay_state_hash_version_tracks_canonical_v3() {
-        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 3);
-        assert_eq!(StateHashVersion::current(), StateHashVersion::V3);
-        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V3);
+    fn replay_state_hash_version_tracks_canonical_v4() {
+        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 4);
+        assert_eq!(StateHashVersion::current(), StateHashVersion::V4);
+        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V4);
     }
 }

@@ -201,6 +201,7 @@ pub enum CommandRejectionReason {
     UnknownDriver,
     RemovedDriver,
     InvalidDriverKind,
+    TrackOccupied,
 }
 
 impl CommandRejectionReason {
@@ -227,6 +228,7 @@ impl CommandRejectionReason {
             Self::UnknownDriver => 18,
             Self::RemovedDriver => 19,
             Self::InvalidDriverKind => 20,
+            Self::TrackOccupied => 21,
         }
     }
 }
@@ -294,6 +296,10 @@ fn encode_endpoint_target(target: EndpointTarget, write: &mut dyn FnMut(&[u8])) 
         EndpointTarget::GatePort(reference) => {
             encode_entity_id(reference.gate.entity_id(), write);
             encode_gate_port(reference.port, write);
+        }
+        EndpointTarget::MobilePort(reference) => {
+            encode_entity_id(reference.mobile.entity_id(), write);
+            write_u8(reference.port.canonical_tag(), write);
         }
     }
 }
@@ -507,13 +513,17 @@ mod tests {
             CommandRejectionReason::InvalidPortBinding,
             CommandRejectionReason::SubstrateBoundsViolation,
             CommandRejectionReason::SubstrateInUse,
+            CommandRejectionReason::UnknownDriver,
+            CommandRejectionReason::RemovedDriver,
+            CommandRejectionReason::InvalidDriverKind,
+            CommandRejectionReason::TrackOccupied,
         ];
 
         let tags: Vec<_> = reasons
             .into_iter()
             .map(CommandRejectionReason::canonical_tag)
             .collect();
-        assert_eq!(tags, (0_u8..=17).collect::<Vec<_>>());
+        assert_eq!(tags, (0_u8..=21).collect::<Vec<_>>());
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub enum CellLayer {
     Substrate,
     Wire,
     Junction,
+    Mobile,
     GatePort,
     Selection,
     GhostAndDebug,
@@ -91,6 +92,7 @@ struct CellStack {
     substrate: Option<CellVisual>,
     wire: Option<CellVisual>,
     junction: Option<CellVisual>,
+    mobile: Option<CellVisual>,
     gate_port: Option<CellVisual>,
     selection: Option<CellVisual>,
     ghost_and_debug: Option<CellVisual>,
@@ -103,6 +105,7 @@ impl CellStack {
             CellLayer::Substrate => &mut self.substrate,
             CellLayer::Wire => &mut self.wire,
             CellLayer::Junction => &mut self.junction,
+            CellLayer::Mobile => &mut self.mobile,
             CellLayer::GatePort => &mut self.gate_port,
             CellLayer::Selection => &mut self.selection,
             CellLayer::GhostAndDebug => &mut self.ghost_and_debug,
@@ -119,6 +122,7 @@ impl CellStack {
     fn visible(&self) -> CellVisual {
         let base = self
             .gate_port
+            .or(self.mobile)
             .or(self.junction)
             .or(self.wire)
             .or(self.substrate)

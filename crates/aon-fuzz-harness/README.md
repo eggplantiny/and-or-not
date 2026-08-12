@@ -66,6 +66,15 @@ frontier, so a real near-exhaustion whole-Tick rollback cannot be constructed by
 crate. Those exact rollback boundaries remain covered by bounded seams inside `aon-sim`; this
 harness does not claim an intent flag as external rollback coverage.
 
+The `mobility` target maps at most 16 bytes to 16 complete stateful S0-M7 micro-scenarios. Each
+scenario runs on two fresh replicas with reverse insertion for multi-command batches, comparing the
+full `StepReport`, State Hash, and immutable render snapshot after every Tick. The retained corpus
+verifies all four C14 LOW/HIGH turn rows through settled Mobile-local control routes, explicit Track
+binding and unbinding, occupied Track rejection, Mobile/Track removal, failed-placement identity
+rollback, dead-end bounce, and movement adjacent to both the largest and smallest world-pitch
+quantized `i64` coordinates. Every simulation error, encoder mismatch, unexpected typed command
+outcome, or replica disagreement fails this target.
+
 Run the deterministic generated cases and retained regression corpus with:
 
 ```sh
@@ -81,14 +90,15 @@ cargo run -p aon-fuzz-harness --locked -- geometry < input.bin
 cargo run -p aon-fuzz-harness --locked -- commands < input.bin
 cargo run -p aon-fuzz-harness --locked -- signal < input.bin
 cargo run -p aon-fuzz-harness --locked -- topology < input.bin
+cargo run -p aon-fuzz-harness --locked -- mobility < input.bin
 cargo run -p aon-fuzz-harness --locked -- all < input.bin
 ```
 
 Normal typed decoder errors and checked numeric-overflow outcomes in the geometry and legacy
-command targets are accepted. The signal and topology targets treat every simulation run error as
-a failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
+command targets are accepted. The signal, topology, and mobility targets treat every simulation
+run error as a failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
 disagreement between the two command encoders fails CI and CLI replay. Add every minimized
 reproducer under `corpus/decoder`, `corpus/replay`, `corpus/geometry`, `corpus/command`,
-`corpus/signal-runtime`, or `corpus/topology-runtime` and register it in
+`corpus/signal-runtime`, `corpus/topology-runtime`, or `corpus/mobility-runtime` and register it in
 `tests/regression_corpus.rs` so CI replays it
 permanently.

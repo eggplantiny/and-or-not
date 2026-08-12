@@ -141,7 +141,7 @@ fn wire_connectivity_and_panel_composition_are_stable_text_projections() {
     let right = TextPanel::new("Inspector", ["tick=7", "logic=HIGH"]);
     assert_eq!(
         compose_panels(&[left, right], 2),
-        "[Grid]  [Inspector ]\n @!     tick=7     \n        logic=HIGH "
+        "[Grid]  [Inspector ]\n @!      tick=7     \n         logic=HIGH "
     );
 }
 

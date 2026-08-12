@@ -3,8 +3,8 @@ use crate::profile::Rational;
 use crate::signal::{DriveVector, DriverRole, SignalWorld, SinkRole};
 use crate::structural::StructuralWorld;
 use crate::{
-    DriverId, EntityId, FIXED_ONE, Fixed, GateId, GatePort, JunctionId, SinkId, Tick, WireEnd,
-    WireId, polyline_length,
+    DriverId, EntityId, FIXED_ONE, Fixed, GateId, GatePort, JunctionId, MobileId, MobilePort,
+    SinkId, Tick, WireEnd, WireId, polyline_length,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +13,7 @@ use thiserror::Error;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum SignalNodeKey {
     GatePort(GateId, GatePort),
+    MobilePort(MobileId, MobilePort),
     Junction(JunctionId),
     FreeEnd(WireId, WireEnd),
 }
@@ -415,7 +416,7 @@ impl SignalGraph {
                 DriverRole::ExternalInputB => GatePort::InputB,
                 DriverRole::GateOutput => GatePort::Output,
             };
-            let node = SignalNodeKey::GatePort(record.owner, port);
+            let node = SignalNodeKey::GatePort(GateId(record.owner), port);
             graph.ensure_node(node);
             if graph.driver_nodes.insert(record.id, node).is_some() {
                 return Err(SignalTopologyError::InvalidCanonicalState);
@@ -425,11 +426,19 @@ impl SignalGraph {
             let Some(record) = record else {
                 continue;
             };
-            let port = match record.role {
-                SinkRole::InputA => GatePort::InputA,
-                SinkRole::InputB => GatePort::InputB,
+            let node = match record.role {
+                SinkRole::InputA => SignalNodeKey::GatePort(GateId(record.owner), GatePort::InputA),
+                SinkRole::InputB => SignalNodeKey::GatePort(GateId(record.owner), GatePort::InputB),
+                SinkRole::MobileStop => {
+                    SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Stop)
+                }
+                SinkRole::MobileLeft => {
+                    SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Left)
+                }
+                SinkRole::MobileRight => {
+                    SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Right)
+                }
             };
-            let node = SignalNodeKey::GatePort(record.owner, port);
             graph.ensure_node(node);
             if graph.sink_nodes.insert(record.id, node).is_some() {
                 return Err(SignalTopologyError::InvalidCanonicalState);
@@ -590,6 +599,9 @@ fn signal_node_for_endpoint(
             SignalNodeKey::GatePort(reference.gate, reference.port)
         }
         crate::EndpointTarget::GatePort(_) => SignalNodeKey::FreeEnd(wire, end),
+        crate::EndpointTarget::MobilePort(reference) => {
+            SignalNodeKey::MobilePort(reference.mobile, reference.port)
+        }
     }
 }
 

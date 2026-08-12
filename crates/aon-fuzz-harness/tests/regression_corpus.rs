@@ -1,6 +1,7 @@
 use aon_fuzz_harness::{
-    SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation, exercise_commands,
-    exercise_decoder, exercise_geometry, exercise_replay_decoder, exercise_signal_runtime,
+    MobilityRuntimeExecutionObservation, SignalRuntimeExecutionObservation,
+    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder, exercise_geometry,
+    exercise_mobility_runtime, exercise_replay_decoder, exercise_signal_runtime,
     exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -98,6 +99,11 @@ const TOPOLOGY_RUNTIME_COVERAGE: &[u8] =
     include_bytes!("../corpus/topology-runtime/s0-m4-coverage.case");
 
 const TOPOLOGY_RUNTIME_CORPUS: &[(&str, &[u8])] = &[("s0-m4-coverage", TOPOLOGY_RUNTIME_COVERAGE)];
+
+const MOBILITY_RUNTIME_COVERAGE: &[u8] =
+    include_bytes!("../corpus/mobility-runtime/s0-m7-coverage.case");
+
+const MOBILITY_RUNTIME_CORPUS: &[(&str, &[u8])] = &[("s0-m7-coverage", MOBILITY_RUNTIME_COVERAGE)];
 
 #[test]
 fn decoder_regression_corpus_never_panics() {
@@ -358,4 +364,67 @@ fn retained_topology_case_reaches_verified_s0_m4_paths() {
     assert!(coverage.removed_slot_outcomes > 0);
     assert!(coverage.checked_max_sample_outcomes > 0);
     assert!(coverage.slot_revision_observations > 0);
+}
+
+#[test]
+fn mobility_runtime_regression_corpus_replays_without_panics_or_silent_run_errors() {
+    for &(name, bytes) in MOBILITY_RUNTIME_CORPUS {
+        let result = catch_unwind(AssertUnwindSafe(|| exercise_mobility_runtime(bytes)));
+        let Ok(observation) = result else {
+            panic!("mobility-runtime regression case `{name}` panicked");
+        };
+        assert_eq!(
+            observation.invariant_failure(),
+            None,
+            "mobility-runtime regression case `{name}` violated a harness invariant"
+        );
+        assert_eq!(
+            observation.execution,
+            MobilityRuntimeExecutionObservation::Completed,
+            "mobility-runtime regression case `{name}` did not complete"
+        );
+        assert_eq!(
+            observation.state_hashes.len(),
+            observation.generated_steps,
+            "mobility-runtime regression case `{name}` skipped a per-Tick hash"
+        );
+        assert!(
+            observation.encodings.iter().all(|encoding| {
+                encoding.allocated_result.is_ok()
+                    && encoding.streamed_result.is_ok()
+                    && encoding.bytes_match
+            }),
+            "mobility-runtime regression case `{name}` failed command encoding"
+        );
+    }
+}
+
+#[test]
+fn retained_mobility_case_reaches_verified_s0_m7_paths() {
+    let observation = exercise_mobility_runtime(MOBILITY_RUNTIME_COVERAGE);
+    assert_eq!(
+        observation.execution,
+        MobilityRuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.generated_scenarios, 8);
+    assert_eq!(observation.state_hashes.len(), observation.generated_steps);
+
+    let coverage = observation.coverage;
+    assert_eq!(coverage.completed_scenarios, 8);
+    assert!(coverage.permuted_command_batches > 0);
+    assert_eq!(coverage.mobile_placements, 8);
+    assert_eq!(coverage.placement_rejections, 1);
+    assert_eq!(coverage.mobile_port_bindings, 4);
+    assert_eq!(coverage.explicit_track_bindings, 2);
+    assert_eq!(coverage.occupied_track_rejections, 2);
+    assert_eq!(coverage.mobile_removals, 1);
+    assert_eq!(coverage.track_removals, 2);
+    assert_eq!(coverage.straight_turns, 1);
+    assert_eq!(coverage.left_turns, 1);
+    assert_eq!(coverage.right_turns, 1);
+    assert_eq!(coverage.reverse_turns, 1);
+    assert!(coverage.movement_observations > 0);
+    assert_eq!(coverage.checked_maximum_coordinate_paths, 1);
+    assert_eq!(coverage.checked_minimum_coordinate_paths, 1);
 }

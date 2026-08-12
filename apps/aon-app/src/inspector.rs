@@ -2,8 +2,8 @@ use crate::cell_buffer::TextPanel;
 use aon_sim::{
     CommandAcceptance, CommandRejection, DriveVector, DriverSample, EndpointTarget, EntityId,
     FixedAabb, FixedSubstrateRenderRecord, FixedVec2, GatePort, GatePortRef, GateRenderRecord,
-    LogicLevel, RenderSnapshot, RoutingDomain, SignalArrivalKind, StepReport, Tick, WireEnd,
-    WireRenderRecord,
+    LogicLevel, MobilePortRef, MobileRenderRecord, RenderSnapshot, RoutingDomain,
+    SignalArrivalKind, StepReport, Tick, WireEnd, WireRenderRecord,
 };
 
 /// A presentation-stable selection namespace.
@@ -14,6 +14,7 @@ use aon_sim::{
 pub enum InspectorTarget {
     Entity(EntityId),
     GatePort(GatePortRef),
+    MobilePort(MobilePortRef),
     WireEnd { wire: aon_sim::WireId, end: WireEnd },
 }
 
@@ -22,6 +23,7 @@ impl InspectorTarget {
         match self {
             Self::Entity(entity) => entity,
             Self::GatePort(port) => port.gate.entity_id(),
+            Self::MobilePort(port) => port.mobile.entity_id(),
             Self::WireEnd { wire, .. } => wire.entity_id(),
         }
     }
@@ -174,6 +176,13 @@ fn append_selection(lines: &mut Vec<String>, input: InspectorInput<'_>) {
         .find(|record| record.id == entity)
     {
         append_fixed_substrate(lines, substrate);
+    } else if let Some(mobile) = input
+        .snapshot
+        .mobiles()
+        .iter()
+        .find(|record| record.id.entity_id() == entity)
+    {
+        append_mobile(lines, mobile);
     } else {
         lines.push("selection.live=false".to_owned());
     }
@@ -252,6 +261,24 @@ fn append_gate(lines: &mut Vec<String>, gate: &GateRenderRecord) {
     lines.push(format!(
         "gate.cancelled_heat={}",
         gate.cancelled_switching_heat.0
+    ));
+}
+
+fn append_mobile(lines: &mut Vec<String>, mobile: &MobileRenderRecord) {
+    lines.push(format!("mobile.id={}", mobile.id.entity_id().0));
+    lines.push(format!("mobile.track_position={:?}", mobile.track_position));
+    lines.push(format!(
+        "mobile.world_position={}",
+        fixed_vec2_text(mobile.world_position)
+    ));
+    lines.push(format!("mobile.stop={}", logic_name(mobile.stop)));
+    lines.push(format!("mobile.left={}", logic_name(mobile.left)));
+    lines.push(format!("mobile.right={}", logic_name(mobile.right)));
+    lines.push(format!(
+        "mobile.sinks={}/{}/{}",
+        mobile.ports.stop.entity_id().0,
+        mobile.ports.left.entity_id().0,
+        mobile.ports.right.entity_id().0
     ));
 }
 
@@ -460,6 +487,9 @@ fn target_text(target: InspectorTarget) -> String {
             port.gate.entity_id().0,
             gate_port_name(port.port)
         ),
+        InspectorTarget::MobilePort(port) => {
+            format!("mobile-port:{}:{:?}", port.mobile.entity_id().0, port.port)
+        }
         InspectorTarget::WireEnd { wire, end } => {
             format!("wire-end:{}:{}", wire.entity_id().0, wire_end_name(end))
         }
@@ -525,6 +555,9 @@ fn endpoint_text(endpoint: EndpointTarget) -> String {
             port.gate.entity_id().0,
             gate_port_name(port.port)
         ),
+        EndpointTarget::MobilePort(port) => {
+            format!("mobile-port:{}:{:?}", port.mobile.entity_id().0, port.port)
+        }
     }
 }
 

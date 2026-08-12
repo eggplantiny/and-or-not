@@ -54,9 +54,24 @@ fn signal_feature_is_decoded_and_supported_at_simulation_start() {
 }
 
 #[test]
+fn mobility_feature_is_decoded_and_supported_at_simulation_start() {
+    let scenario = scenario_requiring("mobility");
+    let manifest = decode_scenario_manifest(&scenario).expect("mobility scenario decodes");
+    assert_eq!(
+        manifest.required_features(),
+        StageFeatureSet {
+            mobility: true,
+            ..StageFeatureSet::none()
+        }
+    );
+
+    Simulation::new(decode_test_package(&scenario))
+        .expect("S0-M7 implements the mobility feature boundary");
+}
+
+#[test]
 fn later_stage_features_remain_unsupported() {
     for feature in [
-        "mobility",
         "capacity",
         "sensing",
         "power",
@@ -73,17 +88,18 @@ fn later_stage_features_remain_unsupported() {
 }
 
 #[test]
-fn signal_does_not_mask_an_unsupported_feature() {
+fn stage_zero_features_do_not_mask_an_unsupported_feature() {
     let mut scenario: serde_json::Value =
         serde_json::from_slice(SCENARIO).expect("reference scenario JSON is valid");
     scenario["requiredFeatures"]["signal"] = true.into();
     scenario["requiredFeatures"]["mobility"] = true.into();
+    scenario["requiredFeatures"]["capacity"] = true.into();
     let scenario = serde_json::to_vec(&scenario).expect("test scenario serializes");
 
     assert_eq!(
         Simulation::new(decode_test_package(&scenario)).err(),
         Some(SimulationError::UnsupportedStageFeature {
-            feature: "mobility"
+            feature: "capacity"
         })
     );
 }

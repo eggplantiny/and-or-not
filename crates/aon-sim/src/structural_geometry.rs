@@ -40,6 +40,85 @@ pub(crate) fn point_is_strict_segment_interior(
         && coordinate_between(point.y.0, start.y.0, end.y.0))
 }
 
+pub(crate) fn point_lies_on_segment(
+    point: FixedVec2,
+    start: FixedVec2,
+    end: FixedVec2,
+) -> Result<bool, NumericError> {
+    Ok(cross(start, end, point)?.is_zero() && point_is_on_segment(point, start, end))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExactTurnSide {
+    Left,
+    Straight,
+    Reverse,
+    Right,
+}
+
+pub(crate) fn exact_turn_side(
+    incoming: (i128, i128),
+    outgoing: (i128, i128),
+) -> Result<ExactTurnSide, NumericError> {
+    if incoming == (0, 0) || outgoing == (0, 0) {
+        return Err(NumericError::Overflow);
+    }
+    let cross = cross_delta(incoming, outgoing)?;
+    Ok(if cross.is_positive() {
+        ExactTurnSide::Left
+    } else if cross.is_negative() {
+        ExactTurnSide::Right
+    } else if dot_delta(incoming, outgoing)?.is_positive() {
+        ExactTurnSide::Straight
+    } else {
+        ExactTurnSide::Reverse
+    })
+}
+
+/// Compares the unsigned turn angles from `incoming` to two nonzero outgoing vectors.
+///
+/// The result is `angle(left).cmp(angle(right))` over the closed interval `[0, pi]`.
+/// Products use the same full-width limb arithmetic as structural spacing checks.
+pub(crate) fn compare_exact_turn_magnitude(
+    incoming: (i128, i128),
+    left: (i128, i128),
+    right: (i128, i128),
+) -> Result<Ordering, NumericError> {
+    if incoming == (0, 0) || left == (0, 0) || right == (0, 0) {
+        return Err(NumericError::Overflow);
+    }
+    let left_cross = cross_delta(incoming, left)?;
+    let right_cross = cross_delta(incoming, right)?;
+    let left_dot = dot_delta(incoming, left)?;
+    let right_dot = dot_delta(incoming, right)?;
+
+    let region = |dot: SignedWide| {
+        if dot.is_positive() {
+            0_u8
+        } else if dot.is_zero() {
+            1
+        } else {
+            2
+        }
+    };
+    match region(left_dot).cmp(&region(right_dot)) {
+        Ordering::Equal => {}
+        ordering => return Ok(ordering),
+    }
+    if left_dot.is_zero() {
+        return Ok(Ordering::Equal);
+    }
+
+    let left_ratio = U512::multiply(left_cross.magnitude, right_dot.magnitude);
+    let right_ratio = U512::multiply(right_cross.magnitude, left_dot.magnitude);
+    let tangent_order = left_ratio.cmp(&right_ratio);
+    if left_dot.is_positive() {
+        Ok(tangent_order)
+    } else {
+        Ok(tangent_order.reverse())
+    }
+}
+
 pub(crate) fn parallel_segments_are_too_close(
     first_a: FixedVec2,
     first_b: FixedVec2,

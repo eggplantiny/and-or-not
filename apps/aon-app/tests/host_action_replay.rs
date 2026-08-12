@@ -84,28 +84,27 @@ fn recorded_replay(final_next_tick: u64) -> (Replay, Vec<StateHash>) {
 }
 
 #[test]
-fn supported_editor_commands_execute_as_current_tick_envelopes_and_mobile_consumes_no_ordinal() {
+fn supported_editor_commands_include_mobile_and_execute_as_current_tick_envelopes() {
     let package = embedded_empty_package().expect("embedded package is valid");
     let mut laboratory = LaboratorySession::new(package).expect("Laboratory starts");
     let initial_hash = laboratory.state_hash();
 
     queue_and_expect_acceptance(&mut laboratory, substrate_command(), 0);
-    assert!(matches!(
-        laboratory.queue_command(mobile_command()),
-        Err(LaboratoryError::EditScope(_))
-    ));
-    assert_eq!(laboratory.pending_commands().next_ordinal(), 1);
-    assert_eq!(laboratory.edit_log().len(), 1);
+    assert_eq!(laboratory.queue_command(mobile_command()), Ok(1));
+    let off_track = laboratory.step_once().expect("off-track edit is typed");
+    assert_eq!(off_track.command_rejections.len(), 1);
+    assert_eq!(laboratory.pending_commands().next_ordinal(), 2);
+    assert_eq!(laboratory.edit_log().len(), 2);
 
     let domain = RoutingDomain::FixedSubstrate(EntityId(1));
-    queue_and_expect_acceptance(&mut laboratory, gate_command(domain), 1);
+    queue_and_expect_acceptance(&mut laboratory, gate_command(domain), 2);
     queue_and_expect_acceptance(
         &mut laboratory,
         Command::PlaceJunction(PlaceJunctionCommand {
             routing_domain: domain,
             position: point(4 * PITCH, 0),
         }),
-        2,
+        3,
     );
     queue_and_expect_acceptance(
         &mut laboratory,
@@ -115,7 +114,7 @@ fn supported_editor_commands_execute_as_current_tick_envelopes_and_mobile_consum
             endpoint_a: EndpointTarget::Free,
             endpoint_b: EndpointTarget::Free,
         }),
-        3,
+        4,
     );
     queue_and_expect_acceptance(
         &mut laboratory,
@@ -124,7 +123,7 @@ fn supported_editor_commands_execute_as_current_tick_envelopes_and_mobile_consum
             end: WireEnd::A,
             target: EndpointTarget::Junction(JunctionId(EntityId(3))),
         }),
-        4,
+        5,
     );
     queue_and_expect_acceptance(
         &mut laboratory,
@@ -133,7 +132,7 @@ fn supported_editor_commands_execute_as_current_tick_envelopes_and_mobile_consum
             end: WireEnd::A,
             target: EndpointTarget::Free,
         }),
-        5,
+        6,
     );
     let external_driver = laboratory.latest_snapshot().gates()[0]
         .input_a_external_sample
@@ -145,20 +144,20 @@ fn supported_editor_commands_execute_as_current_tick_envelopes_and_mobile_consum
             level: LogicLevel::High,
             strength: DriveStrength(1),
         }),
-        6,
+        7,
     );
     queue_and_expect_acceptance(
         &mut laboratory,
         Command::RemoveEntity(RemoveEntityCommand {
             target: EntityId(4),
         }),
-        7,
+        8,
     );
 
     assert_ne!(laboratory.state_hash(), initial_hash);
     assert!(laboratory.pending_commands().is_empty());
-    assert_eq!(laboratory.pending_commands().next_ordinal(), 8);
-    assert_eq!(laboratory.edit_log().len(), 8);
+    assert_eq!(laboratory.pending_commands().next_ordinal(), 9);
+    assert_eq!(laboratory.edit_log().len(), 9);
 }
 
 fn queue_and_expect_acceptance(
@@ -196,13 +195,13 @@ fn fifo_actions_make_reset_a_real_session_boundary_and_keep_rejections_in_order(
     assert!(results[0].is_ok());
     assert!(results[1].is_ok());
     assert!(results[2].is_ok());
-    assert!(matches!(results[3], Err(LaboratoryError::EditScope(_))));
+    assert!(results[3].is_ok());
     assert!(actions.is_empty());
     assert_eq!(laboratory.session_id().0, 1);
-    assert_eq!(laboratory.pending_commands().next_ordinal(), 1);
-    assert_eq!(laboratory.pending_commands().commands().len(), 1);
+    assert_eq!(laboratory.pending_commands().next_ordinal(), 2);
+    assert_eq!(laboratory.pending_commands().commands().len(), 2);
     assert_eq!(laboratory.pending_commands().commands()[0].ordinal, 0);
-    assert_eq!(laboratory.edit_log().len(), 1);
+    assert_eq!(laboratory.edit_log().len(), 2);
     assert_eq!(laboratory.state_hash(), initial_hash);
 }
 

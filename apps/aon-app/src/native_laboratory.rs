@@ -1,9 +1,17 @@
 use crate::host_action::{HostAction, HostActionQueue};
 use crate::laboratory::LaboratorySession;
+use crate::native_editor::{NativeEditorControl, NativeEditorState};
 use crate::pacing::{HostRate, HostRunMode};
-use crate::presenter::ViewMode;
+use crate::presenter::Viewport;
+use aon_sim::{GateType, LogicLevel, PhysicalScaleProfile};
 use bevy::input::{ButtonState, keyboard::KeyboardInput};
 use bevy::prelude::*;
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, SystemSet)]
+pub(crate) enum NativePreUpdateSet {
+    CollectInput,
+    ProductSwitch,
+}
 
 /// Native-only wrapper around the sole mutable Core owner.
 ///
@@ -23,6 +31,10 @@ impl NativeLaboratory {
     pub const fn session(&self) -> &LaboratorySession {
         &self.session
     }
+
+    pub(crate) fn replace_session(&mut self, session: LaboratorySession) {
+        self.session = session;
+    }
 }
 
 #[derive(Resource, Default)]
@@ -37,6 +49,10 @@ impl NativeHostActionQueue {
 
     pub const fn queued(&self) -> &HostActionQueue {
         &self.queue
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.queue.clear();
     }
 }
 
@@ -61,11 +77,29 @@ impl NativeLaboratoryStatus {
     }
 }
 
-pub fn install_native_laboratory(app: &mut App, session: LaboratorySession) {
+pub fn install_native_laboratory(
+    app: &mut App,
+    session: LaboratorySession,
+    physical: PhysicalScaleProfile,
+    viewport: Viewport,
+) {
     app.insert_resource(NativeLaboratory::new(session));
+    app.insert_resource(NativeEditorState::new(physical, viewport));
     app.init_resource::<NativeHostActionQueue>();
     app.init_resource::<NativeLaboratoryStatus>();
-    app.add_systems(PreUpdate, collect_native_keyboard_actions);
+    app.add_message::<KeyboardInput>();
+    app.configure_sets(
+        PreUpdate,
+        (
+            NativePreUpdateSet::CollectInput,
+            NativePreUpdateSet::ProductSwitch,
+        )
+            .chain(),
+    );
+    app.add_systems(
+        PreUpdate,
+        collect_native_keyboard_actions.in_set(NativePreUpdateSet::CollectInput),
+    );
     app.add_systems(FixedUpdate, advance_native_laboratory);
 }
 
@@ -73,6 +107,7 @@ fn collect_native_keyboard_actions(
     laboratory: Res<NativeLaboratory>,
     mut inputs: MessageReader<KeyboardInput>,
     mut actions: ResMut<NativeHostActionQueue>,
+    mut editor: ResMut<NativeEditorState>,
 ) {
     let mut predicted_mode = laboratory.session.pacer().mode();
     for input in inputs.read() {
@@ -94,13 +129,53 @@ fn collect_native_keyboard_actions(
             KeyCode::Digit1 => HostAction::SetRate(HostRate::Quarter),
             KeyCode::Digit2 => HostAction::SetRate(HostRate::One),
             KeyCode::Digit3 => HostAction::SetRate(HostRate::Four),
-            KeyCode::KeyR => HostAction::Reset,
-            KeyCode::KeyN => HostAction::SetView(ViewMode::Network),
-            KeyCode::Escape => HostAction::ClearSelection,
-            _ => continue,
+            KeyCode::KeyR => {
+                editor.clear_transient();
+                HostAction::Reset
+            }
+            _ => {
+                let Some(control) = native_editor_control(input.key_code) else {
+                    continue;
+                };
+                if let Ok(generated) = editor.apply_control(laboratory.session(), control) {
+                    for action in generated {
+                        actions.push(action);
+                    }
+                }
+                continue;
+            }
         };
         actions.push(action);
     }
+}
+
+const fn native_editor_control(key_code: KeyCode) -> Option<NativeEditorControl> {
+    Some(match key_code {
+        KeyCode::ArrowLeft | KeyCode::Numpad4 => NativeEditorControl::Move { dx: -1, dy: 0 },
+        KeyCode::ArrowRight | KeyCode::Numpad6 => NativeEditorControl::Move { dx: 1, dy: 0 },
+        KeyCode::ArrowDown | KeyCode::Numpad2 => NativeEditorControl::Move { dx: 0, dy: -1 },
+        KeyCode::ArrowUp | KeyCode::Numpad8 => NativeEditorControl::Move { dx: 0, dy: 1 },
+        KeyCode::Enter => NativeEditorControl::Pick,
+        KeyCode::Escape => NativeEditorControl::Cancel,
+        KeyCode::KeyN => NativeEditorControl::NetworkView,
+        KeyCode::KeyC => NativeEditorControl::CircuitView,
+        KeyCode::KeyA => NativeEditorControl::PlaceGate(GateType::And),
+        KeyCode::KeyO => NativeEditorControl::PlaceGate(GateType::Or),
+        KeyCode::KeyI => NativeEditorControl::PlaceGate(GateType::Not),
+        KeyCode::KeyJ => NativeEditorControl::PlaceJunction,
+        KeyCode::KeyF => NativeEditorControl::PlaceFixedSubstrate,
+        KeyCode::KeyM => NativeEditorControl::PlaceMobileSubstrate,
+        KeyCode::KeyW => NativeEditorControl::WireAnchor,
+        KeyCode::Delete | KeyCode::Backspace => NativeEditorControl::DeleteSelection,
+        KeyCode::KeyB => NativeEditorControl::BindSelection,
+        KeyCode::KeyU => NativeEditorControl::UnbindSelection,
+        KeyCode::KeyZ => NativeEditorControl::DriveSelection(LogicLevel::Low),
+        KeyCode::KeyH => NativeEditorControl::DriveSelection(LogicLevel::High),
+        KeyCode::KeyX => NativeEditorControl::DriveSelection(LogicLevel::X),
+        KeyCode::KeyP => NativeEditorControl::AddProbe,
+        KeyCode::KeyK => NativeEditorControl::RemoveProbe,
+        _ => return None,
+    })
 }
 
 fn advance_native_laboratory(
@@ -134,12 +209,14 @@ fn advance_native_laboratory(
 mod tests {
     use super::*;
     use crate::embedded_empty_package;
+    use bevy::input::keyboard::{Key, NativeKey};
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
 
     fn test_app() -> App {
         let package = embedded_empty_package().expect("embedded package is valid");
         let simulation_hz = package.profiles().balance().simulation_hz;
+        let physical = package.profiles().physical_scale.clone();
         let session = LaboratorySession::new(package).expect("native Laboratory starts");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -147,8 +224,78 @@ mod tests {
         app.world_mut()
             .resource_mut::<Time<Virtual>>()
             .set_max_delta(Duration::MAX);
-        install_native_laboratory(&mut app, session);
+        install_native_laboratory(
+            &mut app,
+            session,
+            physical,
+            Viewport::new(crate::cell_buffer::CellPoint::new(-30, -12), 61, 25),
+        );
         app
+    }
+
+    fn press_key(app: &mut App, key_code: KeyCode) {
+        let window = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(NativeKey::Unidentified),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.world_mut().run_schedule(PreUpdate);
+    }
+
+    #[test]
+    fn keyboard_edit_is_host_only_until_single_step_executes_the_command() {
+        let mut app = test_app();
+        let initial_hash = app
+            .world()
+            .resource::<NativeLaboratory>()
+            .session()
+            .state_hash();
+
+        press_key(&mut app, KeyCode::KeyF);
+        assert_eq!(
+            app.world()
+                .resource::<NativeHostActionQueue>()
+                .queued()
+                .len(),
+            1
+        );
+        assert_eq!(
+            app.world()
+                .resource::<NativeLaboratory>()
+                .session()
+                .state_hash(),
+            initial_hash
+        );
+
+        app.world_mut().run_schedule(FixedUpdate);
+        let laboratory = app.world().resource::<NativeLaboratory>();
+        assert_eq!(laboratory.session().edit_log().len(), 1);
+        assert!(
+            laboratory
+                .session()
+                .latest_snapshot()
+                .fixed_substrates()
+                .is_empty()
+        );
+        assert_eq!(laboratory.session().state_hash(), initial_hash);
+
+        press_key(&mut app, KeyCode::Period);
+        app.world_mut().run_schedule(FixedUpdate);
+        let laboratory = app.world().resource::<NativeLaboratory>();
+        assert_eq!(laboratory.session().next_tick().0, 1);
+        assert_eq!(
+            laboratory
+                .session()
+                .latest_snapshot()
+                .fixed_substrates()
+                .len(),
+            1
+        );
+        assert_ne!(laboratory.session().state_hash(), initial_hash);
     }
 
     #[test]
@@ -172,6 +319,10 @@ mod tests {
             initial_hash
         );
 
+        let fixed_step = app.world().resource::<Time<Fixed>>().timestep();
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .advance_by(fixed_step);
         app.world_mut().run_schedule(FixedUpdate);
         let laboratory = app.world().resource::<NativeLaboratory>();
         assert_eq!(laboratory.session().next_tick().0, 1);
@@ -256,5 +407,33 @@ mod tests {
                 .mode(),
             HostRunMode::Paused
         );
+    }
+}
+#[test]
+fn arrow_and_numpad_navigation_share_the_same_editor_controls() {
+    for (arrow, numpad, expected) in [
+        (
+            KeyCode::ArrowLeft,
+            KeyCode::Numpad4,
+            NativeEditorControl::Move { dx: -1, dy: 0 },
+        ),
+        (
+            KeyCode::ArrowRight,
+            KeyCode::Numpad6,
+            NativeEditorControl::Move { dx: 1, dy: 0 },
+        ),
+        (
+            KeyCode::ArrowDown,
+            KeyCode::Numpad2,
+            NativeEditorControl::Move { dx: 0, dy: -1 },
+        ),
+        (
+            KeyCode::ArrowUp,
+            KeyCode::Numpad8,
+            NativeEditorControl::Move { dx: 0, dy: 1 },
+        ),
+    ] {
+        assert_eq!(native_editor_control(arrow), Some(expected));
+        assert_eq!(native_editor_control(numpad), Some(expected));
     }
 }

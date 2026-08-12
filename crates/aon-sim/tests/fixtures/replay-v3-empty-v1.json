@@ -1,0 +1,23 @@
+{
+  "scenarioPath": "../../../../fixtures/scenarios/empty.json",
+  "header": {
+    "formatVersion": 1,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
+    "stateHashVersion": "aon-state-v3",
+    "worldGeneratorVersion": "aon-empty-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "97fd4ea8c2425592b115a2937d9dcfdf1686ece39a255de1c596067be522f276"
+    }
+  ]
+}

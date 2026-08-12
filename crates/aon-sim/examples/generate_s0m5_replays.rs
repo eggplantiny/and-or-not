@@ -5,6 +5,7 @@ use aon_sim::{
     Replay, ReplayArtifact, RoutingDomain, SetExternalDriverCommand, Simulation, Tick,
     decode_package, encode_replay_artifact,
 };
+use std::path::Path;
 
 const P: i64 = aon_sim::REFERENCE_CIRCUIT_ROUTING_PITCH.0;
 const FINAL_LONG_TICK: u64 = 100_000;
@@ -236,20 +237,28 @@ fn artifact(
     .expect("Scenario locator is valid")
 }
 
-fn print_artifact(label: &str, artifact: &ReplayArtifact) {
-    println!("=== {label} ===");
-    println!(
-        "{}",
-        String::from_utf8(encode_replay_artifact(artifact).expect("Replay encodes"))
-            .expect("Replay is UTF-8")
-    );
+fn emit_artifact(label: &str, path: &Path, artifact: &ReplayArtifact, write: bool) {
+    let bytes = encode_replay_artifact(artifact).expect("Replay encodes");
+    if write {
+        std::fs::write(path, bytes).expect("Replay fixture writes");
+        println!("wrote {}", path.display());
+    } else {
+        println!("=== {label} ===");
+        println!("{}", String::from_utf8(bytes).expect("Replay is UTF-8"));
+    }
 }
 
 fn main() {
+    let write = std::env::args().any(|argument| argument == "--write");
     let ring_commands = ring_commands();
     let (_, ring_trace) = run(&ring_commands, 21);
     let ring = artifact(ring_commands, &ring_trace, 0..=21);
-    print_artifact("RING", &ring);
+    emit_artifact(
+        "RING",
+        Path::new("fixtures/replays/feedback-ring-v1.json"),
+        &ring,
+        write,
+    );
 
     let latch_commands = latch_commands();
     let (latch_simulation, latch_trace) = run(&latch_commands, FINAL_LONG_TICK);
@@ -268,5 +277,10 @@ fn main() {
         &latch_trace,
         [0, 15, 20, 33, 46, FINAL_LONG_TICK],
     );
-    print_artifact("LATCH", &latch);
+    emit_artifact(
+        "LATCH",
+        Path::new("fixtures/replays/stage0-100k-v1.json"),
+        &latch,
+        write,
+    );
 }

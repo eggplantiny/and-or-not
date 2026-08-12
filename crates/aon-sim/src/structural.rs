@@ -1,16 +1,21 @@
 use crate::command::{
     BindPortCommand, Command, CommandAcceptance, CommandEnvelope, CommandRejection,
     CommandRejectionReason, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
-    PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand,
 };
 #[cfg(test)]
 use crate::identity::FixedSubstrateIndex;
 use crate::identity::{
     EntityLocation, EntityRegistry, EntityRegistryError, GateId, GateIndex, JunctionId,
-    JunctionIndex, WireId, WireIndex,
+    JunctionIndex, MobileId, MobileSubstrateIndex, WireId, WireIndex,
+};
+use crate::mobility::{
+    MobileSubstrateRecord, MobileSubstrateStore, TrackGraph, TrackGraphError, TrackPosition,
 };
 use crate::path_certificate::PathElementStamp;
-use crate::profile::{GateFootprint, PhysicalScaleProfile, PortAnchor};
+use crate::profile::{
+    GateFootprint, MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, PhysicalScaleProfile, PortAnchor,
+};
 use crate::signal::{ExternalDriverStatus, SignalError, SignalWorld};
 use crate::structural_geometry::{
     parallel_segments_are_too_close, point_is_strict_segment_interior,
@@ -78,6 +83,15 @@ impl From<SignalError> for StructuralError {
     }
 }
 
+impl From<TrackGraphError> for StructuralError {
+    fn from(error: TrackGraphError) -> Self {
+        match error {
+            TrackGraphError::NumericOverflow => Self::NumericOverflow,
+            TrackGraphError::InvalidCanonicalState => Self::InvalidCanonicalState,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExternalDriverUpdate {
     pub driver: DriverId,
@@ -101,6 +115,7 @@ pub(crate) struct StructuralWorld {
     wires: WireStore,
     junctions: JunctionStore,
     fixed_substrates: FixedSubstrateStore,
+    mobile_substrates: MobileSubstrateStore,
 }
 
 #[derive(Default)]
@@ -280,7 +295,9 @@ impl StructuralWorld {
                 self.place_junction(*command, frontier, physical, changes)
             }
             Command::PlaceFixedSubstrate(command) => self.place_fixed_substrate(*command, physical),
-            Command::PlaceMobileSubstrate(_) => Ok(Err(Rejection::UnsupportedPlacement)),
+            Command::PlaceMobileSubstrate(command) => {
+                self.place_mobile_substrate(*command, physical, changes)
+            }
             Command::RemoveEntity(command) => self.remove_entity(*command, frontier, changes),
             Command::BindPort(command) => self.bind_port(*command, frontier, physical, changes),
             Command::SetExternalDriver(_) => Ok(Err(Rejection::UnsupportedCommand)),
@@ -307,6 +324,21 @@ impl StructuralWorld {
         &self.fixed_substrates
     }
 
+    pub const fn mobile_substrates(&self) -> &MobileSubstrateStore {
+        &self.mobile_substrates
+    }
+
+    pub(crate) fn commit_mobile_positions(
+        &mut self,
+        positions: &[(MobileSubstrateIndex, MobileId, TrackPosition)],
+    ) -> Result<(), StructuralError> {
+        for &(index, id, position) in positions {
+            self.mobile_substrates
+                .set_track_position(index, id, position)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn path_element_is_current(&self, stamp: PathElementStamp) -> bool {
         let entity = stamp.entity_id();
         match (stamp, self.entities.location(entity).copied()) {
@@ -330,6 +362,7 @@ impl StructuralWorld {
             + self.wires.live_count()
             + self.junctions.live_count()
             + self.fixed_substrates.live_count()
+            + self.mobile_substrates.live_count()
     }
 
     #[cfg(test)]
@@ -339,6 +372,7 @@ impl StructuralWorld {
         self.wires.reserve_capacity_for_test(additional);
         self.junctions.reserve_capacity_for_test(additional);
         self.fixed_substrates.reserve_capacity_for_test(additional);
+        self.mobile_substrates.reserve_capacity_for_test(additional);
     }
 
     #[cfg(test)]
@@ -485,6 +519,41 @@ impl StructuralWorld {
             .update_location(second_id, EntityLocation::FixedSubstrate(first))?;
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn swap_mobile_substrate_slots_for_test(
+        &mut self,
+        first: MobileSubstrateIndex,
+        second: MobileSubstrateIndex,
+    ) -> Result<(), StructuralError> {
+        let first_id = self
+            .mobile_substrates
+            .get(first)
+            .ok_or(StructuralError::InvalidCanonicalState)?
+            .id;
+        let second_id = self
+            .mobile_substrates
+            .get(second)
+            .ok_or(StructuralError::InvalidCanonicalState)?
+            .id;
+        if self.entities.location(first_id.entity_id())
+            != Some(&EntityLocation::MobileSubstrate(first))
+            || self.entities.location(second_id.entity_id())
+                != Some(&EntityLocation::MobileSubstrate(second))
+        {
+            return Err(StructuralError::InvalidCanonicalState);
+        }
+        self.mobile_substrates.swap_slots_for_test(first, second)?;
+        self.entities.update_location(
+            first_id.entity_id(),
+            EntityLocation::MobileSubstrate(second),
+        )?;
+        self.entities.update_location(
+            second_id.entity_id(),
+            EntityLocation::MobileSubstrate(first),
+        )?;
+        Ok(())
+    }
 }
 
 fn apply_external_driver_command(
@@ -531,14 +600,20 @@ fn apply_signal_lifecycle(
             let id = created_entity.ok_or(StructuralError::InvalidCanonicalState)?;
             signal.activate_wire(WireId(id))?;
         }
+        Command::PlaceMobileSubstrate(_) => {
+            let id = created_entity.ok_or(StructuralError::InvalidCanonicalState)?;
+            signal.activate_mobile(MobileId(id))?;
+        }
         Command::RemoveEntity(command) => match removed_location {
             Some(EntityLocation::Gate(_)) => signal.remove_gate(GateId(command.target))?,
             Some(EntityLocation::Wire(_)) => signal.remove_wire(WireId(command.target))?,
+            Some(EntityLocation::MobileSubstrate(_)) => {
+                signal.remove_mobile(MobileId(command.target))?;
+            }
             _ => {}
         },
         Command::PlaceJunction(_)
         | Command::PlaceFixedSubstrate(_)
-        | Command::PlaceMobileSubstrate(_)
         | Command::BindPort(_)
         | Command::SetExternalDriver(_) => {}
     }
@@ -546,6 +621,54 @@ fn apply_signal_lifecycle(
 }
 
 impl StructuralWorld {
+    fn place_mobile_substrate(
+        &mut self,
+        command: PlaceMobileSubstrateCommand,
+        physical: &PhysicalScaleProfile,
+        changes: &mut PhaseChanges,
+    ) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
+        if !command.routing_area.is_nonempty() || !command.footprint.is_nonempty() {
+            return Ok(Err(Rejection::InvalidGeometryShape));
+        }
+        if !point_is_quantized(command.origin, physical.wire_geometry_quantum)
+            || !aabb_is_quantized(command.routing_area, physical.wire_geometry_quantum)
+            || !aabb_is_quantized(command.footprint, physical.wire_geometry_quantum)
+        {
+            return Ok(Err(Rejection::InvalidGeometryQuantum));
+        }
+        if !aabb_is_quantized(command.routing_area, physical.circuit_routing_pitch) {
+            return Ok(Err(Rejection::InvalidRoutingPitch));
+        }
+        if !command.footprint.contains_aabb(command.routing_area) {
+            return Ok(Err(Rejection::SubstrateBoundsViolation));
+        }
+        if physical.world_routing_pitch.0 / physical.wire_geometry_quantum.0
+            > MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA
+        {
+            return Ok(Err(Rejection::UnsupportedPlacement));
+        }
+
+        let track = TrackGraph::compile(&self.wires, &self.junctions)?;
+        let Some(track_position) = track.locate(command.origin)? else {
+            return Ok(Err(Rejection::UnsupportedPlacement));
+        };
+        let id = MobileId(self.entities.next_id());
+        let index = self.mobile_substrates.push(
+            id,
+            track_position,
+            command.routing_area,
+            command.footprint,
+        )?;
+        let allocated = self
+            .entities
+            .allocate(EntityLocation::MobileSubstrate(index))?;
+        if allocated != id.entity_id() {
+            return Err(StructuralError::InvalidCanonicalState);
+        }
+        changes.topology_changed = true;
+        Ok(Ok(Some(allocated)))
+    }
+
     fn place_fixed_substrate(
         &mut self,
         command: PlaceFixedSubstrateCommand,
@@ -605,32 +728,46 @@ impl StructuralWorld {
         {
             return Ok(Err(reason));
         }
-        let RoutingDomain::FixedSubstrate(substrate_id) = command.routing_domain else {
-            return Ok(Err(Rejection::UnsupportedPlacement));
-        };
         if !point_is_quantized(command.origin, physical.wire_geometry_quantum) {
             return Ok(Err(Rejection::InvalidGeometryQuantum));
         }
-        let substrate = match self.fixed_substrate_reference(substrate_id, frontier)? {
-            Ok(substrate) => substrate,
-            Err(reason) => return Ok(Err(reason)),
+        let (local_origin, routing_area) = match command.routing_domain {
+            RoutingDomain::OpenWorld => return Ok(Err(Rejection::UnsupportedPlacement)),
+            RoutingDomain::FixedSubstrate(substrate_id) => {
+                let substrate = match self.fixed_substrate_reference(substrate_id, frontier)? {
+                    Ok(substrate) => substrate,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                (
+                    checked_sub_point(command.origin, substrate.origin)?,
+                    substrate.routing_area,
+                )
+            }
+            RoutingDomain::MobileSubstrate(substrate_id) => {
+                let substrate = match self.mobile_substrate_reference(substrate_id, frontier)? {
+                    Ok(substrate) => substrate,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                (command.origin, substrate.routing_area)
+            }
         };
-        let local_origin = checked_sub_point(command.origin, substrate.origin)?;
         if !point_is_quantized(local_origin, physical.circuit_routing_pitch) {
             return Ok(Err(Rejection::InvalidRoutingPitch));
         }
 
         let local_footprint = gate_aabb(local_origin, command.gate_type, physical)?;
-        if !substrate.routing_area.contains_aabb(local_footprint) {
+        if !routing_area.contains_aabb(local_footprint) {
             return Ok(Err(Rejection::SubstrateBoundsViolation));
         }
-        let world_footprint = gate_aabb(command.origin, command.gate_type, physical)?;
+        let domain_footprint = gate_aabb(command.origin, command.gate_type, physical)?;
         for (_, existing) in self.gates.iter_alive() {
-            if world_footprint.interior_overlaps(gate_aabb(
-                existing.origin,
-                existing.gate_type,
-                physical,
-            )?) {
+            if existing.routing_domain == command.routing_domain
+                && domain_footprint.interior_overlaps(gate_aabb(
+                    existing.origin,
+                    existing.gate_type,
+                    physical,
+                )?)
+            {
                 return Ok(Err(Rejection::GeometryOverlap));
             }
         }
@@ -675,9 +812,6 @@ impl StructuralWorld {
         {
             return Ok(Err(reason));
         }
-        if matches!(command.routing_domain, RoutingDomain::MobileSubstrate(_)) {
-            return Ok(Err(Rejection::UnsupportedPlacement));
-        }
         if !point_is_quantized(command.position, physical.wire_geometry_quantum) {
             return Ok(Err(Rejection::InvalidGeometryQuantum));
         }
@@ -691,6 +825,9 @@ impl StructuralWorld {
             Err(reason) => return Ok(Err(reason)),
         }
         for (_, wire) in self.wires.iter_alive() {
+            if wire.routing_domain != command.routing_domain {
+                continue;
+            }
             for segment in wire.points.windows(2) {
                 if point_is_strict_segment_interior(command.position, segment[0], segment[1])? {
                     return Ok(Err(Rejection::GeometryOverlap));
@@ -728,6 +865,24 @@ impl StructuralWorld {
             .ok_or(StructuralError::InvalidCanonicalState)
     }
 
+    fn mobile_substrate_reference(
+        &self,
+        id: EntityId,
+        frontier: EntityId,
+    ) -> Result<Result<MobileSubstrateRecord, Rejection>, StructuralError> {
+        let location = match self.reference_location(id, frontier) {
+            Ok(location) => location,
+            Err(reason) => return Ok(Err(reason)),
+        };
+        let EntityLocation::MobileSubstrate(index) = location else {
+            return Ok(Err(Rejection::InvalidRoutingDomain));
+        };
+        self.mobile_substrates
+            .get(index)
+            .map(Ok)
+            .ok_or(StructuralError::InvalidCanonicalState)
+    }
+
     fn validate_routed_point(
         &self,
         point: FixedVec2,
@@ -757,7 +912,19 @@ impl StructuralWorld {
                 }
                 Ok(Ok(()))
             }
-            RoutingDomain::MobileSubstrate(_) => Ok(Err(Rejection::UnsupportedPlacement)),
+            RoutingDomain::MobileSubstrate(id) => {
+                let substrate = match self.mobile_substrate_reference(id, frontier)? {
+                    Ok(substrate) => substrate,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                if !point_is_quantized(point, physical.circuit_routing_pitch) {
+                    return Ok(Err(Rejection::InvalidRoutingPitch));
+                }
+                if !substrate.routing_area.contains_point(point) {
+                    return Ok(Err(Rejection::SubstrateBoundsViolation));
+                }
+                Ok(Ok(()))
+            }
         }
     }
 
@@ -780,7 +947,16 @@ impl StructuralWorld {
                 }
                 Ok(Ok(()))
             }
-            RoutingDomain::MobileSubstrate(_) => Ok(Err(Rejection::UnsupportedPlacement)),
+            RoutingDomain::MobileSubstrate(id) => {
+                let substrate = match self.mobile_substrate_reference(id, frontier)? {
+                    Ok(substrate) => substrate,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                if !substrate.routing_area.contains_point(point) {
+                    return Ok(Err(Rejection::SubstrateBoundsViolation));
+                }
+                Ok(Ok(()))
+            }
         }
     }
 
@@ -819,6 +995,7 @@ impl StructuralWorld {
             EndpointTarget::Free => return None,
             EndpointTarget::Junction(id) => id.entity_id(),
             EndpointTarget::GatePort(reference) => reference.gate.entity_id(),
+            EndpointTarget::MobilePort(reference) => reference.mobile.entity_id(),
         };
         self.reference_location(id, frontier).err()
     }
@@ -845,9 +1022,6 @@ impl StructuralWorld {
         }
         if let Some(reason) = self.endpoint_lifecycle_rejection(command.endpoint_b, frontier) {
             return Ok(Err(reason));
-        }
-        if matches!(command.routing_domain, RoutingDomain::MobileSubstrate(_)) {
-            return Ok(Err(Rejection::UnsupportedPlacement));
         }
         if command
             .points
@@ -913,6 +1087,9 @@ impl StructuralWorld {
         }
 
         for (_, existing) in self.wires.iter_alive() {
+            if command.routing_domain != existing.routing_domain {
+                continue;
+            }
             for (new_index, new_segment) in command.points.windows(2).enumerate() {
                 for (old_index, old_segment) in existing.points.windows(2).enumerate() {
                     if segments_have_positive_collinear_overlap(
@@ -923,18 +1100,15 @@ impl StructuralWorld {
                     )? {
                         return Ok(Err(Rejection::GeometryOverlap));
                     }
-                    if command.routing_domain == existing.routing_domain
-                        && parallel_segments_are_too_close(
-                            new_segment[0],
-                            new_segment[1],
-                            old_segment[0],
-                            old_segment[1],
-                            routing_pitch(command.routing_domain, physical),
-                        )?
-                        && !segments_share_physical_wire_endpoint(
-                            command, new_index, existing, old_index,
-                        )
-                    {
+                    if parallel_segments_are_too_close(
+                        new_segment[0],
+                        new_segment[1],
+                        old_segment[0],
+                        old_segment[1],
+                        routing_pitch(command.routing_domain, physical),
+                    )? && !segments_share_physical_wire_endpoint(
+                        command, new_index, existing, old_index,
+                    ) {
                         return Ok(Err(Rejection::InsufficientSpacing));
                     }
                 }
@@ -942,6 +1116,9 @@ impl StructuralWorld {
         }
 
         for (_, junction) in self.junctions.iter_alive() {
+            if junction.routing_domain != command.routing_domain {
+                continue;
+            }
             for segment in command.points.windows(2) {
                 if point_is_strict_segment_interior(junction.position, segment[0], segment[1])? {
                     return Ok(Err(Rejection::GeometryOverlap));
@@ -975,6 +1152,13 @@ impl StructuralWorld {
         )? {
             Ok(()) => {}
             Err(reason) => return Ok(Err(reason)),
+        }
+        if open_world_wire_binds_same_junction(
+            command.routing_domain,
+            command.endpoint_a,
+            command.endpoint_b,
+        ) {
+            return Ok(Err(Rejection::InvalidPortBinding));
         }
 
         let id = WireId(self.entities.next_id());
@@ -1055,6 +1239,20 @@ impl StructuralWorld {
                 }
                 Ok(Ok(()))
             }
+            EndpointTarget::MobilePort(reference) => {
+                let substrate = match self
+                    .mobile_substrate_reference(reference.mobile.entity_id(), frontier)?
+                {
+                    Ok(substrate) => substrate,
+                    Err(reason) => return Ok(Err(reason)),
+                };
+                if domain != RoutingDomain::MobileSubstrate(reference.mobile.entity_id())
+                    || !substrate.routing_area.contains_point(endpoint)
+                {
+                    return Ok(Err(Rejection::InvalidEndpoint));
+                }
+                Ok(Ok(()))
+            }
         }
     }
 
@@ -1087,6 +1285,9 @@ impl StructuralWorld {
         physical: &PhysicalScaleProfile,
         changes: &mut PhaseChanges,
     ) -> Result<Result<Option<EntityId>, Rejection>, StructuralError> {
+        if self.wire_is_occupied(command.wire) {
+            return Ok(Err(Rejection::TrackOccupied));
+        }
         let location = match self.reference_location(command.wire.entity_id(), frontier) {
             Ok(location) => location,
             Err(reason) => return Ok(Err(reason)),
@@ -1129,6 +1330,13 @@ impl StructuralWorld {
             Ok(()) => {}
             Err(reason) => return Ok(Err(reason)),
         }
+        let (endpoint_a, endpoint_b) = match command.end {
+            WireEnd::A => (command.target, wire.endpoint_b),
+            WireEnd::B => (wire.endpoint_a, command.target),
+        };
+        if open_world_wire_binds_same_junction(wire.routing_domain, endpoint_a, endpoint_b) {
+            return Ok(Err(Rejection::InvalidPortBinding));
+        }
 
         mark_target_junction(old_target, &self.entities, &mut changes.dirty_junctions)?;
         mark_target_junction(command.target, &self.entities, &mut changes.dirty_junctions)?;
@@ -1151,8 +1359,16 @@ impl StructuralWorld {
         };
         match location {
             EntityLocation::Gate(index) => self.remove_gate(index, command.target, changes)?,
-            EntityLocation::Wire(index) => self.remove_wire(index, command.target, changes)?,
+            EntityLocation::Wire(index) => {
+                if self.wire_is_occupied(WireId(command.target)) {
+                    return Ok(Err(Rejection::TrackOccupied));
+                }
+                self.remove_wire(index, command.target, changes)?
+            }
             EntityLocation::Junction(index) => {
+                if self.junction_is_occupied(JunctionId(command.target))? {
+                    return Ok(Err(Rejection::TrackOccupied));
+                }
                 self.remove_junction(index, command.target, changes)?
             }
             EntityLocation::FixedSubstrate(index) => {
@@ -1161,6 +1377,14 @@ impl StructuralWorld {
                 }
                 self.fixed_substrates.remove(index)?;
                 self.entities.remove(command.target)?;
+            }
+            EntityLocation::MobileSubstrate(index) => {
+                if self.mobile_substrate_is_in_use(command.target) {
+                    return Ok(Err(Rejection::SubstrateInUse));
+                }
+                self.mobile_substrates.remove(index)?;
+                self.entities.remove(command.target)?;
+                changes.topology_changed = true;
             }
             _ => return Ok(Err(Rejection::UnsupportedCommand)),
         }
@@ -1266,10 +1490,80 @@ impl StructuralWorld {
                 .iter_alive()
                 .any(|(_, record)| record.routing_domain == domain)
     }
+
+    fn mobile_substrate_is_in_use(&self, substrate: EntityId) -> bool {
+        let domain = RoutingDomain::MobileSubstrate(substrate);
+        self.gates
+            .iter_alive()
+            .any(|(_, record)| record.routing_domain == domain)
+            || self
+                .wires
+                .iter_alive()
+                .any(|(_, record)| record.routing_domain == domain)
+            || self
+                .junctions
+                .iter_alive()
+                .any(|(_, record)| record.routing_domain == domain)
+    }
+
+    fn wire_is_occupied(&self, wire: WireId) -> bool {
+        self.mobile_substrates
+            .iter_alive()
+            .any(|(_, mobile)| match mobile.track_position {
+                TrackPosition::Edge { edge, .. } => edge == wire,
+                TrackPosition::Junction { incoming_edge, .. } => incoming_edge == wire,
+            })
+    }
+
+    fn junction_is_occupied(&self, junction: JunctionId) -> Result<bool, StructuralError> {
+        for (_, mobile) in self.mobile_substrates.iter_alive() {
+            match mobile.track_position {
+                TrackPosition::Junction {
+                    junction: occupied, ..
+                } => {
+                    if occupied == junction {
+                        return Ok(true);
+                    }
+                }
+                TrackPosition::Edge { edge, offset, .. } => {
+                    let Some(EntityLocation::Wire(index)) =
+                        self.entities.location(edge.entity_id()).copied()
+                    else {
+                        return Err(StructuralError::InvalidCanonicalState);
+                    };
+                    let wire = self
+                        .wires
+                        .get(index)
+                        .ok_or(StructuralError::InvalidCanonicalState)?;
+                    let length = polyline_length(wire.points)?;
+                    if (offset == Fixed::ZERO
+                        && wire.endpoint_a == EndpointTarget::Junction(junction))
+                        || (offset == length
+                            && wire.endpoint_b == EndpointTarget::Junction(junction))
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
 }
 
 fn point_is_quantized(point: FixedVec2, quantum: Fixed) -> bool {
     quantum.0 > 0 && point.x.0.rem_euclid(quantum.0) == 0 && point.y.0.rem_euclid(quantum.0) == 0
+}
+
+fn open_world_wire_binds_same_junction(
+    domain: RoutingDomain,
+    endpoint_a: EndpointTarget,
+    endpoint_b: EndpointTarget,
+) -> bool {
+    domain == RoutingDomain::OpenWorld
+        && matches!(
+            (endpoint_a, endpoint_b),
+            (EndpointTarget::Junction(a), EndpointTarget::Junction(b)) if a == b
+        )
 }
 
 fn aabb_is_quantized(aabb: FixedAabb, quantum: Fixed) -> bool {
@@ -1395,6 +1689,12 @@ fn validate_wire_gate_contact(
     gate_domain: RoutingDomain,
     physical: &PhysicalScaleProfile,
 ) -> Result<Result<(), Rejection>, StructuralError> {
+    if wire_domain != gate_domain
+        && (matches!(wire_domain, RoutingDomain::MobileSubstrate(_))
+            || matches!(gate_domain, RoutingDomain::MobileSubstrate(_)))
+    {
+        return Ok(Ok(()));
+    }
     let aabb = gate_aabb(gate_origin, gate_type, physical)?;
     for (segment_index, segment) in points.windows(2).enumerate() {
         if segment_intersects_aabb_interior(segment[0], segment[1], aabb)?

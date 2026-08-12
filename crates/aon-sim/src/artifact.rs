@@ -86,10 +86,9 @@ impl StageFeatureSet {
     }
 
     pub(crate) const fn first_enabled(self) -> Option<&'static str> {
-        // Signal is implemented by S0-M3; only later-stage requirements are rejected here.
-        if self.mobility {
-            Some("mobility")
-        } else if self.capacity {
+        // Signal and mobility are implemented by Stage 0; only later-stage requirements are
+        // rejected here.
+        if self.capacity {
             Some("capacity")
         } else if self.sensing {
             Some("sensing")

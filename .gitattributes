@@ -1,0 +1,3 @@
+fixtures/replays/*.json text eol=lf
+crates/aon-sim/tests/fixtures/replay-*.json text eol=lf
+crates/aon-fuzz-harness/corpus/mobility-runtime/*.case binary

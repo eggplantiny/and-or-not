@@ -1,6 +1,7 @@
 use aon_sim::{
     BindPortCommand, Command, CommandEnvelope, PlaceFixedSubstrateCommand, PlaceGateCommand,
-    PlaceJunctionCommand, PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand, Tick,
+    PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand,
+    SetExternalDriverCommand, Tick,
 };
 use thiserror::Error;
 
@@ -10,6 +11,7 @@ pub enum EditIntent {
     PlaceWire(PlaceWireCommand),
     PlaceJunction(PlaceJunctionCommand),
     PlaceFixedSubstrate(PlaceFixedSubstrateCommand),
+    PlaceMobileSubstrate(PlaceMobileSubstrateCommand),
     RemoveEntity(RemoveEntityCommand),
     BindPort(BindPortCommand),
     SetExternalDriver(SetExternalDriverCommand),
@@ -22,6 +24,7 @@ impl EditIntent {
             Self::PlaceWire(command) => Command::PlaceWire(command),
             Self::PlaceJunction(command) => Command::PlaceJunction(command),
             Self::PlaceFixedSubstrate(command) => Command::PlaceFixedSubstrate(command),
+            Self::PlaceMobileSubstrate(command) => Command::PlaceMobileSubstrate(command),
             Self::RemoveEntity(command) => Command::RemoveEntity(command),
             Self::BindPort(command) => Command::BindPort(command),
             Self::SetExternalDriver(command) => Command::SetExternalDriver(command),
@@ -44,10 +47,10 @@ impl TryFrom<Command> for EditIntent {
             Command::PlaceWire(command) => Ok(Self::PlaceWire(command)),
             Command::PlaceJunction(command) => Ok(Self::PlaceJunction(command)),
             Command::PlaceFixedSubstrate(command) => Ok(Self::PlaceFixedSubstrate(command)),
+            Command::PlaceMobileSubstrate(command) => Ok(Self::PlaceMobileSubstrate(command)),
             Command::RemoveEntity(command) => Ok(Self::RemoveEntity(command)),
             Command::BindPort(command) => Ok(Self::BindPort(command)),
             Command::SetExternalDriver(command) => Ok(Self::SetExternalDriver(command)),
-            Command::PlaceMobileSubstrate(_) => Err(EditScopeError::OutOfScopeCommand),
         }
     }
 }
@@ -147,7 +150,7 @@ pub enum PendingCommandError {
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum EditScopeError {
-    #[error("the command is outside the S0-M6 interactive editor scope")]
+    #[error("the command is outside the S0-M7 interactive editor scope")]
     OutOfScopeCommand,
 }
 

@@ -16,10 +16,10 @@ cross-host/replay gate, and MVP scenario below has authoritative evidence.
 - [x] S0-M3 — Signal Topology / Event Runtime
 - [x] S0-M4 — Topology Sync / Path Certificate
 - [x] S0-M5 — Feedback / Replay
-- [ ] S0-M6 — Bevy ASCII Probe
-- [ ] S0-M7 — Mobility
-- [ ] Stage 0 technical gate
-- [ ] Stage 0 product gate
+- [ ] S0-M6 — Bevy ASCII Probe *(implementation and Windows-native smoke complete; final committed fresh clean-checkout evidence pending)*
+- [ ] S0-M7 — Mobility *(implementation, retained Replay, and Windows-native mobile smoke complete; final committed fresh clean-checkout evidence pending)*
+- [x] Stage 0 technical gate *(Windows-native `scripts/stage0-technical-gate.ps1` passed)*
+- [x] Stage 0 product gate *(user direct-play A/B PASS recorded 2026-08-12)*
 
 Required conformance: C-01, C-02, C-03, C-05, C-06, C-14, C-16, C-17,
 C-18, C-19, C-20, C-25.
@@ -350,6 +350,16 @@ The 18 completion gates have the following executable evidence.
     `d45af47` passed the same offline gates; its 100,001-state Headless/Bevy comparison completed in
     207.96 seconds.
 
-Passing these gates completes only S0-M5. **The next implementation slice is S0-M6 — Bevy ASCII
-Probe**; S0-M7, both Stage 0 gates, Stages 1–2, and the MVP remain mandatory before the game engine
-is complete.
+Passing these gates completes only the formally committed S0-M5 slice. The current workspace has
+subsequently implemented S0-M6 and S0-M7, but their authority documents still require final
+committed fresh clean-checkout evidence.
+
+## Stage 0 closure status
+
+As of 2026-08-12, the Windows-native workspace has executable S0-M6/S0-M7 evidence, matched
+current-input-only and retained-state V4 Mobility Replays, an F5/F6 direct-play A/B probe, native
+probe smoke evidence, and a passing fail-closed Stage 0 technical gate.
+Formal S0-M6/S0-M7 closure still requires the final committed fresh clean-checkout gates. The
+Stage 0 product gate passed by explicit user direct-play verdict on 2026-08-12 using
+`docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`. Stage 1 may begin after the committed fresh
+clean-checkout gates close S0-M6/S0-M7.

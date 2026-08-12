@@ -1,7 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod mobility_runtime;
 mod topology_runtime;
 
+pub use mobility_runtime::{
+    MAX_MOBILITY_RUNTIME_INPUT_BYTES, MobilityRuntimeCoverage, MobilityRuntimeExecutionObservation,
+    MobilityRuntimeObservation, MobilityRuntimeScenario, exercise_mobility_runtime,
+};
 pub use topology_runtime::{
     MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, TopologyRuntimeCoverage, TopologyRuntimeExecutionObservation,
     TopologyRuntimeObservation, TopologyRuntimeScenario, exercise_topology_runtime,
@@ -196,6 +201,7 @@ pub struct CommandEncodingObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum CommandExecutionObservation {
     PackageRejected(PackageError),
     SimulationRejected(SimulationError),
@@ -309,6 +315,7 @@ pub struct SignalRuntimeCoverage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum SignalRuntimeExecutionObservation {
     PackageRejected(PackageError),
     SimulationRejected {
@@ -1655,7 +1662,7 @@ mod tests {
                 (0, CommandRejectionReason::UnsupportedPlacement),
                 (1, CommandRejectionReason::InvalidGeometryShape),
                 (3, CommandRejectionReason::InvalidGeometryShape),
-                (4, CommandRejectionReason::UnsupportedPlacement),
+                (4, CommandRejectionReason::InvalidGeometryShape),
                 (5, CommandRejectionReason::UnknownEntity),
                 (6, CommandRejectionReason::UnknownEntity),
                 (7, CommandRejectionReason::UnknownDriver),

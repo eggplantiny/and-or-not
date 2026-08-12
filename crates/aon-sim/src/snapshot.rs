@@ -1,9 +1,11 @@
+use crate::mobility::TrackGraph;
 use crate::signal::{SignalWorld, resolve_drive};
 use crate::structural::StructuralWorld;
 use crate::{
     ConnectionGeneration, DriveVector, DriverId, DriverSample, EndpointTarget, EntityId, FixedAabb,
-    FixedVec2, GateId, GateSignalPorts, GateType, JunctionId, LogicLevel, Revision, RoutingDomain,
-    SimulationContract, SinkId, StateHash, Tick, WireId,
+    FixedVec2, GateId, GateSignalPorts, GateType, JunctionId, LogicLevel, MobileControlPorts,
+    MobileId, Revision, RoutingDomain, SimulationContract, SinkId, StateHash, Tick, TrackPosition,
+    WireId,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +14,19 @@ pub struct FixedSubstrateRenderRecord {
     pub origin: FixedVec2,
     pub routing_area: FixedAabb,
     pub footprint: FixedAabb,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MobileRenderRecord {
+    pub id: MobileId,
+    pub track_position: TrackPosition,
+    pub world_position: FixedVec2,
+    pub routing_area: FixedAabb,
+    pub footprint: FixedAabb,
+    pub ports: MobileControlPorts,
+    pub stop: LogicLevel,
+    pub left: LogicLevel,
+    pub right: LogicLevel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +124,7 @@ pub struct RenderSnapshot {
     primitive_count: u64,
     state_hash: StateHash,
     fixed_substrates: Vec<FixedSubstrateRenderRecord>,
+    mobiles: Vec<MobileRenderRecord>,
     gates: Vec<GateRenderRecord>,
     wires: Vec<WireRenderRecord>,
     junctions: Vec<JunctionRenderRecord>,
@@ -129,6 +145,7 @@ impl Default for RenderSnapshot {
             primitive_count: 0,
             state_hash: StateHash::default(),
             fixed_substrates: Vec::new(),
+            mobiles: Vec::new(),
             gates: Vec::new(),
             wires: Vec::new(),
             junctions: Vec::new(),
@@ -163,6 +180,10 @@ impl RenderSnapshot {
 
     pub fn fixed_substrates(&self) -> &[FixedSubstrateRenderRecord] {
         &self.fixed_substrates
+    }
+
+    pub fn mobiles(&self) -> &[MobileRenderRecord] {
+        &self.mobiles
     }
 
     pub fn gates(&self) -> &[GateRenderRecord] {
@@ -211,6 +232,41 @@ impl RenderSnapshot {
             );
         self.fixed_substrates
             .sort_unstable_by_key(|record| record.id);
+
+        let track = TrackGraph::compile(structural.wires(), structural.junctions())
+            .expect("validated canonical world has a valid Track Graph");
+        self.mobiles.clear();
+        self.mobiles.extend(
+            structural
+                .mobile_substrates()
+                .iter_alive()
+                .map(|(_, record)| {
+                    let ports = signal
+                        .mobile_ports(record.id)
+                        .expect("validated canonical Mobile has control ports");
+                    MobileRenderRecord {
+                        id: record.id,
+                        track_position: record.track_position,
+                        world_position: track
+                            .world_position(record.track_position)
+                            .expect("validated canonical TrackPosition projects"),
+                        routing_area: record.routing_area,
+                        footprint: record.footprint,
+                        ports,
+                        stop: signal
+                            .sink_level(ports.stop)
+                            .expect("validated canonical Mobile STOP Sink exists"),
+                        left: signal
+                            .sink_level(ports.left)
+                            .expect("validated canonical Mobile LEFT Sink exists"),
+                        right: signal
+                            .sink_level(ports.right)
+                            .expect("validated canonical Mobile RIGHT Sink exists"),
+                    }
+                }),
+        );
+        self.mobiles
+            .sort_unstable_by_key(|record| record.id.entity_id());
 
         self.gates.clear();
         self.gates

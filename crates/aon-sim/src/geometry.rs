@@ -74,6 +74,26 @@ pub fn polyline_length(points: &[FixedVec2]) -> Result<Fixed, NumericError> {
     total.checked_add(segment_length(run_start, run_end)?)
 }
 
+pub(crate) fn canonical_polyline_points(points: &[FixedVec2]) -> Vec<FixedVec2> {
+    let mut canonical = Vec::with_capacity(points.len());
+    for &point in points {
+        if canonical.last() == Some(&point) {
+            continue;
+        }
+        if canonical.len() >= 2 {
+            let previous = canonical[canonical.len() - 2];
+            let middle = canonical[canonical.len() - 1];
+            if same_direction_collinear(previous, middle, point) {
+                let last = canonical.len() - 1;
+                canonical[last] = point;
+                continue;
+            }
+        }
+        canonical.push(point);
+    }
+    canonical
+}
+
 fn same_direction_collinear(start: FixedVec2, middle: FixedVec2, end: FixedVec2) -> bool {
     let first_x = i128::from(middle.x.0) - i128::from(start.x.0);
     let first_y = i128::from(middle.y.0) - i128::from(start.y.0);
@@ -137,8 +157,8 @@ pub fn cell_coordinate(coordinate: Fixed, cell_size: Fixed) -> Result<i64, Numer
 #[cfg(test)]
 mod tests {
     use super::{
-        FixedVec2, GeometryError, cell_coordinate, polyline_length, segment_length,
-        validate_quantized,
+        FixedVec2, GeometryError, canonical_polyline_points, cell_coordinate, polyline_length,
+        segment_length, validate_quantized,
     };
     use crate::{FIXED_ONE, Fixed, NumericError};
 
@@ -183,6 +203,7 @@ mod tests {
 
         assert_eq!(polyline_length(&direct), Ok(Fixed(3)));
         assert_eq!(polyline_length(&split), polyline_length(&direct));
+        assert_eq!(canonical_polyline_points(&split), direct);
     }
 
     #[test]
@@ -194,6 +215,7 @@ mod tests {
         ];
 
         assert_eq!(polyline_length(&points), Ok(Fixed(3)));
+        assert_eq!(canonical_polyline_points(&points), points);
     }
 
     #[test]

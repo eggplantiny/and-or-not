@@ -669,8 +669,8 @@ fn simulation_with_every_structural_kind() -> Simulation {
 
 fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"AON\0STATE\0V3\0");
-    push_u16(&mut bytes, 3); // encoder version
+    bytes.extend_from_slice(b"AON\0STATE\0V4\0");
+    push_u16(&mut bytes, 4); // encoder version
     bytes.push(0); // aon-semantics-v1
     bytes.extend_from_slice(contract.numeric_profile_hash.as_bytes());
     bytes.extend_from_slice(contract.physical_scale_profile_hash.as_bytes());
@@ -719,6 +719,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
         push_point(&mut bytes, -SUBSTRATE_HALF_EXTENT, -SUBSTRATE_HALF_EXTENT);
         push_point(&mut bytes, SUBSTRATE_HALF_EXTENT, SUBSTRATE_HALF_EXTENT);
     }
+    push_u64(&mut bytes, 0); // Mobile Substrate count
 
     // Driver allocation slots. Driver 1 is the inert external input; Driver 2 is the NOT output.
     push_u64(&mut bytes, 3); // DriverId frontier
@@ -765,6 +766,8 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     bytes.push(0); // no pending energy
     push_u64(&mut bytes, 0); // canceled switching heat
 
+    push_u64(&mut bytes, 0); // Mobile control-port map count
+
     push_u64(&mut bytes, 1); // Wire excitation count
     push_u64(&mut bytes, 4); // WireId
     push_u128(&mut bytes, 400); // active High
@@ -785,7 +788,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     push_u64(&mut bytes, 0); // pending DriverTransition count
     push_u64(&mut bytes, 0); // pending SignalArrival count
 
-    for _ in 0..4 {
+    for _ in 0..3 {
         push_u64(&mut bytes, 0); // later-stage reserved sections
     }
     push_u64(&mut bytes, 2); // PathCertificateId frontier
@@ -829,7 +832,7 @@ fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
 
     assert_eq!(
         independently_hashed.to_hex().as_str(),
-        "c6689e35a76086f30c02390f5c57047e7637deeee4fcabaaf0c924f050b2536f"
+        "929eeb4963808b4e4e56c5311da064f574b3ff0601e71a2042625d7e8fec1f3b"
     );
     assert_eq!(
         simulation.state_hash().as_bytes(),

@@ -4,8 +4,11 @@ use crate::event::{
     EventCalendarError, EventPayloadAllocator, SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival,
     SignalArrivalKind, SignalArrivalStagingError, UncertifiedSignalArrival, stage_signal_arrivals,
 };
+use crate::mobility::{
+    MobileControlSample, MobileMovementObservation, TrackGraph, TrackGraphError, TrackPosition,
+};
 use crate::path_certificate::{PathCertificateArena, PathCertificateError};
-use crate::profile::{ProfileBundle, ProfileValidationError};
+use crate::profile::{BalanceProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError};
 use crate::replay::{
     ReplayFormatVersion, ReplayHeader, Seed, StateHashVersion, WorldGeneratorVersion,
 };
@@ -17,11 +20,12 @@ use crate::signal_topology::{
     CompiledSignalTopology, RouteDiff, SignalTopologyError, switch_energy,
 };
 use crate::snapshot::{RenderSnapshotSource, SignalProbeSample, SignalProbeTarget, sample_signal};
-use crate::structural::{StructuralError, StructuralWorld};
+use crate::structural::{StructuralError, StructuralPhaseReport, StructuralWorld};
 use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
-    GateId, GateType, InitialWorld, LogicLevel, RenderSnapshot, Revision, ScenarioManifest,
-    SimulationError, SinkId, StageFeatureSet, StateHash, Tick, WireId, canonical,
+    Fixed, FixedVec2, GateId, GateType, InitialWorld, LogicLevel, MobileId, MobileSubstrateIndex,
+    RenderSnapshot, Revision, ScenarioManifest, SimulationError, SinkId, StageFeatureSet,
+    StateHash, Tick, WireId, canonical,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -109,6 +113,108 @@ pub struct StepReport {
     pub signal_changes: Vec<SignalChangeRecord>,
     pub signal_arrivals: Vec<SignalArrivalObservation>,
     pub signal_counters: SignalStepCounters,
+    pub mobile_movements: Vec<MobileMovementObservation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MobileIntent {
+    index: MobileSubstrateIndex,
+    mobile: MobileId,
+    start: TrackPosition,
+    start_world_point: FixedVec2,
+    controls: MobileControlSample,
+    granted_budget: Fixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MobilePhase1Snapshot {
+    index: MobileSubstrateIndex,
+    mobile: MobileId,
+    start: TrackPosition,
+    world_point: FixedVec2,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Phase1Snapshot {
+    mobiles: Vec<MobilePhase1Snapshot>,
+}
+
+struct Phase0Output {
+    structural_report: StructuralPhaseReport,
+    topology: CompiledSignalTopology,
+    track_graph: TrackGraph,
+    signal_counters: SignalStepCounters,
+}
+
+struct Phase11Output {
+    state_hash: StateHash,
+    mobile_movements: Vec<MobileMovementObservation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StagedMobileMovement {
+    index: MobileSubstrateIndex,
+    observation: MobileMovementObservation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum TickPhase {
+    StructuralCommit = 0,
+    SnapshotAndWorldSample = 1,
+    DriverAndSignalArrival = 2,
+    IntentEvaluation = 3,
+    GlobalAccountingAndNominalDemand = 4,
+    PowerSolveAndBrownout = 5,
+    SchedulingAndGrantedWork = 6,
+    Trajectory = 7,
+    Interaction = 8,
+    ThermalIntegration = 9,
+    DamageResolution = 10,
+    ProgressCommit = 11,
+}
+
+impl TickPhase {
+    const ORDER: [Self; 12] = [
+        Self::StructuralCommit,
+        Self::SnapshotAndWorldSample,
+        Self::DriverAndSignalArrival,
+        Self::IntentEvaluation,
+        Self::GlobalAccountingAndNominalDemand,
+        Self::PowerSolveAndBrownout,
+        Self::SchedulingAndGrantedWork,
+        Self::Trajectory,
+        Self::Interaction,
+        Self::ThermalIntegration,
+        Self::DamageResolution,
+        Self::ProgressCommit,
+    ];
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TickPhaseSequence {
+    next: usize,
+}
+
+impl TickPhaseSequence {
+    fn enter(&mut self, phase: TickPhase) -> Result<(), SimulationError> {
+        if TickPhase::ORDER.get(self.next) != Some(&phase) {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or(SimulationError::NumericOverflow)?;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<(), SimulationError> {
+        if self.next == TickPhase::ORDER.len() {
+            Ok(())
+        } else {
+            Err(SimulationError::InvalidCanonicalState)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -188,75 +294,78 @@ impl Simulation {
         let mut candidate = self.canonical.clone();
         let completed_tick = candidate.next_tick;
         let next_tick = completed_tick.checked_add(Tick(1))?;
-        let old_topology = CompiledSignalTopology::compile(
-            &candidate.structural,
-            &candidate.signal,
-            &self.profiles.balance,
-        )?;
-        let phase = candidate.structural.apply_phase0_with_signal(
-            &mut candidate.signal,
-            completed_tick,
-            commands,
-            &self.profiles.physical_scale,
-        )?;
-        let topology_revision = if phase.topology_changed {
-            candidate.topology_revision.checked_add(Revision(1))?
-        } else {
-            candidate.topology_revision
-        };
-        candidate.topology_revision = topology_revision;
+        let mut phases = TickPhaseSequence::default();
 
-        let topology = CompiledSignalTopology::compile(
-            &candidate.structural,
-            &candidate.signal,
+        phases.enter(TickPhase::StructuralCommit)?;
+        let mut phase0 = run_phase0_structural_commit(
+            &mut candidate,
+            commands,
+            completed_tick,
+            &self.profiles.physical_scale,
             &self.profiles.balance,
         )?;
-        let mut signal_counters = if phase.topology_changed {
-            apply_route_diff(
-                &mut candidate,
-                &old_topology.route_diff(&topology),
-                &topology,
-                completed_tick,
-            )?
-        } else {
-            SignalStepCounters::default()
-        };
-        stage_external_driver_updates(
-            &mut candidate,
-            &phase.external_driver_updates,
-            completed_tick,
-        )?;
+
+        phases.enter(TickPhase::SnapshotAndWorldSample)?;
+        let phase1 = run_phase1_snapshot_and_world_sample(&candidate, &phase0.track_graph)?;
+
+        phases.enter(TickPhase::DriverAndSignalArrival)?;
         let phase2 = run_phase2(
             &mut candidate,
-            &topology,
+            &phase0.topology,
             completed_tick,
             self.profiles.balance.logic_threshold,
-            &mut signal_counters,
-        )?;
-        run_phase3(&mut candidate)?;
-        run_phase6(
-            &mut candidate,
-            &topology,
-            completed_tick,
-            &self.profiles.balance,
+            &mut phase0.signal_counters,
         )?;
 
-        candidate.next_tick = next_tick;
-        validate_canonical_world(&candidate)?;
-        let state_hash = canonical::state_hash(candidate.state_view());
+        phases.enter(TickPhase::IntentEvaluation)?;
+        let mut mobile_intents = run_phase3(&mut candidate, &phase1)?;
+
+        phases.enter(TickPhase::GlobalAccountingAndNominalDemand)?;
+        run_phase4_global_accounting_and_nominal_demand(&candidate, &mobile_intents);
+
+        phases.enter(TickPhase::PowerSolveAndBrownout)?;
+        run_phase5_power_solve_and_brownout();
+
+        phases.enter(TickPhase::SchedulingAndGrantedWork)?;
+        run_phase6(
+            &mut candidate,
+            &phase0.topology,
+            completed_tick,
+            &self.profiles.balance,
+            &mut mobile_intents,
+            self.profiles.physical_scale.world_routing_pitch,
+        )?;
+
+        phases.enter(TickPhase::Trajectory)?;
+        let staged_mobiles = run_phase7(&phase0.track_graph, &mobile_intents)?;
+
+        phases.enter(TickPhase::Interaction)?;
+        run_phase8_interaction(&staged_mobiles);
+
+        phases.enter(TickPhase::ThermalIntegration)?;
+        run_phase9_thermal_integration();
+
+        phases.enter(TickPhase::DamageResolution)?;
+        run_phase10_damage_resolution();
+
+        phases.enter(TickPhase::ProgressCommit)?;
+        let phase11 = run_phase11_progress_commit(&mut candidate, next_tick, staged_mobiles)?;
+        phases.finish()?;
+
         self.canonical = candidate;
 
         Ok(StepReport {
             completed_tick,
             next_tick,
-            state_hash,
-            command_acceptances: phase.acceptances,
-            command_rejections: phase.rejections,
-            topology_changed: phase.topology_changed,
+            state_hash: phase11.state_hash,
+            command_acceptances: phase0.structural_report.acceptances,
+            command_rejections: phase0.structural_report.rejections,
+            topology_changed: phase0.structural_report.topology_changed,
             driver_changes: phase2.driver_changes,
             signal_changes: phase2.signal_changes,
             signal_arrivals: phase2.signal_arrivals,
-            signal_counters,
+            signal_counters: phase0.signal_counters,
+            mobile_movements: phase11.mobile_movements,
         })
     }
 
@@ -482,6 +591,43 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
         }
     }
 
+    let structural_mobiles: BTreeSet<_> = world
+        .structural
+        .mobile_substrates()
+        .iter_alive()
+        .map(|(_, record)| record.id)
+        .collect();
+    let signal_mobiles: Vec<_> = signal.iter_mobile_entries().collect();
+    if signal_mobiles.len() != structural_mobiles.len() {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    for (mobile, ports) in signal_mobiles {
+        if !structural_mobiles.contains(&mobile) {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        validate_mobile_sink(
+            signal,
+            mobile,
+            ports.stop,
+            SinkRole::MobileStop,
+            &mut referenced_sinks,
+        )?;
+        validate_mobile_sink(
+            signal,
+            mobile,
+            ports.left,
+            SinkRole::MobileLeft,
+            &mut referenced_sinks,
+        )?;
+        validate_mobile_sink(
+            signal,
+            mobile,
+            ports.right,
+            SinkRole::MobileRight,
+            &mut referenced_sinks,
+        )?;
+    }
+
     let mut live_drivers = BTreeSet::new();
     for (slot_id, record) in driver_slots {
         if slot_id.entity_id().0 == 0 || slot_id.entity_id().0 >= driver_frontier {
@@ -572,6 +718,7 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
     let mut registry_wires = BTreeSet::new();
     let mut registry_junctions = BTreeSet::new();
     let mut registry_substrates = BTreeSet::new();
+    let mut registry_mobiles = BTreeSet::new();
     for (id, location) in slots {
         if id.0 == 0 || id.0 >= frontier {
             return Err(SimulationError::InvalidCanonicalState);
@@ -616,6 +763,15 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
                     return Err(SimulationError::InvalidCanonicalState);
                 }
             }
+            crate::EntityLocation::MobileSubstrate(index) => {
+                let record = structural
+                    .mobile_substrates()
+                    .get(index)
+                    .ok_or(SimulationError::InvalidCanonicalState)?;
+                if record.id.entity_id() != id || !registry_mobiles.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
             _ => return Err(SimulationError::InvalidCanonicalState),
         }
     }
@@ -655,11 +811,21 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
             return Err(SimulationError::InvalidCanonicalState);
         }
     }
+    let mut store_mobiles = BTreeSet::new();
+    for (index, record) in structural.mobile_substrates().iter_alive() {
+        let id = record.id.entity_id();
+        if registry.location(id) != Some(&crate::EntityLocation::MobileSubstrate(index))
+            || !store_mobiles.insert(id)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
 
     if registry_gates != store_gates
         || registry_wires != store_wires
         || registry_junctions != store_junctions
         || registry_substrates != store_substrates
+        || registry_mobiles != store_mobiles
         || u64::try_from(store_gates.len()).map_err(|_| SimulationError::NumericOverflow)?
             != structural.gates().live_count()
         || u64::try_from(store_wires.len()).map_err(|_| SimulationError::NumericOverflow)?
@@ -668,8 +834,14 @@ fn validate_structural_registry_links(structural: &StructuralWorld) -> Result<()
             != structural.junctions().live_count()
         || u64::try_from(store_substrates.len()).map_err(|_| SimulationError::NumericOverflow)?
             != structural.fixed_substrates().live_count()
+        || u64::try_from(store_mobiles.len()).map_err(|_| SimulationError::NumericOverflow)?
+            != structural.mobile_substrates().live_count()
     {
         return Err(SimulationError::InvalidCanonicalState);
+    }
+    let track_graph = TrackGraph::compile(structural.wires(), structural.junctions())?;
+    for (_, mobile) in structural.mobile_substrates().iter_alive() {
+        track_graph.world_position(mobile.track_position)?;
     }
     Ok(())
 }
@@ -684,7 +856,7 @@ fn validate_gate_driver(
     let record = signal
         .driver_record(driver)
         .ok_or(SimulationError::InvalidCanonicalState)?;
-    if record.owner != owner || record.role != role || !referenced.insert(driver) {
+    if record.owner != owner.entity_id() || record.role != role || !referenced.insert(driver) {
         return Err(SimulationError::InvalidCanonicalState);
     }
     Ok(())
@@ -700,7 +872,23 @@ fn validate_gate_sink(
     let record = signal
         .sink_record(sink)
         .ok_or(SimulationError::InvalidCanonicalState)?;
-    if record.owner != owner || record.role != role || !referenced.insert(sink) {
+    if record.owner != owner.entity_id() || record.role != role || !referenced.insert(sink) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    Ok(())
+}
+
+fn validate_mobile_sink(
+    signal: &SignalWorld,
+    owner: crate::MobileId,
+    sink: SinkId,
+    role: SinkRole,
+    referenced: &mut BTreeSet<SinkId>,
+) -> Result<(), SimulationError> {
+    let record = signal
+        .sink_record(sink)
+        .ok_or(SimulationError::InvalidCanonicalState)?;
+    if record.owner != owner.entity_id() || record.role != role || !referenced.insert(sink) {
         return Err(SimulationError::InvalidCanonicalState);
     }
     Ok(())
@@ -922,6 +1110,65 @@ fn stage_external_driver_updates(
         .driver_events
         .stage(&mut world.event_payloads, candidates)?;
     Ok(())
+}
+
+fn run_phase0_structural_commit(
+    world: &mut CanonicalWorld,
+    commands: &[CommandEnvelope],
+    tick: Tick,
+    physical: &PhysicalScaleProfile,
+    balance: &BalanceProfile,
+) -> Result<Phase0Output, SimulationError> {
+    let old_topology = CompiledSignalTopology::compile(&world.structural, &world.signal, balance)?;
+    let structural_report =
+        world
+            .structural
+            .apply_phase0_with_signal(&mut world.signal, tick, commands, physical)?;
+    world.topology_revision = if structural_report.topology_changed {
+        world.topology_revision.checked_add(Revision(1))?
+    } else {
+        world.topology_revision
+    };
+
+    let track_graph = TrackGraph::compile(world.structural.wires(), world.structural.junctions())?;
+    let topology = CompiledSignalTopology::compile(&world.structural, &world.signal, balance)?;
+    let signal_counters = if structural_report.topology_changed {
+        apply_route_diff(world, &old_topology.route_diff(&topology), &topology, tick)?
+    } else {
+        SignalStepCounters::default()
+    };
+    stage_external_driver_updates(world, &structural_report.external_driver_updates, tick)?;
+
+    Ok(Phase0Output {
+        structural_report,
+        topology,
+        track_graph,
+        signal_counters,
+    })
+}
+
+fn run_phase1_snapshot_and_world_sample(
+    world: &CanonicalWorld,
+    track_graph: &TrackGraph,
+) -> Result<Phase1Snapshot, SimulationError> {
+    let mut mobiles = Vec::new();
+    for (index, record) in world.structural.mobile_substrates().iter_alive() {
+        let start = record.track_position;
+        mobiles.push(MobilePhase1Snapshot {
+            index,
+            mobile: record.id,
+            start,
+            world_point: track_graph.world_position(start)?,
+        });
+    }
+    mobiles.sort_unstable_by_key(|snapshot| snapshot.mobile.entity_id());
+    if mobiles
+        .windows(2)
+        .any(|pair| pair[0].mobile >= pair[1].mobile)
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    Ok(Phase1Snapshot { mobiles })
 }
 
 #[derive(Clone, Copy)]
@@ -1193,7 +1440,7 @@ fn validate_driver_transition(
             }
             let gate = world
                 .signal
-                .gate_record(driver.owner)
+                .gate_record(GateId(driver.owner))
                 .ok_or(SimulationError::InvalidCanonicalState)?;
             if gate.ports.output != event.driver_id {
                 return Err(SimulationError::InvalidCanonicalState);
@@ -1206,7 +1453,7 @@ fn validate_driver_transition(
             }
             Ok(Some(ValidDriverTransition {
                 event,
-                clear_pending_gate: Some(driver.owner),
+                clear_pending_gate: Some(GateId(driver.owner)),
             }))
         }
         DriverTransitionCause::GateStrengthResponse => {
@@ -1215,7 +1462,7 @@ fn validate_driver_transition(
             }
             let gate = world
                 .signal
-                .gate_record(driver.owner)
+                .gate_record(GateId(driver.owner))
                 .ok_or(SimulationError::InvalidCanonicalState)?;
             if gate.current_output != event.level || gate.pending_due_tick.is_some() {
                 return Ok(None);
@@ -1228,7 +1475,10 @@ fn validate_driver_transition(
     }
 }
 
-fn run_phase3(world: &mut CanonicalWorld) -> Result<(), SimulationError> {
+fn run_phase3(
+    world: &mut CanonicalWorld,
+    snapshot: &Phase1Snapshot,
+) -> Result<Vec<MobileIntent>, SimulationError> {
     let gates: Vec<_> = world
         .signal
         .iter_gates()
@@ -1237,14 +1487,89 @@ fn run_phase3(world: &mut CanonicalWorld) -> Result<(), SimulationError> {
     for gate in gates {
         world.signal.set_gate_desired_from_inputs(gate)?;
     }
-    Ok(())
+    snapshot
+        .mobiles
+        .iter()
+        .copied()
+        .map(|mobile_snapshot| {
+            let ports = world
+                .signal
+                .mobile_ports(mobile_snapshot.mobile)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let level = |sink| {
+                world
+                    .signal
+                    .sink_level(sink)
+                    .ok_or(SimulationError::InvalidCanonicalState)
+            };
+            Ok(MobileIntent {
+                index: mobile_snapshot.index,
+                mobile: mobile_snapshot.mobile,
+                start: mobile_snapshot.start,
+                start_world_point: mobile_snapshot.world_point,
+                controls: MobileControlSample {
+                    stop: level(ports.stop)?,
+                    left: level(ports.left)?,
+                    right: level(ports.right)?,
+                },
+                granted_budget: Fixed::ZERO,
+            })
+        })
+        .collect()
+}
+
+fn run_phase4_global_accounting_and_nominal_demand(
+    _world: &CanonicalWorld,
+    _mobile_intents: &[MobileIntent],
+) {
+    // Stage 0 has no Capacity, Power, or economy stores. The fixed movement demand represented by
+    // each MobileIntent is granted at unity in Phase 6; the phase remains explicit and ordered.
+}
+
+fn run_phase5_power_solve_and_brownout() {
+    // Stage 0 freezes the power ratio at one, so there is no Power Region solve yet.
+}
+
+fn grant_stage0_mobile_budgets(intents: &mut [MobileIntent], budget: Fixed) {
+    for intent in intents {
+        intent.granted_budget = if intent.controls.grants_stage0_movement() {
+            budget
+        } else {
+            Fixed::ZERO
+        };
+    }
+}
+
+fn run_phase7(
+    track_graph: &TrackGraph,
+    intents: &[MobileIntent],
+) -> Result<Vec<StagedMobileMovement>, SimulationError> {
+    intents
+        .iter()
+        .map(|intent| {
+            if track_graph.world_position(intent.start)? != intent.start_world_point {
+                return Err(SimulationError::InvalidCanonicalState);
+            }
+            Ok(StagedMobileMovement {
+                index: intent.index,
+                observation: track_graph.stage_movement(
+                    intent.mobile,
+                    intent.start,
+                    intent.controls,
+                    intent.granted_budget,
+                )?,
+            })
+        })
+        .collect()
 }
 
 fn run_phase6(
     world: &mut CanonicalWorld,
     topology: &CompiledSignalTopology,
     tick: Tick,
-    balance: &crate::BalanceProfile,
+    balance: &BalanceProfile,
+    mobile_intents: &mut [MobileIntent],
+    movement_budget: Fixed,
 ) -> Result<(), SimulationError> {
     let gates: Vec<_> = world.signal.iter_gates().collect();
     let mut candidates = Vec::new();
@@ -1315,7 +1640,51 @@ fn run_phase6(
     world
         .driver_events
         .stage(&mut world.event_payloads, candidates)?;
+    grant_stage0_mobile_budgets(mobile_intents, movement_budget);
     Ok(())
+}
+
+fn run_phase8_interaction(_staged_mobiles: &[StagedMobileMovement]) {
+    // Stage 0 has no collision, payload, construction, radiation, or heat contribution stores.
+}
+
+fn run_phase9_thermal_integration() {
+    // Stage 0 has no thermal state.
+}
+
+fn run_phase10_damage_resolution() {
+    // Stage 0 has no Integrity, exposure, or pending-destruction state.
+}
+
+fn run_phase11_progress_commit(
+    world: &mut CanonicalWorld,
+    next_tick: Tick,
+    staged_mobiles: Vec<StagedMobileMovement>,
+) -> Result<Phase11Output, SimulationError> {
+    let committed_positions = staged_mobiles
+        .iter()
+        .map(|staged| {
+            (
+                staged.index,
+                staged.observation.mobile,
+                staged.observation.end,
+            )
+        })
+        .collect::<Vec<_>>();
+    world
+        .structural
+        .commit_mobile_positions(&committed_positions)?;
+    world.next_tick = next_tick;
+    validate_canonical_world(world)?;
+    let state_hash = canonical::state_hash(world.state_view());
+    let mobile_movements = staged_mobiles
+        .into_iter()
+        .map(|staged| staged.observation)
+        .collect();
+    Ok(Phase11Output {
+        state_hash,
+        mobile_movements,
+    })
 }
 
 impl From<ProfileValidationError> for SimulationError {
@@ -1348,6 +1717,15 @@ impl From<SignalTopologyError> for SimulationError {
         match error {
             SignalTopologyError::NumericOverflow => Self::NumericOverflow,
             SignalTopologyError::InvalidCanonicalState => Self::InvalidCanonicalState,
+        }
+    }
+}
+
+impl From<TrackGraphError> for SimulationError {
+    fn from(error: TrackGraphError) -> Self {
+        match error {
+            TrackGraphError::NumericOverflow => Self::NumericOverflow,
+            TrackGraphError::InvalidCanonicalState => Self::InvalidCanonicalState,
         }
     }
 }
@@ -1445,6 +1823,129 @@ mod tests {
         )
     }
 
+    #[test]
+    fn explicit_twelve_phase_sequence_is_total_ordered_and_enforced_by_step() {
+        assert_eq!(TickPhase::ORDER.len(), 12);
+        for (ordinal, phase) in TickPhase::ORDER.into_iter().enumerate() {
+            assert_eq!(usize::from(phase as u8), ordinal);
+        }
+
+        let mut sequence = TickPhaseSequence::default();
+        for phase in TickPhase::ORDER {
+            sequence.enter(phase).expect("canonical phase order");
+        }
+        assert_eq!(sequence.finish(), Ok(()));
+
+        let mut skipped = TickPhaseSequence::default();
+        assert_eq!(
+            skipped.enter(TickPhase::SnapshotAndWorldSample),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+        assert_eq!(
+            skipped.finish(),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+
+        let mut duplicate = TickPhaseSequence::default();
+        duplicate
+            .enter(TickPhase::StructuralCommit)
+            .expect("Phase 0 starts the Tick");
+        assert_eq!(
+            duplicate.enter(TickPhase::StructuralCommit),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let report = simulation
+            .step(&[])
+            .expect("Simulation::step completes all twelve phases");
+        assert_eq!(report.completed_tick, Tick(0));
+        assert_eq!(report.next_tick, Tick(1));
+        assert_eq!(report.state_hash, simulation.state_hash());
+    }
+
+    #[test]
+    fn phase1_snapshots_mobile_start_and_world_point_without_observable_mutation() {
+        let mut simulation = Simulation::new(package()).expect("test package is valid");
+        let pitch = simulation.profiles().physical_scale.world_routing_pitch;
+        let circuit_pitch = simulation.profiles().physical_scale.circuit_routing_pitch;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![point(0, 0), point(3 * pitch.0, 4 * pitch.0)],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("diagonal Track placement succeeds");
+        let local_bounds = crate::FixedAabb::new(
+            point(-4 * circuit_pitch.0, -4 * circuit_pitch.0),
+            point(4 * circuit_pitch.0, 4 * circuit_pitch.0),
+        );
+        simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(1),
+                ordinal: 0,
+                command: crate::Command::PlaceMobileSubstrate(crate::PlaceMobileSubstrateCommand {
+                    origin: point(0, 0),
+                    routing_area: local_bounds,
+                    footprint: local_bounds,
+                }),
+            }])
+            .expect("Mobile placement succeeds");
+
+        let graph = TrackGraph::compile(
+            simulation.canonical.structural.wires(),
+            simulation.canonical.structural.junctions(),
+        )
+        .expect("canonical Track compiles");
+        let tick_before = simulation.next_tick();
+        let hash_before = simulation.state_hash();
+        let snapshot = run_phase1_snapshot_and_world_sample(&simulation.canonical, &graph)
+            .expect("Phase 1 samples canonical Mobile state");
+        assert_eq!(snapshot.mobiles.len(), 1);
+        assert_eq!(
+            snapshot.mobiles[0].start,
+            TrackPosition::Edge {
+                edge: WireId(crate::EntityId(1)),
+                offset: Fixed(pitch.0),
+                heading: crate::Heading::Forward,
+            }
+        );
+        assert_eq!(
+            snapshot.mobiles[0].world_point,
+            point(
+                i64::try_from(
+                    crate::round_div_nearest_even(i128::from(3 * pitch.0), 5)
+                        .expect("3:4 projection rounds"),
+                )
+                .expect("projected x fits Fixed"),
+                i64::try_from(
+                    crate::round_div_nearest_even(i128::from(4 * pitch.0), 5)
+                        .expect("3:4 projection rounds"),
+                )
+                .expect("projected y fits Fixed"),
+            )
+        );
+        assert_eq!(simulation.next_tick(), tick_before);
+        assert_eq!(simulation.state_hash(), hash_before);
+
+        let mut control = Simulation {
+            scenario_id: simulation.scenario_id.clone(),
+            canonical: simulation.canonical.clone(),
+            profiles: simulation.profiles.clone(),
+            initial_state_hash: simulation.initial_state_hash,
+        };
+        let sampled_report = simulation.step(&[]).expect("sampled replica advances");
+        let control_report = control.step(&[]).expect("control replica advances");
+        assert_eq!(sampled_report, control_report);
+        assert_eq!(simulation.state_hash(), control.state_hash());
+    }
+
     fn place_test_not(simulation: &mut Simulation) -> GateId {
         let bounds = crate::FixedAabb::new(
             crate::FixedVec2::new(
@@ -1497,6 +1998,158 @@ mod tests {
         assert_eq!(simulation.step(&[]), Err(SimulationError::NumericOverflow));
         assert_eq!(simulation.next_tick(), Tick(u64::MAX));
         assert_eq!(simulation.state_hash(), before_hash);
+    }
+
+    #[test]
+    fn mobility_ratio_cap_preserves_profiles_and_bounds_mobile_placement() {
+        fn point(x: i64) -> crate::FixedVec2 {
+            crate::FixedVec2::new(Fixed(x), Fixed::ZERO)
+        }
+
+        fn simulation_with_one_unit_track(world_routing_pitch: i64) -> Simulation {
+            let mut profiles = ProfileBundle {
+                numeric: NumericProfile::reference_v1("extreme-mobility"),
+                physical_scale: PhysicalScaleProfile::stage0_alpha("extreme-mobility"),
+                balance: BalanceProfile::stage0_alpha("extreme-mobility"),
+            };
+            profiles.physical_scale.wire_geometry_quantum = Fixed(1);
+            profiles.physical_scale.world_routing_pitch = Fixed(world_routing_pitch);
+            profiles
+                .validate()
+                .expect("pre-Mobility Physical Scale v1 profiles remain valid");
+            let contract =
+                SimulationContract::from_profiles(&profiles).expect("valid profile contract");
+            let package = SimulationPackage::new(
+                "extreme-mobility",
+                InitialWorld::Empty,
+                StageFeatureSet::none(),
+                contract,
+                profiles,
+            );
+            let mut simulation = Simulation::new(package).expect("extreme simulation");
+            let track = simulation
+                .step(&[crate::CommandEnvelope {
+                    target_tick: Tick(0),
+                    ordinal: 0,
+                    command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                        routing_domain: crate::RoutingDomain::OpenWorld,
+                        points: vec![point(0), point(1)],
+                        endpoint_a: crate::EndpointTarget::Free,
+                        endpoint_b: crate::EndpointTarget::Free,
+                    }),
+                }])
+                .expect("one-unit Track placement");
+            assert!(track.command_rejections.is_empty());
+            simulation
+        }
+
+        let local_extent = 4 * crate::REFERENCE_CIRCUIT_ROUTING_PITCH.0;
+        let bounds = crate::FixedAabb::new(
+            crate::FixedVec2::new(Fixed(-local_extent), Fixed(-local_extent)),
+            crate::FixedVec2::new(Fixed(local_extent), Fixed(local_extent)),
+        );
+        let unsupported_ratio = crate::MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA
+            .checked_add(1)
+            .expect("test ratio remains in range");
+        let mut unsupported = simulation_with_one_unit_track(unsupported_ratio);
+        let before_placement = unsupported.state_hash();
+        let before_entity_count = unsupported
+            .canonical
+            .structural
+            .entities()
+            .allocated_count();
+        let before_sink_frontier = unsupported.canonical.signal.sink_frontier();
+        let rejected = unsupported
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(1),
+                ordinal: 0,
+                command: crate::Command::PlaceMobileSubstrate(crate::PlaceMobileSubstrateCommand {
+                    origin: point(0),
+                    routing_area: bounds,
+                    footprint: bounds,
+                }),
+            }])
+            .expect("unsupported Mobility ratio is an ordinary command rejection");
+        assert!(rejected.command_acceptances.is_empty());
+        assert_eq!(
+            rejected.command_rejections[0].reason,
+            crate::CommandRejectionReason::UnsupportedPlacement
+        );
+        assert!(rejected.mobile_movements.is_empty());
+        assert_ne!(
+            rejected.state_hash, before_placement,
+            "the rejected command still completes its Tick"
+        );
+        assert_eq!(
+            unsupported
+                .canonical
+                .structural
+                .entities()
+                .allocated_count(),
+            before_entity_count,
+            "unsupported placement consumes no structural identity"
+        );
+        assert_eq!(
+            unsupported.canonical.signal.sink_frontier(),
+            before_sink_frontier,
+            "unsupported placement consumes no intrinsic control Sink identity"
+        );
+        assert_eq!(
+            unsupported
+                .canonical
+                .structural
+                .mobile_substrates()
+                .live_count(),
+            0
+        );
+
+        let mut boundary =
+            simulation_with_one_unit_track(crate::MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA);
+        let before_boundary_sink = boundary.canonical.signal.sink_frontier();
+        let placement = boundary
+            .step(&[crate::CommandEnvelope {
+                target_tick: boundary.next_tick(),
+                ordinal: 0,
+                command: crate::Command::PlaceMobileSubstrate(crate::PlaceMobileSubstrateCommand {
+                    origin: point(0),
+                    routing_area: bounds,
+                    footprint: bounds,
+                }),
+            }])
+            .expect("maximum supported Mobility ratio completes");
+        assert!(placement.command_rejections.is_empty());
+        let mobile = MobileId(
+            placement.command_acceptances[0]
+                .created_entity
+                .expect("supported placement allocates a Mobile identity"),
+        );
+        let ports = boundary
+            .canonical
+            .signal
+            .mobile_ports(mobile)
+            .expect("supported placement activates all Mobile control ports");
+        assert_ne!(ports.stop, ports.left);
+        assert_ne!(ports.stop, ports.right);
+        assert_ne!(ports.left, ports.right);
+        assert_eq!(
+            boundary.canonical.signal.sink_frontier().entity_id().0
+                - before_boundary_sink.entity_id().0,
+            3,
+            "supported placement consumes exactly STOP, LEFT, and RIGHT Sink identities"
+        );
+        assert_eq!(placement.mobile_movements.len(), 1);
+        assert_eq!(
+            placement.mobile_movements[0].granted_budget,
+            Fixed(crate::MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA)
+        );
+        assert_eq!(
+            placement.mobile_movements[0].end,
+            TrackPosition::Edge {
+                edge: WireId(crate::EntityId(1)),
+                offset: Fixed::ZERO,
+                heading: crate::Heading::Reverse,
+            }
+        );
     }
 
     #[test]
@@ -2436,15 +3089,96 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_stage_feature_rejects_simulation_start() {
+    fn unsupported_later_stage_feature_rejects_simulation_start() {
         let mut package = package();
         package.required_features.mobility = true;
+        package.required_features.capacity = true;
 
         assert_eq!(
             Simulation::new(package).err(),
             Some(SimulationError::UnsupportedStageFeature {
-                feature: "mobility"
+                feature: "capacity"
             })
+        );
+    }
+
+    #[test]
+    fn mobile_commit_order_and_hash_are_independent_of_mobile_store_layout() {
+        let mut canonical = Simulation::new(package()).expect("test package is valid");
+        let pitch = canonical.profiles().physical_scale.world_routing_pitch;
+        let circuit_pitch = canonical.profiles().physical_scale.circuit_routing_pitch;
+        let point = |x: i64, y: i64| crate::FixedVec2::new(crate::Fixed(x), crate::Fixed(y));
+        canonical
+            .step(&[crate::CommandEnvelope {
+                target_tick: canonical.next_tick(),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![point(0, 0), point(8 * pitch.0, 0)],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("track placement succeeds");
+        let local_bounds = crate::FixedAabb::new(
+            point(-4 * circuit_pitch.0, -4 * circuit_pitch.0),
+            point(4 * circuit_pitch.0, 4 * circuit_pitch.0),
+        );
+        canonical
+            .step(&[
+                crate::CommandEnvelope {
+                    target_tick: canonical.next_tick(),
+                    ordinal: 0,
+                    command: crate::Command::PlaceMobileSubstrate(
+                        crate::PlaceMobileSubstrateCommand {
+                            origin: point(pitch.0, 0),
+                            routing_area: local_bounds,
+                            footprint: local_bounds,
+                        },
+                    ),
+                },
+                crate::CommandEnvelope {
+                    target_tick: canonical.next_tick(),
+                    ordinal: 1,
+                    command: crate::Command::PlaceMobileSubstrate(
+                        crate::PlaceMobileSubstrateCommand {
+                            origin: point(2 * pitch.0, 0),
+                            routing_area: local_bounds,
+                            footprint: local_bounds,
+                        },
+                    ),
+                },
+            ])
+            .expect("two Mobile placements succeed");
+
+        let mut reordered = Simulation {
+            scenario_id: canonical.scenario_id.clone(),
+            canonical: canonical.canonical.clone(),
+            profiles: canonical.profiles.clone(),
+            initial_state_hash: canonical.initial_state_hash,
+        };
+        reordered
+            .canonical
+            .structural
+            .reserve_layout_capacity_for_test(128);
+        reordered
+            .canonical
+            .structural
+            .swap_mobile_substrate_slots_for_test(MobileSubstrateIndex(0), MobileSubstrateIndex(1))
+            .expect("test-only Mobile slots swap");
+        validate_canonical_world(&reordered.canonical).expect("reordered layout remains valid");
+        assert_eq!(canonical.state_hash(), reordered.state_hash());
+
+        let canonical_report = canonical.step(&[]).expect("canonical layout moves");
+        let reordered_report = reordered.step(&[]).expect("reordered layout moves");
+        assert_eq!(canonical_report, reordered_report);
+        assert_eq!(canonical.state_hash(), reordered.state_hash());
+        assert!(
+            canonical_report
+                .mobile_movements
+                .windows(2)
+                .all(|pair| pair[0].mobile < pair[1].mobile),
+            "Phase 11 commits and reports Mobiles in stable MobileId order"
         );
     }
 
