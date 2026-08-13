@@ -230,6 +230,25 @@ pub struct ConstructionContactDamageAnalyzerSnapshot {
     pub run_status: RunStatus,
 }
 
+/// Read-only counts that distinguish a stable signal state from one with deferred work.
+///
+/// This is derived observation data: reading it cannot advance a Tick or mutate canonical State.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignalQuiescenceSnapshot {
+    pub next_tick: Tick,
+    pub pending_driver_transitions: u64,
+    pub pending_signal_arrivals: u64,
+    pub pending_gate_transitions: u64,
+}
+
+impl SignalQuiescenceSnapshot {
+    pub const fn is_quiescent(self) -> bool {
+        self.pending_driver_transitions == 0
+            && self.pending_signal_arrivals == 0
+            && self.pending_gate_transitions == 0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StepReport {
     pub completed_tick: Tick,
@@ -1386,6 +1405,25 @@ impl Simulation {
             armed_wires,
             run_status: self.canonical.run_status,
         }))
+    }
+
+    /// Reports every deferred signal mechanism without changing canonical State.
+    pub fn signal_quiescence_snapshot(&self) -> Result<SignalQuiescenceSnapshot, SimulationError> {
+        Ok(SignalQuiescenceSnapshot {
+            next_tick: self.canonical.next_tick,
+            pending_driver_transitions: u64::try_from(self.canonical.driver_events.len())
+                .map_err(|_| SimulationError::NumericOverflow)?,
+            pending_signal_arrivals: u64::try_from(self.canonical.signal_events.len())
+                .map_err(|_| SimulationError::NumericOverflow)?,
+            pending_gate_transitions: u64::try_from(
+                self.canonical
+                    .signal
+                    .iter_gates()
+                    .filter(|gate| gate.pending_due_tick.is_some())
+                    .count(),
+            )
+            .map_err(|_| SimulationError::NumericOverflow)?,
+        })
     }
 
     pub fn gate_signal_ports(&self, gate: GateId) -> Option<GateSignalPorts> {
@@ -7344,5 +7382,98 @@ mod tests {
             simulation.canonical.signal.sink_frontier(),
             sink_frontier_before
         );
+    }
+
+    #[test]
+    fn signal_quiescence_snapshot_counts_every_deferred_mechanism_without_mutation() {
+        let mut simulation = Simulation::new(package()).expect("test Simulation starts");
+        let baseline = simulation
+            .signal_quiescence_snapshot()
+            .expect("quiescence reads");
+        assert_eq!(baseline.next_tick, Tick(0));
+        assert!(baseline.is_quiescent());
+
+        let driver = DriverId(EntityId(1));
+        let sink = SinkId(EntityId(1));
+        simulation
+            .canonical
+            .driver_events
+            .stage(
+                &mut simulation.canonical.event_payloads,
+                [DriverTransition::s0m3(
+                    Tick(2),
+                    driver,
+                    LogicLevel::High,
+                    DriveStrength(1),
+                    0,
+                    DriverTransitionCause::ExternalDriver,
+                )],
+            )
+            .expect("test Driver event stages");
+        stage_signal_arrivals(
+            &mut simulation.canonical.signal_events,
+            &mut simulation.canonical.event_payloads,
+            &mut simulation.canonical.path_certificates,
+            [UncertifiedSignalArrival::topology_sync(
+                Tick(3),
+                driver,
+                sink,
+                DriverSample::s0m3(driver, LogicLevel::Low, DriveStrength(0), Tick(0)),
+                Vec::new(),
+            )],
+        )
+        .expect("test Signal arrival stages");
+        let gate = GateId(EntityId(2));
+        simulation
+            .canonical
+            .signal
+            .activate_gate(gate, GateType::Not, Tick(0))
+            .expect("test Gate activates");
+        simulation
+            .canonical
+            .signal
+            .set_pending(gate, Tick(4), LogicLevel::High, Energy(1))
+            .expect("test Gate transition stages");
+        let hash_before = simulation.state_hash();
+        let first = simulation
+            .signal_quiescence_snapshot()
+            .expect("first read succeeds");
+        let second = simulation
+            .signal_quiescence_snapshot()
+            .expect("second read succeeds");
+        assert_eq!(first, second);
+        assert_eq!(first.pending_driver_transitions, 1);
+        assert_eq!(first.pending_signal_arrivals, 1);
+        assert_eq!(first.pending_gate_transitions, 1);
+        assert!(!first.is_quiescent());
+        assert_eq!(simulation.state_hash(), hash_before);
+        assert_eq!(simulation.next_tick(), Tick(0));
+    }
+
+    #[test]
+    fn signal_quiescence_ignores_unscheduled_unpowered_desired_level() {
+        let mut simulation = Simulation::new(package()).expect("test Simulation starts");
+        let gate = GateId(EntityId(2));
+        simulation
+            .canonical
+            .signal
+            .activate_gate(gate, GateType::Not, Tick(0))
+            .expect("test NOT Gate activates");
+        simulation
+            .canonical
+            .signal
+            .set_gate_desired_level(gate, LogicLevel::High)
+            .expect("test desired level updates");
+
+        let hash_before = simulation.state_hash();
+        let snapshot = simulation
+            .signal_quiescence_snapshot()
+            .expect("quiescence reads");
+        assert_eq!(snapshot.pending_driver_transitions, 0);
+        assert_eq!(snapshot.pending_signal_arrivals, 0);
+        assert_eq!(snapshot.pending_gate_transitions, 0);
+        assert!(snapshot.is_quiescent());
+        assert_eq!(simulation.state_hash(), hash_before);
+        assert_eq!(simulation.next_tick(), Tick(0));
     }
 }

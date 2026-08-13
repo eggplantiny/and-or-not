@@ -28,6 +28,9 @@ mod power_runtime;
 mod power_source;
 mod power_topology;
 mod profile;
+mod reference_architecture;
+mod reference_experiment;
+mod reference_metrics;
 mod replay;
 mod sensing;
 mod signal;
@@ -161,6 +164,50 @@ pub use profile::{
     REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH,
     RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
 };
+pub use reference_architecture::{
+    MaterializedReferenceArchitecture, MaterializedReferenceArchitecturePair,
+    REFERENCE_ARCHITECTURE_FORMAT_VERSION_V1, REFERENCE_ARCHITECTURE_FORMAT_VERSION_V2,
+    REFERENCE_ARCHITECTURE_MAX_BARRIER_TICKS_V2, REFERENCE_ARCHITECTURE_MAX_BINDING_BATCHES_V2,
+    ReferenceArchitectureArtifact, ReferenceArchitectureBindingEndpoint,
+    ReferenceArchitectureBindingStageEvidence, ReferenceArchitectureEndpoint,
+    ReferenceArchitectureError, ReferenceArchitectureExecutedBatchEvidence,
+    ReferenceArchitectureFormatVersion, ReferenceArchitectureLocalId,
+    ReferenceArchitectureMaterializationBatchKind, ReferenceArchitectureMaterializationInput,
+    ReferenceArchitectureMaterializationPlan, ReferenceArchitectureMaterializationSchedule,
+    ReferenceArchitectureMaterializationStep, ReferenceArchitectureObservationBinding,
+    ReferenceArchitectureOperation, ReferenceArchitectureRoleBinding,
+    ReferenceArchitectureRoutingDomain, ReferenceArchitectureScenarioResolution,
+    ReferenceArchitectureSemanticTarget, ReferenceFixedSubstrate, ReferenceGate, ReferenceJunction,
+    ReferenceMobileSubstrate, ReferenceWire, ResolvedReferenceArchitectureSemanticTarget,
+    decode_reference_architecture_artifact, encode_reference_architecture_artifact,
+    materialize_reference_architecture, materialize_reference_architecture_pair,
+    reference_architecture_command_log_hash, resolve_reference_architecture_semantic_target,
+    validate_reference_architecture_against,
+};
+pub use reference_experiment::{
+    REFERENCE_EXPERIMENT_FORMAT_VERSION_V2, REFERENCE_EXPERIMENT_STAGE_S1_M5,
+    REFERENCE_PAIR_FORMAT_VERSION_V1, ReferenceArchitecturePairManifest, ReferenceArchitectureRole,
+    ReferenceArtifactReference, ReferenceDesignBinding, ReferenceExperimentError,
+    ReferenceExperimentPlanV2, ReferenceExperimentRunIdentityV2, ReferenceExperimentRunV2,
+    ReferencePairFairnessInput, ReferenceProfileReference, ReferenceResponseBinding,
+    ReferenceTerritoryAnchor, decode_reference_experiment_plan_v2, decode_reference_pair_manifest,
+    encode_reference_experiment_plan_v2, encode_reference_pair_manifest, experiment_run_id_v2,
+    reference_empty_shared_command_log_hash, reference_enemy_sequence_hash,
+    reference_power_source_sequence_hash, validate_reference_pair_fairness,
+};
+pub use reference_metrics::{
+    REFERENCE_METRIC_ARTIFACT_FORMAT_VERSION_V1, REFERENCE_METRIC_SET_FORMAT_V1,
+    REFERENCE_METRIC_SET_ID_V1, REFERENCE_METRICS_V1, ReferenceMetric, ReferenceMetricArtifact,
+    ReferenceMetricBoundaries, ReferenceMetricCollector, ReferenceMetricError,
+    ReferenceMetricResult, ReferenceMetricResultBoundaries, ReferenceMetricSetArtifact,
+    ReferenceMetricTickSample, ReferenceObservationPhase, ReferenceResponseLatency,
+    ReferenceResponseObservationSpec, ReferenceRuntimeMetrics, ReferenceStaticInventory,
+    ReferenceTerminalStatus, ResolvedReferenceResponseObservation,
+    decode_reference_metric_artifact, decode_reference_metric_set_artifact,
+    derive_reference_static_inventory, encode_reference_metric_artifact,
+    encode_reference_metric_set_artifact, reduce_reference_metrics,
+    resolve_reference_response_observations, validate_reference_metric_bindings,
+};
 pub use replay::{
     HashCheckpoint, REPLAY_FORMAT_VERSION_V1, REPLAY_FORMAT_VERSION_V2, Replay, ReplayArtifact,
     ReplayContractField, ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3,
@@ -182,8 +229,8 @@ pub use signal::{
 pub use simulation::{
     ArmedWireAnalyzerRecord, ConstructionContactDamageAnalyzerSnapshot, ConstructionWorkReport,
     ContactEnergyReport, DamageAnalyzerRecord, DamageReport, DestructionKind, DestructionReport,
-    InteractionHeatReport, RunEndCause, RunStatus, SignalArrivalObservation, Simulation,
-    SimulationPackage, StepReport,
+    InteractionHeatReport, RunEndCause, RunStatus, SignalArrivalObservation,
+    SignalQuiescenceSnapshot, Simulation, SimulationPackage, StepReport,
 };
 pub use snapshot::{
     ConstructionSiteRenderRecord, EnemyRenderRecord, FixedSubstrateRenderRecord, GateRenderRecord,
