@@ -27,7 +27,7 @@ C-18, C-19, C-20, C-25.
 ## Stage 1 — Capacity Economy Probe
 
 - [x] S1-M0 — Physical Scale Experiment Baseline *(committed fresh clean-checkout and Windows-native gate passed)*
-- [ ] S1-M1 — Main Core / Capacity Accounting
+- [x] S1-M1 — Main Core / Capacity Accounting *(committed fresh clean-checkout and Windows-native gate passed)*
 - [ ] S1-M2 — Sensing / Power / Brownout
 - [ ] S1-M3 — Capacity Support Load
 - [ ] S1-M4 — Construction / Contact / Damage
@@ -403,3 +403,50 @@ Retained closure goldens:
 - Materialized `runs.json` SHA-256:
   `6F16DE35480066D8B7DCBC1006AC3F27CA30E219012F4F404D7E896391ACD371`;
   its sixteen retained Run IDs are ordered and pairwise distinct.
+
+## Completed slice — S1-M1
+
+S1-M1 completed on 2026-08-13 at implementation commit
+`5554f76266467d9112acdb2bad3ba5fcba4ed011`. This completes Main Core / Capacity
+Accounting only; S1-M2 through S1-M6 and both Stage 1 gates remain open.
+
+- [x] Scenario schema v2 creates exactly one protected Main Core as EntityId 1 with exact Fixed
+  position, implicit MainCoreAnchor, Capacity, Integrity, and HeatEnergy; Scenario v1 Empty bytes
+  and semantic hash remain preserved.
+- [x] The capacity feature, Main Core initial world, and `capacityProbe` profile form a strict
+  dependency triad. Capacity coefficients remain inert when that feature is absent, and active
+  whole-NCU to raw-Fixed conversion is checked and atomic.
+- [x] Phase 4 sums every live Wire body exactly once in WireId order across OpenWorld,
+  FixedSubstrate, and MobileSubstrate domains. It reports `U` and Main Core `S` as a soft limit;
+  over-capacity construction remains accepted.
+- [x] C-21 is retained as 10 NCU for one body, 10 NCU after an exact four-Wire split, and 12 NCU
+  after a 2 NCU internal Wire. Per-Wire integer Euclidean rounding, including the 46,341/46,342
+  diagonal boundary, is independently frozen.
+- [x] Network Analyzer rows are WireId-sorted, sum exactly to Phase 4 usage, include the Main Core
+  contribution, and are read-only derived observations excluded from State Hash.
+- [x] MainCoreAnchor has exact command, Replay JSON, topology, Signal-isolation, and State encoder
+  tags; live identity, position, routing-domain, binding, removal, and registry invariants are
+  validated fail-closed.
+- [x] State Hash V5 globally encodes Main Core presence and fields while retaining strict V3/V4
+  Replay decode/re-encode compatibility and rejecting legacy execution before Tick 0.
+- [x] Headless and Bevy hosts reproduce identical per-Tick reports and V5 hashes; Network View,
+  selection, inspector, Analyzer, probes, and presentation partitions are non-intervening.
+- [x] `scripts/s1-m1-technical-gate.ps1` runs 45 fail-closed exact tests for Gates 1–12, while the
+  Stage 0 25-exact-test and S1-M0 47-exact-test technical gates remain green.
+- [x] An independent Windows-native `git clone --no-local` of the implementation commit passed
+  locked/offline metadata, formatting, all-target workspace check, strict Clippy, all 514
+  registered workspace tests, all three technical gates, and a clean post-run Git status. WSL
+  was not used.
+
+Retained closure goldens:
+
+- Scenario v2 file SHA-256:
+  `F377128795D98B661D2BCEDC685DF5F193EE69C417C763F7486B3EAE2048251F`;
+  semantic `ArtifactHash`:
+  `f81b15ab86e4c172275b2e2c1c9a13289c04997e3fc1e80f14deedcd76d964ae`.
+- Capacity Replay file SHA-256:
+  `205BE93F4A848FD50189B9565841F0631B62541BB66EB520B51A3FAD4A46256B`.
+- Retained Main Core initial State Hash:
+  `d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b`.
+- Retained C-21 final State Hash:
+  `cbe2f28ada7d5b969de8e220e694996a76391c2d5bf5605c55f28dab803150df`.

@@ -722,3 +722,29 @@ State V5 goldens, C-21 report values, suite/gate counts, and clean-clone evidenc
 
 That closure advances the tracker only for S1-M1. S1-M2 through S1-M6 and both Stage 1 gates remain
 open.
+
+## 13. Closure record
+
+S1-M1 closed on 2026-08-13 at implementation commit
+`5554f76266467d9112acdb2bad3ba5fcba4ed011`.
+
+An independent Windows-native `git clone --no-local` of that commit passed locked/offline Cargo
+metadata, formatting, all-target workspace check, workspace strict Clippy, all 514 registered
+workspace tests, the 25-exact-test Stage 0 gate, the 47-exact-test S1-M0 gate, and the 45-test
+S1-M1 gate. The verification clone remained clean. WSL was not used.
+
+The retained closure values are:
+
+- Scenario v2 file SHA-256
+  `F377128795D98B661D2BCEDC685DF5F193EE69C417C763F7486B3EAE2048251F` and semantic
+  `ArtifactHash` `f81b15ab86e4c172275b2e2c1c9a13289c04997e3fc1e80f14deedcd76d964ae`;
+- capacity Replay file SHA-256
+  `205BE93F4A848FD50189B9565841F0631B62541BB66EB520B51A3FAD4A46256B`;
+- initial Main Core V5 State Hash
+  `d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b`;
+- final C-21 V5 State Hash
+  `cbe2f28ada7d5b969de8e220e694996a76391c2d5bf5605c55f28dab803150df`;
+- Phase 4 usage `10 -> 10 -> 12 NCU` with Main Core support `1000 NCU`.
+
+This record completes only S1-M1. It does not claim C-07, C-08, C-09, C-10, C-22, the Stage 1
+technical gate, or the Stage 1 product gate.

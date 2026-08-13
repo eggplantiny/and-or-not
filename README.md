@@ -11,7 +11,12 @@ fresh clean-checkout offline 게이트와 실제 GUI 스모크를 통과했고, 
 **S1-M0 Physical Scale Experiment Baseline도 정식 완료됐다.** 구현 커밋
 `fe616fc6d9ffc81fd37864cf3d018343b327106b`는 별도 Windows-native clean clone에서 전체
 workspace 검사와 테스트, Stage 0 게이트, 47-test S1-M0 게이트, 8-profile/16-run 실제
-materialization을 모두 통과했다. Stage 1 전체는 아직 진행 중이며 다음 구현 경계는 S1-M1이다.
+materialization을 모두 통과했다.
+
+**S1-M1 Main Core / Capacity Accounting도 정식 완료됐다.** 구현 커밋
+`5554f76266467d9112acdb2bad3ba5fcba4ed011`은 별도 Windows-native `git clone --no-local`
+검증에서 514개 workspace 테스트와 Stage 0, S1-M0, 45-test S1-M1 게이트를 모두 통과했다.
+Stage 1 전체는 아직 진행 중이며 다음 구현 경계는 S1-M2이다.
 
 ## Source baseline
 
@@ -25,6 +30,7 @@ materialization을 모두 통과했다. Stage 1 전체는 아직 진행 중이�
 - S0-M7 implementation authority: `docs/AON_S0_M7_Canonical_Decisions_v1.0.md`
 - Stage 0 product playtest: `docs/AON_Stage0_Product_Gate_Playtest_v1.0.md`
 - S1-M0 implementation authority: `docs/AON_S1_M0_Canonical_Decisions_v1.0.md`
+- S1-M1 implementation authority: `docs/AON_S1_M1_Canonical_Decisions_v1.0.md`
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -83,6 +89,13 @@ cargo run -p aon-headless --locked --offline -- `
   replay fixtures/replays/mobility-retained-stop-v1.json
 ```
 
+Retained S1-M1 Main Core capacity Replay:
+
+```powershell
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m1-capacity-accounting-v1.json
+```
+
 Materialize the retained S1-M0 Physical Scale experiment plan:
 
 ```powershell
@@ -126,6 +139,7 @@ cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo test --workspace --locked --offline -- --test-threads=1
 powershell -NoProfile -File .\scripts\stage0-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m0-technical-gate.ps1
+powershell -NoProfile -File .\scripts\s1-m1-technical-gate.ps1
 cargo test -p aon-sim --test signal_conformance --locked --offline
 cargo test -p aon-sim --test feedback_conformance --locked --offline
 cargo test -p aon-sim --test replay_golden --locked --offline
@@ -147,24 +161,30 @@ fixed-point numeric/geometry, stable identity registry, canonical Stage 0 struct
 Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event calendar, 명시적
 12-Phase `Simulation::step`, render snapshot, canonical state hash와 Replay v1까지 제공한다.
 
-- Scenario, Numeric, Physical schema `1`과 Balance schema `2`, semantics
-  `aon-semantics-v1`, hash algorithm `blake3-v1`을 현재 지원한다.
-- Profile hash는 versioned canonical encoding을, state hash는 TrackPosition과 Mobile control
-  mapping까지 포함한 `AON\0STATE\0V4\0` encoder를 사용한다. retained V3 Replay는 strict
-  decode되지만 V4-only 실행에서는 typed unsupported-version 오류를 낸다.
-- artifact의 Initial World는 아직 Empty만 지원하지만, command로 Fixed Substrate, Gate, Wire,
-  Junction을 생성·바인드·제거할 수 있다.
+- Scenario schema `1`의 Empty와 schema `2`의 Main Core initial world, Numeric/Physical schema
+  `1`, Balance schema `2`, semantics `aon-semantics-v1`, hash algorithm `blake3-v1`을 지원한다.
+- Profile hash는 versioned canonical encoding을, state hash는 Main Core와 파생 anchor까지
+  포함한 전역 `AON\0STATE\0V5\0` encoder를 사용한다. retained V3/V4 Replay는 strict
+  decode·재인코딩되지만 V5 실행에서는 typed unsupported-version 오류를 낸다.
+- Main Core는 첫 canonical EntityId, 위치, Capacity, Integrity, HeatEnergy와 implicit
+  `MainCoreAnchor`를 가지며 제거할 수 없다. OpenWorld Wire만 정확한 anchor에 바인드할 수
+  있고, 이 물리 endpoint는 Signal net을 서로 합치지 않는다.
 - Phase 0은 ordinal ordering, deterministic rejection, geometry validation, generation/revision,
   fatal-overflow rollback을 구현한다.
 - Phase 1/3/6/7/11은 Mobile 시작 위치와 world point snapshot, STOP/LEFT/RIGHT 단일 sample,
   정확한 movement budget, staged trajectory, EntityId 순서 commit을 구현한다. Phase 2/3/6은
   DriverTransition, SignalArrival/TopologySync, simultaneous Sink resolution, Gate truth table,
   inertial cancellation, transport delay를 구현한다.
+- Phase 4는 WireId 순서로 모든 live Wire body 길이를 정확히 한 번 합산해 raw Fixed Capacity
+  사용량 `U`와 Main Core 지원량 `S`를 산출한다. 초과 사용은 관찰 가능한 soft limit이며
+  구조 배치를 거부하지 않는다. `StepReport`와 read-only Network Analyzer가 같은 값을
+  노출하지만 derived accounting은 State Hash에 들어가지 않는다.
 - in-flight topology edit는 stamped Path Certificate로 검증한다. Route Diff가 만든 sync와
   propagation은 revision-aware slot comparison으로 합쳐지고, 제거된 route는 passive Low를
   즉시 재해결한다.
-- Replay v1은 immutable initial-state Header, zero Seed/empty generator, 여덟 Stage 0
-  Command variant, strict JSON, normalized Tick scheduling, sparse hash checkpoint를 제공한다.
+- Replay v1은 immutable initial-state Header, zero Seed, Empty/MainCore world generator, 여덟
+  Stage 0 Command variant와 MainCoreAnchor endpoint, strict JSON, normalized Tick scheduling,
+  sparse hash checkpoint를 제공한다.
 - Headless는 `replay <path>`로 artifact 기준 상대 Scenario를 로드하고, Bevy harness는 같은
   Command Log를 canonical Tick 기준 `FixedUpdate`에 제출한다.
 - S1-M0 Core는 strict Physical Scale matrix, versioned Experiment plan/Run identity, Scenario와
