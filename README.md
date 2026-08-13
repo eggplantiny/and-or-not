@@ -22,12 +22,11 @@ materialization을 모두 통과했다.
 검증에서 629개 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
 70-test S1-M2 fail-closed 기술 게이트를 모두 통과했다.
 
-**S1-M3 Capacity Support Load 구현과 종료 증거는 준비됐지만 아직 정식 완료 상태가
-아니다.** Balance v4, exact soft-support arithmetic, WireId-stable distribution, intrinsic
-OvercapacitySupport Power load, Phase 8 Support Heat와 retained C-22 Headless/Bevy 증거를
-구현했고, 29-test fail-closed S1-M3 기술 게이트를 등록했다. 구현 커밋과 fresh
-Windows-native clean-tree 전체 검증 전이므로 tracker와 완료 선언은 그대로 열어 둔다.
-S1-M3 종료 뒤의 구현 경계는 S1-M4다.
+**S1-M3 Capacity Support Load도 정식 완료됐다.** 구현 커밋
+`f59fe50b6b19af0696e4f4fd0e2523f12889f973`은 별도 Windows-native `git clone --no-local`
+검증에서 653개 등록 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
+70-test S1-M2, 29-test S1-M3 fail-closed 기술 게이트를 모두 통과했다. WSL은 사용하지
+않았다. Stage 1 전체는 아직 진행 중이며, 다음 구현 경계는 S1-M4다.
 
 ## Source baseline
 

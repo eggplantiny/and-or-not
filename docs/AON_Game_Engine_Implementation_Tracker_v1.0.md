@@ -29,7 +29,7 @@ C-18, C-19, C-20, C-25.
 - [x] S1-M0 — Physical Scale Experiment Baseline *(committed fresh clean-checkout and Windows-native gate passed)*
 - [x] S1-M1 — Main Core / Capacity Accounting *(committed fresh clean-checkout and Windows-native gate passed)*
 - [x] S1-M2 — Sensing / Power / Brownout *(committed fresh clean-checkout and Windows-native gate passed)*
-- [ ] S1-M3 — Capacity Support Load
+- [x] S1-M3 — Capacity Support Load *(committed fresh clean-checkout and Windows-native gate passed)*
 - [ ] S1-M4 — Construction / Contact / Damage
 - [ ] S1-M5 — Reference Architecture Fixture
 - [ ] S1-M6 — Parameter Sweep
@@ -519,3 +519,62 @@ Retained closure goldens:
   initial/final V6 State Hashes:
   `72a6eb1f246d18b7059e4a4d9efc6394890edd8360582d7f6b12beac3a13a5ed` and
   `8565e47f3a2a9d652956a9ca692b7cc3c3baaaf5f2dbb07b334acfd25ee7cace`.
+
+## Completed slice — S1-M3
+
+S1-M3 completed on 2026-08-13 at implementation commit
+`f59fe50b6b19af0696e4f4fd0e2523f12889f973`. This completes Capacity Support Load only;
+S1-M4 through S1-M6 and both Stage 1 gates remain open.
+
+- [x] Balance schema v4 strictly requires Capacity, Power, and Capacity Support probes, selects the
+  outer schema before strict version-body faults, and adds one independently hash-sensitive exact
+  `supportPowerPerNCU` Rational. Balance v2/v3 validation, encodings, hashes, and runtime behavior
+  remain unchanged.
+- [x] The public exact-`u128` kernel computes `E=max(0,U-S)` and the frozen linear/quadratic support
+  curve with one final ceiling. It rejects coefficient, denominator-floor, conversion, and overflow
+  boundaries with exact typed errors and no saturation, wrapping, panic, or partial output.
+- [x] Positive Support Demand is distributed conservatively by measured Wire length with remainder
+  assigned in ascending `WireId` order. Phase 4 reuses those lengths and inserts positive shares as
+  intrinsic `DemandKind::OvercapacitySupport` loads before the common-ratio Power solve.
+- [x] Support loads receive the same regional ratio as ordinary loads, including partial and
+  source-less cases. Phase 8 derives report-only Support Heat from actual grants with
+  nearest-ties-even rounding; it adds no canonical thermal state, Phase-9 integration, damage, or
+  destruction.
+- [x] Balance v2/v3 reports retain `None`, active v4 zero is `Some(0)`, and overcapacity publishes
+  exact positive excess, total demand, and per-Wire shares. Network and Power/Sense analyzers
+  recompute sorted read-only observations without changing State V6, ticks, events, identities, or
+  allocator frontiers.
+- [x] Retained C-22 proves `U=120`, `S=100`, `E=20`, Support Demand `28`, ascending-Wire shares
+  `17/11`, ordinary leakage+sensing demand `240`, total nominal demand and Source generation `268`,
+  common ratio `1`, and Support Heat `4+3=7`, with no Wire deletion, build rejection, or direct
+  Capacity delay/damage.
+- [x] Headless and Bevy hosts reproduce every C-22 completed-Tick State V6 hash, Capacity report,
+  Power load/grant/ratio, and Phase-8 Heat row through `nextTick=3`.
+- [x] Bounded independent exact-`u128` oracles freeze the curve, one-final-ceiling rule, typed
+  numeric boundaries, monotonicity (`U=121` produces `D=30 > 28`), conservation, and permutation
+  stability; bounded strict-decoder and Capacity Support corpora remain panic-free.
+- [x] `scripts/s1-m3-technical-gate.ps1` runs 29 unique fail-closed exact tests covering executable
+  Gates 1–15, while the Stage 0 25-test, S1-M0 47-test, S1-M1 45-test, and S1-M2 70-test gates
+  remain green.
+- [x] An independent Windows-native `git clone --no-local` of the implementation commit passed
+  locked/offline metadata, formatting, all-target workspace check, strict Clippy, all 653
+  registered workspace tests, all five technical gates, and a clean post-run Git status with zero
+  tracked or untracked differences. WSL was not used.
+
+Retained closure goldens:
+
+- S1-M3 authority SHA-256:
+  `C725E03D2E7790056F32DE29D83D190CF01784617388646756886B6C77DBAF9B`.
+- Balance v4 file SHA-256:
+  `73A3B3512D0809808469BE614426867789D17F1BE86C5E9513893A4DE686624B`;
+  semantic `ProfileHash`:
+  `a0a8974aebc87e30d602ffa019340e59c908912c0b36e0e0634e51214afc45ef`.
+- C-22 Scenario file SHA-256:
+  `609CE583577F0E65084A75A27644C1D8D58FD054B966D99E98947081D0BCE992`;
+  semantic `ArtifactHash`:
+  `bdebfe491a2f3a31dfdcd7c2470cf447415137459de5e4d65095d3d38f0e01a5`.
+- C-22 Replay file SHA-256:
+  `8BB79ED60AE5CAFBC46F7A077549773BD9C117738D99982E5354EFA8DA777C9C`;
+  initial/final V6 State Hashes:
+  `47cddc7a4a1a1371d6600953bb7c0acc7c7e5e465741869375026e7efcab9369` and
+  `7f687d752df7146141be826dbb74668866494c1a024ec6f157bb3eb264c3445c`.
