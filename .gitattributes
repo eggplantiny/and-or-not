@@ -1,8 +1,11 @@
 fixtures/replays/*.json text eol=lf
+fixtures/replays/**/*.json text eol=lf
 fixtures/scenarios/*.json text eol=lf
+fixtures/scenarios/**/*.json text eol=lf
 fixtures/experiments/*.json text eol=lf
 fixtures/experiments/*.txt text eol=lf
 fixtures/modules/*.json text eol=lf
+profiles/**/*.json text eol=lf
 crates/aon-sim/tests/fixtures/replay-*.json text eol=lf
 crates/aon-fuzz-harness/corpus/mobility-runtime/*.case binary
 crates/aon-fuzz-harness/corpus/experiment/*.case binary
