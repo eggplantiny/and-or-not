@@ -1,15 +1,15 @@
 {
   "scenarioPath": "../scenarios/empty.json",
   "header": {
-    "formatVersion": 1,
+    "formatVersion": 2,
     "semanticsVersion": "aon-semantics-v1",
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
-    "stateHashVersion": "aon-state-v5",
+    "stateHashVersion": "aon-state-v6",
     "worldGeneratorVersion": "aon-empty-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561",
+    "initialStateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -112,91 +112,91 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561"
+      "stateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1"
     },
     {
       "nextTick": 1,
-      "stateHash": "f3ab8d059652c952a6dfca72c8465f28d1b2838e7488da711c100fba627927a0"
+      "stateHash": "fc2cbfcbc0c5f9871a84abb66a206a30fb3108979f3053897fce5a780c8dca4b"
     },
     {
       "nextTick": 2,
-      "stateHash": "b1e5f706de212a7c0833b09f5d7937c083874bd2f5f5d1a7c9957504f363a127"
+      "stateHash": "d3c0a9de1b5c8d9b7d3587e741d4424ba13addd481f43df818593f0e9b113e54"
     },
     {
       "nextTick": 3,
-      "stateHash": "8f82c3793b9517d096775fca0b244a2ec7c6b37855d2e576fcd3645bc0fe14cf"
+      "stateHash": "3d9b04b81552e62379530d3b43b00b398e1dae5cf58a21a2ce8c6cad361673c9"
     },
     {
       "nextTick": 4,
-      "stateHash": "738f81120d4d8e521593e3188b3957f48748e3c0176669add0ce5f46e698314e"
+      "stateHash": "195d9f2e2d7a842de09c76cda5779a4f2210714cb7f04d647ac27c7f38449dfd"
     },
     {
       "nextTick": 5,
-      "stateHash": "d1e59c029e55e208e87a064bac82c9de76e0961e9c2ff878c826af1825cc0990"
+      "stateHash": "c3a447e5aff7d423442a51a1b5b88d125be8d51d01f0036f9f6534628453fa62"
     },
     {
       "nextTick": 6,
-      "stateHash": "a5c2ec61822c698456c944fc47d8b60edee21ad274e3a779505fdd9ecfca2500"
+      "stateHash": "025f2b27eae6b6cd6e2b42d6605108e5e91a5dcaf99ffe17769ff8a42744a7c9"
     },
     {
       "nextTick": 7,
-      "stateHash": "e34ae903a3211d1057583da4935d18f76017aa2e4b1ba4083173fea2d0e1b815"
+      "stateHash": "0b283b41b29b77e5a3a42bddc4331607b40f32af85f72a20a7dcebe661a4366a"
     },
     {
       "nextTick": 8,
-      "stateHash": "eeee9917e7c261e1de210563ef9eefcf7db0ebd21c30769153d398e03b120336"
+      "stateHash": "580349ca6c99013531cd8950a99c6cbceddaf9778c6054337cbbc90e250506fa"
     },
     {
       "nextTick": 9,
-      "stateHash": "1b674dadf4ab85ee698c192036a3c19419c8e54a5c8a5a7befd5ddbb78fede23"
+      "stateHash": "826f5989de40d6864123494175264d56232fe4e2bc230fda8b3dfde680d09041"
     },
     {
       "nextTick": 10,
-      "stateHash": "ac06f32c91be94391019047b6fb590136966c59432c2998ad7c86c7b8cdbf64b"
+      "stateHash": "638564b19a9515bec3dae998f2873b820ce77629a7fe628837c74be75d953236"
     },
     {
       "nextTick": 11,
-      "stateHash": "29ec2348d5e89b19250911d61936adfd21514fc065379d0a6e8a82b4b1df9b5c"
+      "stateHash": "321f616b7ea3de44acda578d92591f561c37e21b5a6595048b3c5bef088dd2d5"
     },
     {
       "nextTick": 12,
-      "stateHash": "69750ef9e31430372d9a5a7ab5e320b5c9e9e7193897c48556e5062cf8588dd9"
+      "stateHash": "96cdea15948600427f196983a4c51100fa038af078b1c7bd29d6781af2cff703"
     },
     {
       "nextTick": 13,
-      "stateHash": "d11bce25e5a266cdd222d1a01f8489623d70c322a01465657c3f08e74ec53bd3"
+      "stateHash": "053820f921e62272aa173c174c896192323da02c5e12d66b45e4300b96b26051"
     },
     {
       "nextTick": 14,
-      "stateHash": "f963fe5d0604131b7314be1c7760c1808fcfe7cb66822a0a10972bdb4d5995ab"
+      "stateHash": "75d4d89c714e200f667b934964f41d6459c170e2a8c943b6d599a4790b332aed"
     },
     {
       "nextTick": 15,
-      "stateHash": "3e5a163c8e0e2b9e9b4f8263892791e301a5bc3652a3a71a73cb9328c2f38eb8"
+      "stateHash": "47325bfc04b616d516bb0239a190b927e6e50c288da6dce2f898df890033ecb8"
     },
     {
       "nextTick": 16,
-      "stateHash": "709465e7615bdf06dcc1fbde0bb575b4893d1540ae7508d736f4a7f79ec4b232"
+      "stateHash": "b699426fb47ac16dc5fe30ea3519e91aa80101a33eeccf35f93ae910f0dbbf92"
     },
     {
       "nextTick": 17,
-      "stateHash": "9168956158d1eca9b9e41245238795bac58f4c9b5d2ab71b6afd6d1bcc8afd23"
+      "stateHash": "3aa83e7eae39aa8f08aea41a7f067589696b9739b413e2ee4a8999b3dbe3923b"
     },
     {
       "nextTick": 18,
-      "stateHash": "257f457cb4428e1731b6ad461a4d4d355ddbe86fb6a6e71b88c117c398d5ef7f"
+      "stateHash": "3f59190b7710959731bc860bc21280c7a248d5808e0cc036e1b518dd9bce2a39"
     },
     {
       "nextTick": 19,
-      "stateHash": "7d45850616ea277c2f675e3d2d7b228ba042a7491b235c6ff88605f2fdec8a8c"
+      "stateHash": "25c714cd8821d9bba48b8b5d62dab4b09260696c6c2a5a67176c56e009f712a3"
     },
     {
       "nextTick": 20,
-      "stateHash": "1d7279ff590c5d0c127124e177176e77fd4870df329ac8f9f53272d5176b8f8b"
+      "stateHash": "ce15662c1e540b8683d9e562b585259c9c2cc40fd4e70ea22a04acdbc2866cc8"
     },
     {
       "nextTick": 21,
-      "stateHash": "3e9cc996465f0849244ba84adbf1f7637e0415689d58da2558c5b85c714e9319"
+      "stateHash": "11699b3a0decbd6d72f227060fe737b637be9503aa2a6e726b3a8776b4ae6188"
     }
   ]
 }

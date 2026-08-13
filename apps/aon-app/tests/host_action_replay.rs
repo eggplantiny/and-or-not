@@ -78,7 +78,7 @@ fn recorded_replay(final_next_tick: u64) -> (Replay, Vec<StateHash>) {
         .iter()
         .map(|checkpoint| checkpoint.state_hash)
         .collect::<Vec<_>>();
-    let replay = Replay::new(recorder.replay_header(), commands, checkpoints)
+    let replay = Replay::new_v2(recorder.replay_header(), commands, Vec::new(), checkpoints)
         .expect("recorded Replay is valid");
     (replay, trace)
 }
@@ -421,8 +421,9 @@ fn replay_checkpoint_divergence_faults_and_pauses_before_any_later_tick() {
     } else {
         StateHash::default()
     };
-    let replay = Replay::new(
+    let replay = Replay::new_v2(
         simulation.replay_header(),
+        Vec::new(),
         Vec::new(),
         vec![
             HashCheckpoint {

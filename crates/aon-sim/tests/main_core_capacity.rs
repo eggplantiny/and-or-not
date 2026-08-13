@@ -4,9 +4,9 @@ use aon_sim::{
     InitialWorld, Integrity, JsonErrorCategory, MainCoreId, NumericProfile, PackageError,
     PhysicalScaleProfile, ProfileBundle, RemoveEntityCommand, RenderSnapshot, Replay,
     ReplayArtifact, RoutingDomain, SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2,
-    Simulation, SimulationContract, SimulationError, SimulationPackage, StageFeatureSet, Tick,
-    TopologyNodeId, WireEnd, WireId, WorldGeneratorVersion, decode_replay_artifact,
-    decode_scenario_manifest, encode_replay_artifact,
+    SCENARIO_SCHEMA_VERSION_V3, Simulation, SimulationContract, SimulationError, SimulationPackage,
+    StageFeatureSet, Tick, TopologyNodeId, WireEnd, WireId, WorldGeneratorVersion,
+    decode_replay_artifact, decode_scenario_manifest, encode_replay_artifact,
 };
 
 const WORLD_PITCH: i64 = 65_536;
@@ -240,7 +240,7 @@ fn simulation_construction_compound_errors_follow_frozen_precedence() {
     };
 
     let mut unsupported = capacity_features();
-    unsupported.sensing = true;
+    unsupported.relay = true;
     assert_eq!(
         Simulation::new(SimulationPackage::new(
             "precedence",
@@ -250,7 +250,7 @@ fn simulation_construction_compound_errors_follow_frozen_precedence() {
             invalid_profiles.clone(),
         ))
         .err(),
-        Some(SimulationError::UnsupportedStageFeature { feature: "sensing" })
+        Some(SimulationError::UnsupportedStageFeature { feature: "relay" })
     );
 
     assert!(matches!(
@@ -583,7 +583,7 @@ fn scenario_decode_precedence_and_v1_v2_pairing_are_frozen() {
         decode_scenario_manifest(&serde_json::to_vec(&unsupported).expect("JSON serializes")),
         Err(PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Scenario,
-            expected: SCENARIO_SCHEMA_VERSION_V2,
+            expected: SCENARIO_SCHEMA_VERSION_V3,
             actual: 99,
         })
     );
@@ -854,9 +854,10 @@ fn replay_main_core_anchor_json_is_camel_case_and_round_trips() {
     let report = simulation
         .step(std::slice::from_ref(&command))
         .expect("anchored placement succeeds");
-    let replay = Replay::new(
+    let replay = Replay::new_v2(
         simulation.replay_header(),
         vec![command],
+        Vec::new(),
         vec![
             HashCheckpoint {
                 next_tick: Tick(0),

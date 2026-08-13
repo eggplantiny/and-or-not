@@ -10,7 +10,7 @@ pub use experiment::{
 use aon_sim::{
     ArtifactBytes, ExperimentArtifactError, PackageError, PhysicalScaleProfileArtifactError,
     Replay, ReplayArtifact, ReplayError, Simulation, SimulationError, SimulationPackage, StateHash,
-    decode_package, decode_replay_artifact, decode_scenario_manifest,
+    StepReport, decode_package, decode_replay_artifact, decode_scenario_manifest,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,6 +107,7 @@ pub struct RunTrace {
     scenario_id: String,
     completed_ticks: u64,
     checkpoints: Vec<StateHash>,
+    reports: Vec<StepReport>,
 }
 
 impl RunTrace {
@@ -120,6 +121,10 @@ impl RunTrace {
 
     pub fn checkpoints(&self) -> &[StateHash] {
         &self.checkpoints
+    }
+
+    pub fn reports(&self) -> &[StepReport] {
+        &self.reports
     }
 
     pub fn final_hash(&self) -> StateHash {
@@ -161,17 +166,20 @@ pub fn run_package(package: SimulationPackage, ticks: u64) -> Result<RunTrace, H
         .and_then(|value| value.checked_add(1))
         .unwrap_or(0);
     let mut checkpoints = Vec::with_capacity(capacity);
+    let mut reports = Vec::with_capacity(usize::try_from(ticks).unwrap_or(0));
     checkpoints.push(simulation.state_hash());
 
     for _ in 0..ticks {
         let report = simulation.step(&[])?;
         checkpoints.push(report.state_hash);
+        reports.push(report);
     }
 
     Ok(RunTrace {
         scenario_id,
         completed_ticks: ticks,
         checkpoints,
+        reports,
     })
 }
 
@@ -189,18 +197,25 @@ pub fn run_replay(package: SimulationPackage, replay: &Replay) -> Result<RunTrac
     let scenario_id = simulation.scenario_id().to_owned();
     let final_next_tick = replay.final_next_tick();
     let mut trace = Vec::new();
+    let mut reports = Vec::new();
     trace.push(simulation.state_hash());
 
     let mut checkpoint_index = 0;
     verify_current_checkpoint(replay, &simulation, &mut checkpoint_index)?;
 
     while simulation.next_tick() < final_next_tick {
+        let next_tick = simulation.next_tick();
         let commands = replay
-            .commands_for_tick(simulation.next_tick())
+            .commands_for_tick(next_tick)
             .cloned()
             .collect::<Vec<_>>();
-        let report = simulation.step(&commands)?;
+        let world_inputs = replay
+            .world_inputs_for_tick(next_tick)
+            .cloned()
+            .collect::<Vec<_>>();
+        let report = simulation.step_with_world_inputs(&commands, &world_inputs)?;
         trace.push(report.state_hash);
+        reports.push(report);
         verify_current_checkpoint(replay, &simulation, &mut checkpoint_index)?;
     }
 
@@ -209,6 +224,7 @@ pub fn run_replay(package: SimulationPackage, replay: &Replay) -> Result<RunTrac
         scenario_id,
         completed_ticks: final_next_tick.0,
         checkpoints: trace,
+        reports,
     })
 }
 

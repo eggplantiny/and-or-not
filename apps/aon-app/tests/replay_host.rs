@@ -47,7 +47,8 @@ fn recorded_command_replay(final_next_tick: u64) -> (SimulationPackage, Replay, 
         .iter()
         .map(|checkpoint| checkpoint.state_hash)
         .collect();
-    let replay = Replay::new(header, commands, checkpoints).expect("recorded replay is valid");
+    let replay = Replay::new_v2(header, commands, Vec::new(), checkpoints)
+        .expect("recorded replay is valid");
 
     (package, replay, expected_trace)
 }
@@ -148,7 +149,8 @@ fn recorded_mobility_replay() -> (SimulationPackage, Replay, Vec<StateHash>) {
         .iter()
         .map(|checkpoint| checkpoint.state_hash)
         .collect::<Vec<_>>();
-    let replay = Replay::new(header, commands, checkpoints).expect("mobility replay is valid");
+    let replay = Replay::new_v2(header, commands, Vec::new(), checkpoints)
+        .expect("mobility replay is valid");
     (package, replay, trace)
 }
 
@@ -234,8 +236,13 @@ fn replay_checkpoint_divergence_is_a_host_error() {
     let (package, replay, _) = recorded_command_replay(4);
     let mut checkpoints = replay.checkpoints().to_vec();
     checkpoints[1].state_hash = checkpoints[0].state_hash;
-    let divergent = Replay::new(*replay.header(), replay.commands().to_vec(), checkpoints)
-        .expect("shape remains valid");
+    let divergent = Replay::new_v2(
+        *replay.header(),
+        replay.commands().to_vec(),
+        replay.world_inputs().to_vec(),
+        checkpoints,
+    )
+    .expect("shape remains valid");
 
     let error = run_replay_host_harness(package, divergent, 0, false)
         .expect_err("checkpoint mismatch must fail the host");

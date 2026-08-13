@@ -93,6 +93,7 @@ fn canonical_tags_and_s0m4_certificate_fields_are_exact() {
         DriverTransitionCause::GateStrengthResponse.canonical_tag(),
         2
     );
+    assert_eq!(DriverTransitionCause::WireSense.canonical_tag(), 3);
     assert_eq!(SignalArrivalKind::Propagation.canonical_tag(), 0);
     assert_eq!(SignalArrivalKind::TopologySync.canonical_tag(), 1);
 

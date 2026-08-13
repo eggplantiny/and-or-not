@@ -1,15 +1,15 @@
 {
   "scenarioPath": "../scenarios/empty.json",
   "header": {
-    "formatVersion": 1,
+    "formatVersion": 2,
     "semanticsVersion": "aon-semantics-v1",
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
-    "stateHashVersion": "aon-state-v5",
+    "stateHashVersion": "aon-state-v6",
     "worldGeneratorVersion": "aon-empty-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561",
+    "initialStateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -309,27 +309,27 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561"
+      "stateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1"
     },
     {
       "nextTick": 15,
-      "stateHash": "571226e91241c1fa521489a498535f9522727404959da40569eb3acbcba03e81"
+      "stateHash": "c5671008e684a827a75ca56aac8953f6abb9f604fd7b1fe05446a5a9b45baa1c"
     },
     {
       "nextTick": 20,
-      "stateHash": "cdd886edc0cf5142358071b3c48ca766d426646c3e1b7d2f4439f5575f7304b3"
+      "stateHash": "3a7687ad5dfb54744d93aef1897c9a8574d3da738ad790659a25e31c56186d8a"
     },
     {
       "nextTick": 33,
-      "stateHash": "4c919b0a07cf8cfb086ab0820a35c394134a3dd19b85c9b186bda40360518df6"
+      "stateHash": "98d6d64293aef3453b78265512a40110bf6977742da3c1a9a7b0c95120f35042"
     },
     {
       "nextTick": 46,
-      "stateHash": "572e1c031e5eddb0f41b7e90374194de745b083f59d390a961f72c6349cd3815"
+      "stateHash": "70321d5e8a8f66fedb9ae230863998f9bd8b0ffd6c97ae034113331885d62fed"
     },
     {
       "nextTick": 100000,
-      "stateHash": "61d49248320f1c9cb803325945e18fc19d59cf80e33ab7d877543e3b4fc75f32"
+      "stateHash": "957a8644c2c9246f37912701883b7eb4da097dea2b515b91ddfb1b25bfcd5a83"
     }
   ]
 }

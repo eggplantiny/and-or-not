@@ -1,8 +1,8 @@
 use aon_sim::{
-    ArtifactBytes, HASH_ALGORITHM_ID_BLAKE3_V1, REPLAY_FORMAT_VERSION_V1, ReplayError,
-    SEMANTICS_VERSION_V1, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5,
-    Seed, Simulation, StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1, decode_package,
-    decode_replay_artifact, encode_replay_artifact,
+    ArtifactBytes, HASH_ALGORITHM_ID_BLAKE3_V1, REPLAY_FORMAT_VERSION_V2, ReplayContractField,
+    ReplayError, SEMANTICS_VERSION_V1, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4,
+    STATE_HASH_VERSION_V6, Seed, Simulation, StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1,
+    decode_package, decode_replay_artifact, encode_replay_artifact,
 };
 
 const FEEDBACK_RING: &[u8] = include_bytes!("../../../fixtures/replays/feedback-ring-v1.json");
@@ -16,7 +16,7 @@ const NUMERIC: &[u8] = include_bytes!("../../../profiles/numeric/v1.json");
 const PHYSICAL: &[u8] = include_bytes!("../../../profiles/physical-scale/stage0-alpha.json");
 const BALANCE: &[u8] = include_bytes!("../../../profiles/balance/stage0-alpha.json");
 
-const INITIAL_STATE_HASH: &str = "b5f5bece87627f60cd1ddfa84d127a727698105db19501b42bafd24306577561";
+const INITIAL_STATE_HASH: &str = "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1";
 const NUMERIC_PROFILE_HASH: &str =
     "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469";
 const PHYSICAL_SCALE_PROFILE_HASH: &str =
@@ -47,12 +47,13 @@ fn retained_v3_empty_artifact_strictly_decodes_and_round_trips_exactly() {
         balance_profile: BALANCE,
     })
     .expect("reference package decodes");
-    let simulation = Simulation::new(package).expect("fresh V5 simulation starts");
+    let simulation = Simulation::new(package).expect("fresh V6 simulation starts");
     assert_eq!(
         artifact.replay().validate_against(&simulation),
-        Err(ReplayError::UnsupportedStateHashVersion {
-            expected: STATE_HASH_VERSION_V5,
-            actual: STATE_HASH_VERSION_V3.to_owned(),
+        Err(ReplayError::ContractMismatch {
+            field: ReplayContractField::FormatVersion,
+            expected: "1".to_owned(),
+            actual: REPLAY_FORMAT_VERSION_V2.to_string(),
         })
     );
 }
@@ -80,12 +81,13 @@ fn retained_v4_empty_artifact_strictly_decodes_round_trips_and_is_execution_reje
         balance_profile: BALANCE,
     })
     .expect("reference package decodes");
-    let simulation = Simulation::new(package).expect("fresh V5 simulation starts");
+    let simulation = Simulation::new(package).expect("fresh V6 simulation starts");
     assert_eq!(
         artifact.replay().validate_against(&simulation),
-        Err(ReplayError::UnsupportedStateHashVersion {
-            expected: STATE_HASH_VERSION_V5,
-            actual: STATE_HASH_VERSION_V4.to_owned(),
+        Err(ReplayError::ContractMismatch {
+            field: ReplayContractField::FormatVersion,
+            expected: "1".to_owned(),
+            actual: REPLAY_FORMAT_VERSION_V2.to_string(),
         })
     );
 }
@@ -124,7 +126,7 @@ fn retained_feedback_ring_is_the_exact_canonical_replay_encoding() {
             .last()
             .expect("feedback Replay has a final checkpoint")
             .state_hash,
-        StateHash::from_hex("3e9cc996465f0849244ba84adbf1f7637e0415689d58da2558c5b85c714e9319")
+        StateHash::from_hex("11699b3a0decbd6d72f227060fe737b637be9503aa2a6e726b3a8776b4ae6188")
             .expect("feedback final golden is canonical")
     );
 }
@@ -141,7 +143,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
 
     let replay = artifact.replay();
     let header = replay.header();
-    assert_eq!(header.format_version.as_u32(), REPLAY_FORMAT_VERSION_V1);
+    assert_eq!(header.format_version.as_u32(), REPLAY_FORMAT_VERSION_V2);
     assert_eq!(header.semantics_version.as_str(), SEMANTICS_VERSION_V1);
     assert_eq!(
         header.numeric_profile_hash.to_string(),
@@ -155,7 +157,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
         header.balance_profile_hash.to_string(),
         BALANCE_PROFILE_HASH
     );
-    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V5);
+    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V6);
     assert_eq!(
         header.world_generator_version.as_str(),
         WORLD_GENERATOR_VERSION_EMPTY_V1
@@ -181,7 +183,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
     assert_eq!(final_checkpoint.next_tick, Tick(100_000));
     assert_eq!(
         final_checkpoint.state_hash,
-        StateHash::from_hex("61d49248320f1c9cb803325945e18fc19d59cf80e33ab7d877543e3b4fc75f32")
+        StateHash::from_hex("957a8644c2c9246f37912701883b7eb4da097dea2b515b91ddfb1b25bfcd5a83")
             .expect("100k final golden is canonical")
     );
 }

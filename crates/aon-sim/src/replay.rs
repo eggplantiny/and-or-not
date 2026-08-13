@@ -1,8 +1,8 @@
 use crate::{
     BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength, DriverId,
     EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId, GatePort, GatePortRef, GateType,
-    HashAlgorithmId, HashParseError, JsonErrorCategory, LogicLevel, MobileId, MobilePort,
-    MobilePortRef, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+    HashAlgorithmId, HashParseError, HostileCollider, JsonErrorCategory, LogicLevel, MobileId,
+    MobilePort, MobilePortRef, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
     PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileHash, RemoveEntityCommand, RoutingDomain,
     SemanticsVersion, SetExternalDriverCommand, Simulation, StateHash, Tick, WireEnd, WireId,
 };
@@ -11,11 +11,14 @@ use std::fmt;
 use thiserror::Error;
 
 pub const REPLAY_FORMAT_VERSION_V1: u32 = 1;
+pub const REPLAY_FORMAT_VERSION_V2: u32 = 2;
 pub const STATE_HASH_VERSION_V3: &str = "aon-state-v3";
 pub const STATE_HASH_VERSION_V4: &str = "aon-state-v4";
 pub const STATE_HASH_VERSION_V5: &str = "aon-state-v5";
+pub const STATE_HASH_VERSION_V6: &str = "aon-state-v6";
 pub const WORLD_GENERATOR_VERSION_EMPTY_V1: &str = "aon-empty-v1";
 pub const WORLD_GENERATOR_VERSION_MAIN_CORE_V1: &str = "aon-main-core-v1";
+pub const WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1: &str = "aon-main-core-power-v1";
 
 const SEED_BYTE_LENGTH: usize = 32;
 const SEED_HEX_LENGTH: usize = SEED_BYTE_LENGTH * 2;
@@ -24,20 +27,23 @@ const SEED_HEX_LENGTH: usize = SEED_BYTE_LENGTH * 2;
 pub enum ReplayFormatVersion {
     #[default]
     V1,
+    V2,
 }
 
 impl ReplayFormatVersion {
     pub const fn as_u32(self) -> u32 {
         match self {
             Self::V1 => REPLAY_FORMAT_VERSION_V1,
+            Self::V2 => REPLAY_FORMAT_VERSION_V2,
         }
     }
 
     fn parse(actual: u32) -> Result<Self, ReplayError> {
         match actual {
             REPLAY_FORMAT_VERSION_V1 => Ok(Self::V1),
+            REPLAY_FORMAT_VERSION_V2 => Ok(Self::V2),
             actual => Err(ReplayError::UnsupportedFormatVersion {
-                expected: REPLAY_FORMAT_VERSION_V1,
+                expected: REPLAY_FORMAT_VERSION_V2,
                 actual,
             }),
         }
@@ -48,8 +54,9 @@ impl ReplayFormatVersion {
 pub enum StateHashVersion {
     V3,
     V4,
-    #[default]
     V5,
+    #[default]
+    V6,
 }
 
 impl StateHashVersion {
@@ -58,6 +65,7 @@ impl StateHashVersion {
             Self::V3 => STATE_HASH_VERSION_V3,
             Self::V4 => STATE_HASH_VERSION_V4,
             Self::V5 => STATE_HASH_VERSION_V5,
+            Self::V6 => STATE_HASH_VERSION_V6,
         }
     }
 
@@ -66,15 +74,16 @@ impl StateHashVersion {
             STATE_HASH_VERSION_V3 => Ok(Self::V3),
             STATE_HASH_VERSION_V4 => Ok(Self::V4),
             STATE_HASH_VERSION_V5 => Ok(Self::V5),
+            STATE_HASH_VERSION_V6 => Ok(Self::V6),
             actual => Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V5,
+                expected: STATE_HASH_VERSION_V6,
                 actual: actual.to_owned(),
             }),
         }
     }
 
     pub(crate) const fn current() -> Self {
-        Self::V5
+        Self::V6
     }
 }
 
@@ -89,6 +98,7 @@ pub enum WorldGeneratorVersion {
     #[default]
     EmptyV1,
     MainCoreV1,
+    MainCorePowerV1,
 }
 
 impl WorldGeneratorVersion {
@@ -96,6 +106,7 @@ impl WorldGeneratorVersion {
         match self {
             Self::EmptyV1 => WORLD_GENERATOR_VERSION_EMPTY_V1,
             Self::MainCoreV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_V1,
+            Self::MainCorePowerV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1,
         }
     }
 
@@ -103,8 +114,9 @@ impl WorldGeneratorVersion {
         match actual {
             WORLD_GENERATOR_VERSION_EMPTY_V1 => Ok(Self::EmptyV1),
             WORLD_GENERATOR_VERSION_MAIN_CORE_V1 => Ok(Self::MainCoreV1),
+            WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1 => Ok(Self::MainCorePowerV1),
             actual => Err(ReplayError::UnsupportedWorldGeneratorVersion {
-                expected: "aon-empty-v1 or aon-main-core-v1",
+                expected: "aon-empty-v1, aon-main-core-v1, or aon-main-core-power-v1",
                 actual: actual.to_owned(),
             }),
         }
@@ -189,7 +201,27 @@ pub struct HashCheckpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorldInputEvent {}
+pub enum WorldInputEvent {
+    /// Complete, nonpersistent hostile-collider snapshot for exactly one simulation Tick.
+    HostileFrame {
+        target_tick: Tick,
+        hostiles: Vec<HostileCollider>,
+    },
+}
+
+impl WorldInputEvent {
+    pub const fn target_tick(&self) -> Tick {
+        match self {
+            Self::HostileFrame { target_tick, .. } => *target_tick,
+        }
+    }
+
+    pub fn hostiles(&self) -> &[HostileCollider] {
+        match self {
+            Self::HostileFrame { hostiles, .. } => hostiles,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Replay {
@@ -205,10 +237,40 @@ impl Replay {
         commands: Vec<CommandEnvelope>,
         checkpoints: Vec<HashCheckpoint>,
     ) -> Result<Self, ReplayError> {
+        if header.format_version != ReplayFormatVersion::V1 {
+            return Err(ReplayError::ConstructorFormatVersionMismatch {
+                expected: REPLAY_FORMAT_VERSION_V1,
+                actual: header.format_version.as_u32(),
+            });
+        }
+        Self::new_normalized(header, commands, Vec::new(), checkpoints)
+    }
+
+    pub fn new_v2(
+        header: ReplayHeader,
+        commands: Vec<CommandEnvelope>,
+        world_inputs: Vec<WorldInputEvent>,
+        checkpoints: Vec<HashCheckpoint>,
+    ) -> Result<Self, ReplayError> {
+        if header.format_version != ReplayFormatVersion::V2 {
+            return Err(ReplayError::ConstructorFormatVersionMismatch {
+                expected: REPLAY_FORMAT_VERSION_V2,
+                actual: header.format_version.as_u32(),
+            });
+        }
+        Self::new_normalized(header, commands, world_inputs, checkpoints)
+    }
+
+    fn new_normalized(
+        header: ReplayHeader,
+        commands: Vec<CommandEnvelope>,
+        world_inputs: Vec<WorldInputEvent>,
+        checkpoints: Vec<HashCheckpoint>,
+    ) -> Result<Self, ReplayError> {
         let replay = Self {
             header,
             commands: normalize_commands(commands)?,
-            world_inputs: Vec::new(),
+            world_inputs: normalize_world_inputs(world_inputs),
             checkpoints,
         };
         replay.validate_shape()?;
@@ -235,6 +297,12 @@ impl Replay {
         self.commands
             .iter()
             .filter(move |command| command.target_tick == tick)
+    }
+
+    pub fn world_inputs_for_tick(&self, tick: Tick) -> impl Iterator<Item = &WorldInputEvent> + '_ {
+        self.world_inputs
+            .iter()
+            .filter(move |input| input.target_tick() == tick)
     }
 
     pub fn final_next_tick(&self) -> Tick {
@@ -350,10 +418,18 @@ impl Replay {
         {
             return Err(ReplayError::NonzeroMainCoreWorldSeed);
         }
-        if !self.world_inputs.is_empty() {
+        if self.header.world_generator_version == WorldGeneratorVersion::MainCorePowerV1
+            && self.header.seed != Seed::ZERO
+        {
+            return Err(ReplayError::NonzeroMainCorePowerWorldSeed);
+        }
+        if self.header.format_version == ReplayFormatVersion::V1 && !self.world_inputs.is_empty() {
             return Err(ReplayError::UnsupportedWorldInputs {
                 count: self.world_inputs.len(),
             });
+        }
+        if self.header.format_version == ReplayFormatVersion::V2 {
+            validate_v2_world_inputs(&self.world_inputs)?;
         }
         let Some(first) = self.checkpoints.first() else {
             return Err(ReplayError::MissingInitialCheckpoint);
@@ -393,6 +469,16 @@ impl Replay {
                 final_next_tick,
             });
         }
+        if let Some(input) = self
+            .world_inputs
+            .iter()
+            .find(|input| input.target_tick() >= final_next_tick)
+        {
+            return Err(ReplayError::WorldInputOutsideRunBoundary {
+                target_tick: input.target_tick(),
+                final_next_tick,
+            });
+        }
         Ok(())
     }
 }
@@ -421,6 +507,57 @@ fn normalize_commands(commands: Vec<CommandEnvelope>) -> Result<Vec<CommandEnvel
             .then_with(|| left.1.cmp(&right.1))
     });
     Ok(encoded.into_iter().map(|(command, _)| command).collect())
+}
+
+fn normalize_world_inputs(mut inputs: Vec<WorldInputEvent>) -> Vec<WorldInputEvent> {
+    for input in &mut inputs {
+        match input {
+            WorldInputEvent::HostileFrame { hostiles, .. } => {
+                hostiles.sort_unstable_by_key(|hostile| hostile.id);
+            }
+        }
+    }
+    inputs.sort_unstable_by_key(WorldInputEvent::target_tick);
+    inputs
+}
+
+fn validate_v2_world_inputs(inputs: &[WorldInputEvent]) -> Result<(), ReplayError> {
+    if let Some(pair) = inputs
+        .windows(2)
+        .find(|pair| pair[0].target_tick() == pair[1].target_tick())
+    {
+        return Err(ReplayError::DuplicateWorldInputTick {
+            target_tick: pair[0].target_tick(),
+        });
+    }
+
+    for input in inputs {
+        match input {
+            WorldInputEvent::HostileFrame {
+                target_tick,
+                hostiles,
+            } => {
+                if hostiles.iter().any(|hostile| hostile.id == 0) {
+                    return Err(ReplayError::ZeroHostileId {
+                        target_tick: *target_tick,
+                    });
+                }
+                if let Some(pair) = hostiles.windows(2).find(|pair| pair[0].id == pair[1].id) {
+                    return Err(ReplayError::DuplicateHostileId {
+                        target_tick: *target_tick,
+                        hostile_id: pair[0].id,
+                    });
+                }
+                if let Some(hostile) = hostiles.iter().find(|hostile| hostile.radius.0 < 0) {
+                    return Err(ReplayError::NegativeHostileRadius {
+                        target_tick: *target_tick,
+                        hostile_id: hostile.id,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn compare_header_field(
@@ -527,6 +664,9 @@ pub enum ReplayError {
     #[error("unsupported Replay format: expected {expected}, got {actual}")]
     UnsupportedFormatVersion { expected: u32, actual: u32 },
 
+    #[error("Replay constructor requires format {expected}, got {actual}")]
+    ConstructorFormatVersionMismatch { expected: u32, actual: u32 },
+
     #[error("unsupported State hash version: expected {expected}, got {actual}")]
     UnsupportedStateHashVersion {
         expected: &'static str,
@@ -560,8 +700,27 @@ pub enum ReplayError {
     #[error("aon-main-core-v1 requires the all-zero Seed")]
     NonzeroMainCoreWorldSeed,
 
+    #[error("aon-main-core-power-v1 requires the all-zero Seed")]
+    NonzeroMainCorePowerWorldSeed,
+
     #[error("Replay v1 does not support WorldInput events (got {count})")]
     UnsupportedWorldInputs { count: usize },
+
+    #[error("Replay v2 contains more than one WorldInput frame for Tick {target_tick}")]
+    DuplicateWorldInputTick { target_tick: Tick },
+
+    #[error("Replay hostile frame at Tick {target_tick} contains reserved hostile ID 0")]
+    ZeroHostileId { target_tick: Tick },
+
+    #[error(
+        "Replay hostile frame at Tick {target_tick} contains duplicate hostile ID {hostile_id}"
+    )]
+    DuplicateHostileId { target_tick: Tick, hostile_id: u64 },
+
+    #[error(
+        "Replay hostile frame at Tick {target_tick} gives hostile {hostile_id} a negative radius"
+    )]
+    NegativeHostileRadius { target_tick: Tick, hostile_id: u64 },
 
     #[error("Replay scenarioPath must be a nonempty portable relative path")]
     InvalidScenarioPath,
@@ -585,6 +744,14 @@ pub enum ReplayError {
 
     #[error("Replay command targets Tick {target_tick} outside final nextTick {final_next_tick}")]
     CommandOutsideRunBoundary {
+        target_tick: Tick,
+        final_next_tick: Tick,
+    },
+
+    #[error(
+        "Replay WorldInput targets Tick {target_tick} outside final nextTick {final_next_tick}"
+    )]
+    WorldInputOutsideRunBoundary {
         target_tick: Tick,
         final_next_tick: Tick,
     },
@@ -628,23 +795,33 @@ pub enum ReplayError {
 }
 
 pub fn decode_replay_artifact(bytes: &[u8]) -> Result<ReplayArtifact, ReplayError> {
-    let wire: ReplayArtifactWire =
-        serde_json::from_slice(bytes).map_err(|error| ReplayError::InvalidJson {
-            category: JsonErrorCategory::from(error.classify()),
-            line: error.line(),
-            column: error.column(),
-        })?;
+    // Replay format is the outer protocol discriminator. Read it before the strict,
+    // version-specific body so an unsupported format cannot be masked by a body-shape fault.
+    // JSON syntax/category errors still win because this envelope is itself decoded from JSON.
+    let envelope: ReplayArtifactFormatEnvelope =
+        serde_json::from_slice(bytes).map_err(invalid_replay_json)?;
+    ReplayFormatVersion::parse(envelope.header.format_version)?;
+
+    let wire: ReplayArtifactWire = serde_json::from_slice(bytes).map_err(invalid_replay_json)?;
     wire.try_into()
 }
 
+fn invalid_replay_json(error: serde_json::Error) -> ReplayError {
+    ReplayError::InvalidJson {
+        category: JsonErrorCategory::from(error.classify()),
+        line: error.line(),
+        column: error.column(),
+    }
+}
+
 pub fn encode_replay_artifact(artifact: &ReplayArtifact) -> Result<Vec<u8>, ReplayError> {
-    let wire = ReplayArtifactWire::from(artifact);
+    let wire = ReplayArtifactEncodeWire::from(artifact);
     let mut encoded = serde_json::to_vec_pretty(&wire).map_err(|_| ReplayError::JsonEncoding)?;
     encoded.push(b'\n');
     Ok(encoded)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReplayArtifactWire {
     scenario_path: String,
@@ -654,31 +831,69 @@ struct ReplayArtifactWire {
     checkpoints: Vec<HashCheckpointWire>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayArtifactFormatEnvelope {
+    header: ReplayHeaderFormatEnvelope,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayHeaderFormatEnvelope {
+    format_version: u32,
+}
+
 impl TryFrom<ReplayArtifactWire> for ReplayArtifact {
     type Error = ReplayError;
 
     fn try_from(wire: ReplayArtifactWire) -> Result<Self, Self::Error> {
-        if !wire.world_inputs.is_empty() {
-            return Err(ReplayError::UnsupportedWorldInputs {
-                count: wire.world_inputs.len(),
-            });
-        }
-        let replay = Replay::new(
-            wire.header.try_into()?,
-            wire.commands
-                .into_iter()
-                .map(CommandEnvelope::from)
-                .collect(),
-            wire.checkpoints
-                .into_iter()
-                .map(HashCheckpoint::try_from)
-                .collect::<Result<Vec<_>, _>>()?,
-        )?;
-        ReplayArtifact::new(wire.scenario_path, replay)
+        let ReplayArtifactWire {
+            scenario_path,
+            header,
+            commands,
+            world_inputs,
+            checkpoints,
+        } = wire;
+        let header = ReplayHeader::try_from(header)?;
+        let commands = commands.into_iter().map(CommandEnvelope::from).collect();
+        let checkpoints = checkpoints
+            .into_iter()
+            .map(HashCheckpoint::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let replay = match header.format_version {
+            ReplayFormatVersion::V1 => {
+                if !world_inputs.is_empty() {
+                    return Err(ReplayError::UnsupportedWorldInputs {
+                        count: world_inputs.len(),
+                    });
+                }
+                Replay::new(header, commands, checkpoints)?
+            }
+            ReplayFormatVersion::V2 => Replay::new_v2(
+                header,
+                commands,
+                world_inputs
+                    .into_iter()
+                    .map(decode_world_input)
+                    .collect::<Result<Vec<_>, _>>()?,
+                checkpoints,
+            )?,
+        };
+        ReplayArtifact::new(scenario_path, replay)
     }
 }
 
-impl From<&ReplayArtifact> for ReplayArtifactWire {
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayArtifactEncodeWire {
+    scenario_path: String,
+    header: ReplayHeaderWire,
+    commands: Vec<CommandEnvelopeWire>,
+    world_inputs: Vec<WorldInputEventWire>,
+    checkpoints: Vec<HashCheckpointWire>,
+}
+
+impl From<&ReplayArtifact> for ReplayArtifactEncodeWire {
     fn from(artifact: &ReplayArtifact) -> Self {
         Self {
             scenario_path: artifact.scenario_path.clone(),
@@ -689,7 +904,12 @@ impl From<&ReplayArtifact> for ReplayArtifactWire {
                 .iter()
                 .map(CommandEnvelopeWire::from)
                 .collect(),
-            world_inputs: Vec::new(),
+            world_inputs: artifact
+                .replay
+                .world_inputs
+                .iter()
+                .map(WorldInputEventWire::from)
+                .collect(),
             checkpoints: artifact
                 .replay
                 .checkpoints
@@ -808,6 +1028,90 @@ impl From<HashCheckpoint> for HashCheckpointWire {
             state_hash: checkpoint.state_hash.to_string(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum WorldInputEventWire {
+    HostileFrame {
+        target_tick: u64,
+        hostiles: Vec<HostileColliderWire>,
+    },
+}
+
+impl From<WorldInputEventWire> for WorldInputEvent {
+    fn from(input: WorldInputEventWire) -> Self {
+        match input {
+            WorldInputEventWire::HostileFrame {
+                target_tick,
+                hostiles,
+            } => Self::HostileFrame {
+                target_tick: Tick(target_tick),
+                hostiles: hostiles.into_iter().map(HostileCollider::from).collect(),
+            },
+        }
+    }
+}
+
+impl From<&WorldInputEvent> for WorldInputEventWire {
+    fn from(input: &WorldInputEvent) -> Self {
+        match input {
+            WorldInputEvent::HostileFrame {
+                target_tick,
+                hostiles,
+            } => Self::HostileFrame {
+                target_tick: target_tick.0,
+                hostiles: hostiles
+                    .iter()
+                    .copied()
+                    .map(HostileColliderWire::from)
+                    .collect(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostileColliderWire {
+    id: u64,
+    center: PointWire,
+    radius: i64,
+}
+
+impl From<HostileColliderWire> for HostileCollider {
+    fn from(hostile: HostileColliderWire) -> Self {
+        Self {
+            id: hostile.id,
+            center: hostile.center.into(),
+            radius: Fixed(hostile.radius),
+        }
+    }
+}
+
+impl From<HostileCollider> for HostileColliderWire {
+    fn from(hostile: HostileCollider) -> Self {
+        Self {
+            id: hostile.id,
+            center: hostile.center.into(),
+            radius: hostile.radius.0,
+        }
+    }
+}
+
+fn decode_world_input(value: serde_json::Value) -> Result<WorldInputEvent, ReplayError> {
+    serde_json::from_value::<WorldInputEventWire>(value)
+        .map(WorldInputEvent::from)
+        .map_err(|error| ReplayError::InvalidJson {
+            category: JsonErrorCategory::from(error.classify()),
+            line: error.line(),
+            column: error.column(),
+        })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1244,6 +1548,13 @@ enum EndpointTargetWire {
         #[serde(rename = "mainCore")]
         main_core: u64,
     },
+    PowerSourceAnchor {
+        power_source: u64,
+    },
+    WireSensePort {
+        wire: u64,
+        end: WireEndWire,
+    },
 }
 
 impl From<EndpointTargetWire> for EndpointTarget {
@@ -1263,6 +1574,15 @@ impl From<EndpointTargetWire> for EndpointTarget {
             }),
             EndpointTargetWire::MainCoreAnchor { main_core } => {
                 Self::MainCoreAnchor(crate::MainCoreId(EntityId(main_core)))
+            }
+            EndpointTargetWire::PowerSourceAnchor { power_source } => {
+                Self::PowerSourceAnchor(crate::PowerSourceId(EntityId(power_source)))
+            }
+            EndpointTargetWire::WireSensePort { wire, end } => {
+                Self::WireSensePort(crate::WireSensePortRef {
+                    wire: WireId(EntityId(wire)),
+                    end: end.into(),
+                })
             }
         }
     }
@@ -1285,6 +1605,13 @@ impl From<EndpointTarget> for EndpointTargetWire {
             },
             EndpointTarget::MainCoreAnchor(core) => Self::MainCoreAnchor {
                 main_core: core.entity_id().0,
+            },
+            EndpointTarget::PowerSourceAnchor(source) => Self::PowerSourceAnchor {
+                power_source: source.entity_id().0,
+            },
+            EndpointTarget::WireSensePort(reference) => Self::WireSensePort {
+                wire: reference.wire.entity_id().0,
+                end: reference.end.into(),
             },
         }
     }
@@ -1318,8 +1645,9 @@ mod tests {
     }
 
     fn empty_replay(simulation: &Simulation, final_next_tick: u64) -> Replay {
-        Replay::new(
+        Replay::new_v2(
             simulation.replay_header(),
+            Vec::new(),
             Vec::new(),
             vec![
                 HashCheckpoint {
@@ -1340,6 +1668,43 @@ mod tests {
             .expect("the test Replay has a valid locator");
         serde_json::from_slice(&encode_replay_artifact(&artifact).expect("the test Replay encodes"))
             .expect("the encoded Replay is JSON")
+    }
+
+    fn v2_header(simulation: &Simulation) -> ReplayHeader {
+        ReplayHeader {
+            format_version: ReplayFormatVersion::V2,
+            world_generator_version: WorldGeneratorVersion::MainCorePowerV1,
+            ..simulation.replay_header()
+        }
+    }
+
+    fn checkpoints(simulation: &Simulation, final_next_tick: u64) -> Vec<HashCheckpoint> {
+        vec![
+            HashCheckpoint {
+                next_tick: Tick(0),
+                state_hash: simulation.state_hash(),
+            },
+            HashCheckpoint {
+                next_tick: Tick(final_next_tick),
+                state_hash: simulation.state_hash(),
+            },
+        ]
+    }
+
+    fn current_replay(
+        header: ReplayHeader,
+        commands: Vec<CommandEnvelope>,
+        checkpoints: Vec<HashCheckpoint>,
+    ) -> Result<Replay, ReplayError> {
+        Replay::new_v2(header, commands, Vec::new(), checkpoints)
+    }
+
+    fn hostile(id: u64, x: i64, radius: i64) -> HostileCollider {
+        HostileCollider {
+            id,
+            center: FixedVec2::new(Fixed(x), Fixed(-x)),
+            radius: Fixed(radius),
+        }
     }
 
     fn decode_json(value: &serde_json::Value) -> Result<ReplayArtifact, ReplayError> {
@@ -1385,6 +1750,240 @@ mod tests {
         assert!(matches!(
             decode_replay_artifact(&serde_json::to_vec(&unknown).unwrap()),
             Err(ReplayError::InvalidJson { .. })
+        ));
+    }
+
+    #[test]
+    fn replay_v2_hostile_frames_are_canonical_typed_and_nonpersistent() {
+        let simulation = simulation();
+        let reverse_inputs = vec![
+            WorldInputEvent::HostileFrame {
+                target_tick: Tick(2),
+                hostiles: vec![hostile(9, 90, 3), hostile(2, 20, 1)],
+            },
+            WorldInputEvent::HostileFrame {
+                target_tick: Tick(1),
+                hostiles: Vec::new(),
+            },
+            WorldInputEvent::HostileFrame {
+                target_tick: Tick(0),
+                hostiles: vec![hostile(7, 70, 2)],
+            },
+        ];
+        let replay = Replay::new_v2(
+            v2_header(&simulation),
+            Vec::new(),
+            reverse_inputs.clone(),
+            checkpoints(&simulation, 3),
+        )
+        .expect("valid v2 Replay constructs");
+
+        assert_eq!(
+            replay
+                .world_inputs()
+                .iter()
+                .map(WorldInputEvent::target_tick)
+                .collect::<Vec<_>>(),
+            vec![Tick(0), Tick(1), Tick(2)]
+        );
+        assert_eq!(
+            replay.world_inputs()[2]
+                .hostiles()
+                .iter()
+                .map(|hostile| hostile.id)
+                .collect::<Vec<_>>(),
+            vec![2, 9]
+        );
+        assert!(replay.world_inputs()[1].hostiles().is_empty());
+        assert_eq!(replay.world_inputs_for_tick(Tick(2)).count(), 1);
+        assert_eq!(replay.world_inputs_for_tick(Tick(3)).count(), 0);
+
+        let artifact = ReplayArtifact::new("scenario-v3.json", replay).expect("locator is valid");
+        let encoded = encode_replay_artifact(&artifact).expect("v2 Replay encodes");
+        let value: serde_json::Value =
+            serde_json::from_slice(&encoded).expect("encoded v2 Replay is JSON");
+        assert_eq!(value["header"]["formatVersion"], 2);
+        assert_eq!(
+            value["header"]["worldGeneratorVersion"],
+            WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1
+        );
+        assert_eq!(value["worldInputs"][0]["type"], "hostile-frame");
+        assert_eq!(value["worldInputs"][2]["hostiles"][0]["id"], 2);
+        assert_eq!(
+            decode_replay_artifact(&encoded).expect("v2 Replay decodes"),
+            artifact
+        );
+
+        let mut forward_inputs = reverse_inputs;
+        forward_inputs.reverse();
+        for input in &mut forward_inputs {
+            match input {
+                WorldInputEvent::HostileFrame { hostiles, .. } => hostiles.reverse(),
+            }
+        }
+        let forward = ReplayArtifact::new(
+            "scenario-v3.json",
+            Replay::new_v2(
+                v2_header(&simulation),
+                Vec::new(),
+                forward_inputs,
+                checkpoints(&simulation, 3),
+            )
+            .expect("permuted v2 Replay constructs"),
+        )
+        .expect("locator is valid");
+        assert_eq!(
+            encode_replay_artifact(&forward).expect("permuted v2 Replay encodes"),
+            encoded
+        );
+    }
+
+    #[test]
+    fn replay_v2_hostile_frame_invariants_are_typed_and_strict() {
+        let simulation = simulation();
+        let build = |inputs| {
+            Replay::new_v2(
+                v2_header(&simulation),
+                Vec::new(),
+                inputs,
+                checkpoints(&simulation, 2),
+            )
+        };
+
+        assert_eq!(
+            Replay::new_v2(
+                ReplayHeader {
+                    format_version: ReplayFormatVersion::V1,
+                    ..simulation.replay_header()
+                },
+                Vec::new(),
+                Vec::new(),
+                checkpoints(&simulation, 2)
+            ),
+            Err(ReplayError::ConstructorFormatVersionMismatch {
+                expected: REPLAY_FORMAT_VERSION_V2,
+                actual: REPLAY_FORMAT_VERSION_V1
+            })
+        );
+        assert_eq!(
+            Replay::new(
+                v2_header(&simulation),
+                Vec::new(),
+                checkpoints(&simulation, 2)
+            ),
+            Err(ReplayError::ConstructorFormatVersionMismatch {
+                expected: REPLAY_FORMAT_VERSION_V1,
+                actual: REPLAY_FORMAT_VERSION_V2
+            })
+        );
+        assert_eq!(
+            build(vec![
+                WorldInputEvent::HostileFrame {
+                    target_tick: Tick(0),
+                    hostiles: Vec::new()
+                },
+                WorldInputEvent::HostileFrame {
+                    target_tick: Tick(0),
+                    hostiles: Vec::new()
+                }
+            ]),
+            Err(ReplayError::DuplicateWorldInputTick {
+                target_tick: Tick(0)
+            })
+        );
+        assert_eq!(
+            build(vec![WorldInputEvent::HostileFrame {
+                target_tick: Tick(0),
+                hostiles: vec![hostile(0, 0, 0)]
+            }]),
+            Err(ReplayError::ZeroHostileId {
+                target_tick: Tick(0)
+            })
+        );
+        assert_eq!(
+            build(vec![WorldInputEvent::HostileFrame {
+                target_tick: Tick(0),
+                hostiles: vec![hostile(4, 0, 0), hostile(4, 1, 0)]
+            }]),
+            Err(ReplayError::DuplicateHostileId {
+                target_tick: Tick(0),
+                hostile_id: 4
+            })
+        );
+        assert_eq!(
+            build(vec![WorldInputEvent::HostileFrame {
+                target_tick: Tick(0),
+                hostiles: vec![hostile(5, 0, -1)]
+            }]),
+            Err(ReplayError::NegativeHostileRadius {
+                target_tick: Tick(0),
+                hostile_id: 5
+            })
+        );
+        assert_eq!(
+            build(vec![WorldInputEvent::HostileFrame {
+                target_tick: Tick(2),
+                hostiles: Vec::new()
+            }]),
+            Err(ReplayError::WorldInputOutsideRunBoundary {
+                target_tick: Tick(2),
+                final_next_tick: Tick(2)
+            })
+        );
+
+        let valid = ReplayArtifact::new(
+            "scenario-v3.json",
+            build(vec![WorldInputEvent::HostileFrame {
+                target_tick: Tick(0),
+                hostiles: vec![hostile(1, 0, 0)],
+            }])
+            .expect("valid v2 Replay constructs"),
+        )
+        .expect("locator is valid");
+        let mut value: serde_json::Value = serde_json::from_slice(
+            &encode_replay_artifact(&valid).expect("valid v2 Replay encodes"),
+        )
+        .expect("encoded Replay is JSON");
+        value["worldInputs"][0]["hostiles"][0]["unexpected"] = true.into();
+        assert!(matches!(
+            decode_json(&value),
+            Err(ReplayError::InvalidJson {
+                category: JsonErrorCategory::Data,
+                ..
+            })
+        ));
+
+        value["header"]["formatVersion"] = REPLAY_FORMAT_VERSION_V1.into();
+        assert_eq!(
+            decode_json(&value),
+            Err(ReplayError::UnsupportedWorldInputs { count: 1 })
+        );
+    }
+
+    #[test]
+    fn replay_format_envelope_precedes_version_specific_body_shape_errors() {
+        let simulation = simulation();
+        let mut compound_fault = empty_replay_json(&simulation);
+        compound_fault["header"]["formatVersion"] = serde_json::json!(99);
+        compound_fault["commands"] = serde_json::json!([{
+            "unexpectedVersionSpecificBody": true
+        }]);
+
+        assert_eq!(
+            decode_json(&compound_fault),
+            Err(ReplayError::UnsupportedFormatVersion {
+                expected: REPLAY_FORMAT_VERSION_V2,
+                actual: 99,
+            })
+        );
+
+        compound_fault["header"]["formatVersion"] = REPLAY_FORMAT_VERSION_V2.into();
+        assert!(matches!(
+            decode_json(&compound_fault),
+            Err(ReplayError::InvalidJson {
+                category: JsonErrorCategory::Data,
+                ..
+            })
         ));
     }
 
@@ -1453,10 +2052,10 @@ mod tests {
             (
                 "format version",
                 "formatVersion",
-                serde_json::json!(2),
+                serde_json::json!(3),
                 ReplayError::UnsupportedFormatVersion {
-                    expected: REPLAY_FORMAT_VERSION_V1,
-                    actual: 2,
+                    expected: REPLAY_FORMAT_VERSION_V2,
+                    actual: 3,
                 },
             ),
             (
@@ -1472,7 +2071,7 @@ mod tests {
                 "stateHashVersion",
                 serde_json::json!("aon-state-unsupported"),
                 ReplayError::UnsupportedStateHashVersion {
-                    expected: STATE_HASH_VERSION_V5,
+                    expected: STATE_HASH_VERSION_V6,
                     actual: "aon-state-unsupported".to_owned(),
                 },
             ),
@@ -1481,7 +2080,7 @@ mod tests {
                 "worldGeneratorVersion",
                 serde_json::json!("aon-generator-unsupported"),
                 ReplayError::UnsupportedWorldGeneratorVersion {
-                    expected: "aon-empty-v1 or aon-main-core-v1",
+                    expected: "aon-empty-v1, aon-main-core-v1, or aon-main-core-power-v1",
                     actual: "aon-generator-unsupported".to_owned(),
                 },
             ),
@@ -1546,6 +2145,7 @@ mod tests {
         }
 
         let mut world_inputs = valid;
+        world_inputs["header"]["formatVersion"] = REPLAY_FORMAT_VERSION_V1.into();
         world_inputs["worldInputs"] = serde_json::json!([{}]);
         assert_eq!(
             decode_json(&world_inputs),
@@ -1554,23 +2154,27 @@ mod tests {
     }
 
     #[test]
-    fn decoded_v3_replay_is_rejected_only_when_execution_requires_v5() {
+    fn retained_v3_v4_v5_state_versions_decode_and_reject_only_against_current_v6() {
         let simulation = simulation();
-        let mut v3 = empty_replay_json(&simulation);
-        v3["header"]["stateHashVersion"] = serde_json::json!(STATE_HASH_VERSION_V3);
+        for (version_text, version) in [
+            (STATE_HASH_VERSION_V3, StateHashVersion::V3),
+            (STATE_HASH_VERSION_V4, StateHashVersion::V4),
+            (STATE_HASH_VERSION_V5, StateHashVersion::V5),
+        ] {
+            let mut retained = empty_replay_json(&simulation);
+            retained["header"]["stateHashVersion"] = serde_json::json!(version_text);
 
-        let decoded = decode_json(&v3).expect("retained V3 schema remains strictly decodable");
-        assert_eq!(
-            decoded.replay().header().state_hash_version,
-            StateHashVersion::V3
-        );
-        assert_eq!(
-            decoded.replay().validate_against(&simulation),
-            Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V5,
-                actual: STATE_HASH_VERSION_V3.to_owned(),
-            })
-        );
+            let decoded =
+                decode_json(&retained).expect("retained State Hash schema remains decodable");
+            assert_eq!(decoded.replay().header().state_hash_version, version);
+            assert_eq!(
+                decoded.replay().validate_against(&simulation),
+                Err(ReplayError::UnsupportedStateHashVersion {
+                    expected: STATE_HASH_VERSION_V6,
+                    actual: version_text.to_owned(),
+                })
+            );
+        }
     }
 
     #[test]
@@ -1680,7 +2284,7 @@ mod tests {
         ];
         let mut reversed = commands.clone();
         reversed.reverse();
-        let replay = Replay::new(
+        let replay = current_replay(
             simulation.replay_header(),
             reversed,
             vec![
@@ -1796,7 +2400,8 @@ mod tests {
             .collect();
         let artifact = ReplayArtifact::new(
             "../scenarios/empty.json",
-            Replay::new(header, commands.clone(), checkpoints).expect("mobility Replay is valid"),
+            current_replay(header, commands.clone(), checkpoints)
+                .expect("mobility Replay is valid"),
         )
         .expect("mobility Replay locator is portable");
 
@@ -1823,7 +2428,7 @@ mod tests {
         decoded
             .replay()
             .validate_against(&restarted)
-            .expect("V5 mobility Replay matches the fresh session");
+            .expect("current mobility Replay matches the fresh session");
         let mut restarted_trace = vec![restarted.state_hash()];
         for (tick, recorded) in recorded_reports.iter().enumerate() {
             let tick = Tick(u64::try_from(tick).expect("bounded Tick index fits u64"));
@@ -1896,14 +2501,14 @@ mod tests {
         ];
         let forward = ReplayArtifact::new(
             "scenario.json",
-            Replay::new(header, commands.clone(), checkpoints.clone()).expect("Replay is valid"),
+            current_replay(header, commands.clone(), checkpoints.clone()).expect("Replay is valid"),
         )
         .expect("Replay locator is valid");
         let mut reversed_input = commands;
         reversed_input.reverse();
         let input_reversed = ReplayArtifact::new(
             "scenario.json",
-            Replay::new(header, reversed_input, checkpoints).expect("reversed Replay is valid"),
+            current_replay(header, reversed_input, checkpoints).expect("reversed Replay is valid"),
         )
         .expect("Replay locator is valid");
 
@@ -1966,7 +2571,7 @@ mod tests {
         let mut header = simulation.replay_header();
         header.seed = Seed::from_hex(&format!("{}1", "0".repeat(63))).unwrap();
         assert_eq!(
-            Replay::new(
+            current_replay(
                 header,
                 Vec::new(),
                 vec![HashCheckpoint {
@@ -1979,11 +2584,11 @@ mod tests {
 
         let header = simulation.replay_header();
         assert!(matches!(
-            Replay::new(header, Vec::new(), Vec::new()),
+            current_replay(header, Vec::new(), Vec::new()),
             Err(ReplayError::MissingInitialCheckpoint)
         ));
         assert!(matches!(
-            Replay::new(
+            current_replay(
                 header,
                 vec![CommandEnvelope {
                     target_tick: Tick(1),
@@ -2022,7 +2627,7 @@ mod tests {
         }
 
         assert_eq!(
-            Replay::new(
+            current_replay(
                 header,
                 Vec::new(),
                 vec![HashCheckpoint {
@@ -2033,7 +2638,7 @@ mod tests {
             Err(ReplayError::InitialCheckpointTick { actual: Tick(1) })
         );
         assert_eq!(
-            Replay::new(
+            current_replay(
                 header,
                 Vec::new(),
                 vec![HashCheckpoint {
@@ -2047,7 +2652,7 @@ mod tests {
             })
         );
         assert_eq!(
-            Replay::new(
+            current_replay(
                 header,
                 Vec::new(),
                 vec![
@@ -2106,10 +2711,13 @@ mod tests {
                 },
             ),
         ] {
-            assert_eq!(Replay::new(header, Vec::new(), checkpoints), Err(expected));
+            assert_eq!(
+                current_replay(header, Vec::new(), checkpoints),
+                Err(expected)
+            );
         }
 
-        let sparse = Replay::new(
+        let sparse = current_replay(
             header,
             Vec::new(),
             vec![
@@ -2130,7 +2738,7 @@ mod tests {
         .expect("sparse checkpoints are valid");
         assert_eq!(sparse.verify_trace(&trace), Ok(()));
 
-        let divergent = Replay::new(
+        let divergent = current_replay(
             header,
             Vec::new(),
             vec![
@@ -2207,7 +2815,7 @@ mod tests {
         for (expected_field, mutate) in cases {
             let mut header = before_header;
             mutate(&mut header);
-            let replay = Replay::new(
+            let replay = current_replay(
                 header,
                 Vec::new(),
                 vec![
@@ -2282,7 +2890,7 @@ mod tests {
         );
         let artifact = ReplayArtifact::new(
             "scenario.json",
-            Replay::new(
+            current_replay(
                 header,
                 vec![substrate_command, gate_command],
                 vec![
@@ -2364,9 +2972,9 @@ mod tests {
     }
 
     #[test]
-    fn replay_state_hash_version_tracks_canonical_v5() {
-        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 5);
-        assert_eq!(StateHashVersion::current(), StateHashVersion::V5);
-        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V5);
+    fn replay_state_hash_version_tracks_canonical_v6() {
+        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 6);
+        assert_eq!(StateHashVersion::current(), StateHashVersion::V6);
+        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V6);
     }
 }

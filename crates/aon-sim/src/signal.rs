@@ -14,6 +14,8 @@ pub enum DriverRole {
     ExternalInputA,
     ExternalInputB,
     GateOutput,
+    WireSenseA,
+    WireSenseB,
 }
 
 impl DriverRole {
@@ -22,12 +24,28 @@ impl DriverRole {
             Self::ExternalInputA => 0,
             Self::ExternalInputB => 1,
             Self::GateOutput => 2,
+            Self::WireSenseA => 3,
+            Self::WireSenseB => 4,
         }
     }
 
     pub const fn is_external(self) -> bool {
         matches!(self, Self::ExternalInputA | Self::ExternalInputB)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WireSensePorts {
+    pub a: DriverId,
+    pub b: DriverId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WireSenseSnapshot {
+    pub ports: WireSensePorts,
+    pub sampled_presence: bool,
+    pub intended_level: LogicLevel,
+    pub intended_strength: DriveStrength,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -101,6 +119,7 @@ pub struct GateSignalSnapshot {
     pub pending_level: Option<LogicLevel>,
     pub pending_switch_energy: Option<Energy>,
     pub cancelled_switching_heat: HeatEnergy,
+    pub unpowered_ticks: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,6 +389,7 @@ pub(crate) struct GateSignalRecord {
     pub pending_level: Option<LogicLevel>,
     pub pending_switch_energy: Option<Energy>,
     pub cancelled_switching_heat: HeatEnergy,
+    pub unpowered_ticks: u64,
 }
 
 impl GateSignalRecord {
@@ -383,6 +403,7 @@ impl GateSignalRecord {
             pending_level: self.pending_level,
             pending_switch_energy: self.pending_switch_energy,
             cancelled_switching_heat: self.cancelled_switching_heat,
+            unpowered_ticks: self.unpowered_ticks,
         }
     }
 }
@@ -394,6 +415,7 @@ pub(crate) struct SignalWorld {
     gates: BTreeMap<GateId, GateSignalRecord>,
     mobiles: BTreeMap<MobileId, MobileControlPorts>,
     wires: BTreeMap<WireId, WireSignalSnapshot>,
+    wire_sensing: BTreeMap<WireId, WireSenseSnapshot>,
     slots: BTreeMap<(SinkId, DriverId), SinkDriverSlot>,
 }
 
@@ -460,6 +482,7 @@ impl SignalWorld {
                 pending_level: None,
                 pending_switch_energy: None,
                 cancelled_switching_heat: HeatEnergy(0),
+                unpowered_ticks: 0,
             },
         );
         if previous.is_some() {
@@ -547,11 +570,66 @@ impl SignalWorld {
         Ok(())
     }
 
+    /// Activates the two independent, read-only Sense outputs for an already-live Wire.
+    ///
+    /// This API is called only for sensing-enabled sessions. Leaving it unused preserves every
+    /// pre-S1-M2 Driver identity and State hash.
+    pub fn activate_wire_sensing(
+        &mut self,
+        wire: WireId,
+        tick: Tick,
+    ) -> Result<WireSensePorts, SignalError> {
+        if !self.wires.contains_key(&wire) || self.wire_sensing.contains_key(&wire) {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        let owner = wire.entity_id();
+        let ports = WireSensePorts {
+            a: self.drivers.allocate(owner, DriverRole::WireSenseA, tick)?,
+            b: self.drivers.allocate(owner, DriverRole::WireSenseB, tick)?,
+        };
+        if self
+            .wire_sensing
+            .insert(
+                wire,
+                WireSenseSnapshot {
+                    ports,
+                    sampled_presence: false,
+                    intended_level: LogicLevel::Low,
+                    intended_strength: DriveStrength(0),
+                },
+            )
+            .is_some()
+        {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        Ok(ports)
+    }
+
     pub fn remove_wire(&mut self, wire: WireId) -> Result<(), SignalError> {
         self.wires
             .remove(&wire)
-            .map(|_| ())
-            .ok_or(SignalError::InvalidCanonicalState)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        if let Some(sense) = self.wire_sensing.remove(&wire) {
+            let removed = BTreeSet::from([sense.ports.a, sense.ports.b]);
+            for driver in &removed {
+                self.drivers.remove(*driver)?;
+            }
+            let mut dirtied = BTreeSet::new();
+            self.slots.retain(|(sink, driver), _| {
+                let remove = removed.contains(driver);
+                if remove {
+                    dirtied.insert(*sink);
+                }
+                !remove
+            });
+            for sink in dirtied {
+                self.sinks
+                    .record_mut(sink)
+                    .ok_or(SignalError::InvalidCanonicalState)?
+                    .dirty = true;
+            }
+        }
+        Ok(())
     }
 
     pub fn driver_frontier(&self) -> DriverId {
@@ -610,6 +688,73 @@ impl SignalWorld {
 
     pub fn wire_snapshot(&self, wire: WireId) -> Option<WireSignalSnapshot> {
         self.wires.get(&wire).copied()
+    }
+
+    pub fn wire_sense_snapshot(&self, wire: WireId) -> Option<WireSenseSnapshot> {
+        self.wire_sensing.get(&wire).copied()
+    }
+
+    pub fn iter_wire_sensing(&self) -> impl Iterator<Item = (WireId, WireSenseSnapshot)> + '_ {
+        self.wire_sensing
+            .iter()
+            .map(|(wire, state)| (*wire, *state))
+    }
+
+    #[cfg(test)]
+    pub fn set_wire_sampled_presence(
+        &mut self,
+        wire: WireId,
+        sampled_presence: bool,
+    ) -> Result<WireSensePorts, SignalError> {
+        let state = self
+            .wire_sensing
+            .get_mut(&wire)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        state.sampled_presence = sampled_presence;
+        Ok(state.ports)
+    }
+
+    pub fn set_wire_sense_intent(
+        &mut self,
+        wire: WireId,
+        sampled_presence: bool,
+        intended_level: LogicLevel,
+        intended_strength: DriveStrength,
+    ) -> Result<(WireSensePorts, bool), SignalError> {
+        let state = self
+            .wire_sensing
+            .get_mut(&wire)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        let changed =
+            state.intended_level != intended_level || state.intended_strength != intended_strength;
+        state.sampled_presence = sampled_presence;
+        state.intended_level = intended_level;
+        state.intended_strength = intended_strength;
+        Ok((state.ports, changed))
+    }
+
+    pub fn set_gate_unpowered_ticks(
+        &mut self,
+        gate: GateId,
+        unpowered_ticks: u64,
+    ) -> Result<(), SignalError> {
+        self.gates
+            .get_mut(&gate)
+            .ok_or(SignalError::InvalidCanonicalState)?
+            .unpowered_ticks = unpowered_ticks;
+        Ok(())
+    }
+
+    pub fn set_gate_desired_level(
+        &mut self,
+        gate: GateId,
+        desired: LogicLevel,
+    ) -> Result<(), SignalError> {
+        self.gates
+            .get_mut(&gate)
+            .ok_or(SignalError::InvalidCanonicalState)?
+            .desired_output = desired;
+        Ok(())
     }
 
     pub fn gate_record(&self, gate: GateId) -> Option<&GateSignalRecord> {
@@ -1057,6 +1202,70 @@ mod tests {
         assert_eq!(unary.input_a.sink, SinkId(EntityId(3)));
         assert_eq!(world.driver_frontier(), DriverId(EntityId(6)));
         assert_eq!(world.sink_frontier(), SinkId(EntityId(4)));
+    }
+
+    #[test]
+    fn wire_sense_drivers_are_feature_activated_in_a_then_b_order_and_removed_as_tombstones() {
+        let mut world = SignalWorld::new();
+        let wire = WireId(EntityId(41));
+        world.activate_wire(wire).expect("Wire activates");
+        assert_eq!(world.driver_frontier(), DriverId(EntityId(1)));
+        assert_eq!(world.wire_sense_snapshot(wire), None);
+
+        let ports = world
+            .activate_wire_sensing(wire, Tick(7))
+            .expect("sensing activates");
+        assert_eq!(ports.a, DriverId(EntityId(1)));
+        assert_eq!(ports.b, DriverId(EntityId(2)));
+        assert_eq!(
+            world.driver_record(ports.a).unwrap().role,
+            DriverRole::WireSenseA
+        );
+        assert_eq!(
+            world.driver_record(ports.b).unwrap().role,
+            DriverRole::WireSenseB
+        );
+        assert_eq!(
+            world.driver_sample(ports.a).unwrap().strength,
+            DriveStrength(0)
+        );
+        assert_eq!(world.set_wire_sampled_presence(wire, true), Ok(ports));
+        assert_eq!(
+            world.wire_sense_snapshot(wire),
+            Some(WireSenseSnapshot {
+                ports,
+                sampled_presence: true,
+                intended_level: LogicLevel::Low,
+                intended_strength: DriveStrength(0),
+            })
+        );
+
+        world.remove_wire(wire).expect("Wire removal succeeds");
+        assert_eq!(world.driver_record(ports.a), None);
+        assert_eq!(world.driver_record(ports.b), None);
+        assert_eq!(world.driver_frontier(), DriverId(EntityId(3)));
+        assert_eq!(world.wire_sense_snapshot(wire), None);
+    }
+
+    #[test]
+    fn wire_sensing_requires_a_live_unique_wire_and_repeated_sampling_is_idempotent() {
+        let mut world = SignalWorld::new();
+        let wire = WireId(EntityId(9));
+        assert_eq!(
+            world.activate_wire_sensing(wire, Tick(0)),
+            Err(SignalError::InvalidCanonicalState)
+        );
+        world.activate_wire(wire).expect("Wire activates");
+        let ports = world
+            .activate_wire_sensing(wire, Tick(0))
+            .expect("sensing activates");
+        assert_eq!(
+            world.activate_wire_sensing(wire, Tick(0)),
+            Err(SignalError::InvalidCanonicalState)
+        );
+        assert_eq!(world.set_wire_sampled_presence(wire, false), Ok(ports));
+        assert_eq!(world.set_wire_sampled_presence(wire, false), Ok(ports));
+        assert!(!world.wire_sense_snapshot(wire).unwrap().sampled_presence);
     }
 
     #[test]

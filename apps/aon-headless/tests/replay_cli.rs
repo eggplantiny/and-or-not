@@ -78,7 +78,8 @@ impl ReplayFixture {
             });
         }
 
-        let replay = Replay::new(header, Vec::new(), checkpoints).expect("Replay shape is valid");
+        let replay = Replay::new_v2(header, Vec::new(), Vec::new(), checkpoints)
+            .expect("Replay shape is valid");
         let artifact = ReplayArtifact::new("../scenarios/empty.json", replay)
             .expect("portable relative Scenario path is valid");
         let replay_path = temporary_directory
@@ -145,8 +146,9 @@ fn replay_runner_constructs_a_fresh_simulation_and_validates_the_header() {
 
     let mut wrong_header = *artifact.replay().header();
     wrong_header.initial_state_hash = fixture.expected_trace[1];
-    let mismatched = Replay::new(
+    let mismatched = Replay::new_v2(
         wrong_header,
+        Vec::new(),
         Vec::new(),
         vec![HashCheckpoint {
             next_tick: Tick(0),

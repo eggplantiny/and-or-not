@@ -669,8 +669,8 @@ fn simulation_with_every_structural_kind() -> Simulation {
 
 fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"AON\0STATE\0V5\0");
-    push_u16(&mut bytes, 5); // encoder version
+    bytes.extend_from_slice(b"AON\0STATE\0V6\0");
+    push_u16(&mut bytes, 6); // encoder version
     bytes.push(0); // aon-semantics-v1
     bytes.extend_from_slice(contract.numeric_profile_hash.as_bytes());
     bytes.extend_from_slice(contract.physical_scale_profile_hash.as_bytes());
@@ -688,6 +688,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     }
 
     bytes.push(0); // no Main Core
+    push_u32(&mut bytes, 0); // no Power Sources
 
     push_u64(&mut bytes, 1); // Gate count
     push_u64(&mut bytes, 2);
@@ -767,6 +768,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     bytes.push(0); // no pending level
     bytes.push(0); // no pending energy
     push_u64(&mut bytes, 0); // canceled switching heat
+    push_u64(&mut bytes, 0); // unpowered Tick count
 
     push_u64(&mut bytes, 0); // Mobile control-port map count
 
@@ -778,6 +780,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     push_u128(&mut bytes, 0); // previous High
     push_u128(&mut bytes, 0); // previous Low
     push_u128(&mut bytes, 0); // previous X
+    bytes.push(0); // no Wire Sense state in this non-Power world
 
     push_u64(&mut bytes, 1); // Sink Driver slot count
     push_u64(&mut bytes, 1); // SinkId
@@ -786,7 +789,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     push_u64(&mut bytes, 0); // strength
     push_u64(&mut bytes, 0); // revision
     push_u64(&mut bytes, 1); // emitted Tick
-    push_u64(&mut bytes, 3); // event payload frontier; payloads 1 and 2 were drained
+    push_u64(&mut bytes, 4); // event payload frontier; payloads 1 through 3 were drained
     push_u64(&mut bytes, 0); // pending DriverTransition count
     push_u64(&mut bytes, 0); // pending SignalArrival count
 
@@ -834,11 +837,14 @@ fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
 
     assert_eq!(
         independently_hashed.to_hex().as_str(),
-        "2d7cef4990a3218fe909a07a82e4becdc37061161dfb2de1b80c530720e425fe"
+        "975c7a849af4ea9f2cf093e181bfb60757d7c53578452a81443ca80c31686d72"
     );
     assert_eq!(
         simulation.state_hash().as_bytes(),
-        independently_hashed.as_bytes()
+        independently_hashed.as_bytes(),
+        "simulation hash {} independent hash {}",
+        simulation.state_hash(),
+        independently_hashed.to_hex()
     );
 }
 

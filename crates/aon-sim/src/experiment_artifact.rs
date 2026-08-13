@@ -1240,7 +1240,7 @@ mod tests {
 
         let wrong_scenario_schema = String::from_utf8(SCENARIO.to_vec()).unwrap().replacen(
             "\"schemaVersion\": 1",
-            "\"schemaVersion\": 3",
+            "\"schemaVersion\": 4",
             1,
         );
         assert!(matches!(

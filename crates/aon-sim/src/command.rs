@@ -304,6 +304,13 @@ fn encode_endpoint_target(target: EndpointTarget, write: &mut dyn FnMut(&[u8])) 
         EndpointTarget::MainCoreAnchor(core) => {
             encode_entity_id(core.entity_id(), write);
         }
+        EndpointTarget::PowerSourceAnchor(source) => {
+            encode_entity_id(source.entity_id(), write);
+        }
+        EndpointTarget::WireSensePort(reference) => {
+            encode_entity_id(reference.wire.entity_id(), write);
+            encode_wire_end(reference.end, write);
+        }
     }
 }
 
@@ -349,9 +356,9 @@ fn write_i64(value: i64, write: &mut dyn FnMut(&[u8])) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{GateId, JunctionId};
+    use crate::identity::{GateId, JunctionId, PowerSourceId};
     use crate::numeric::Fixed;
-    use crate::topology::GatePortRef;
+    use crate::topology::{GatePortRef, WireSensePortRef};
 
     fn point(x: i64, y: i64) -> FixedVec2 {
         FixedVec2::new(Fixed(x), Fixed(y))
@@ -442,6 +449,38 @@ mod tests {
         .canonical_bytes()
         .expect("binding command encodes");
         assert!(binding.ends_with(&[5, 0, 0, 0, 0, 0, 0, 0, 1, 1, 12, 0, 0, 0, 0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn appended_power_source_and_wire_sense_endpoint_tags_have_exact_bytes() {
+        let power = CommandEnvelope {
+            target_tick: Tick(1),
+            ordinal: 2,
+            command: Command::BindPort(BindPortCommand {
+                wire: WireId(EntityId(3)),
+                end: WireEnd::A,
+                target: EndpointTarget::PowerSourceAnchor(PowerSourceId(EntityId(4))),
+            }),
+        }
+        .canonical_bytes()
+        .expect("Power Source endpoint encodes");
+        assert!(power.ends_with(&[3, 0, 0, 0, 0, 0, 0, 0, 0, 5, 4, 0, 0, 0, 0, 0, 0, 0]));
+
+        let sense = CommandEnvelope {
+            target_tick: Tick(1),
+            ordinal: 3,
+            command: Command::BindPort(BindPortCommand {
+                wire: WireId(EntityId(3)),
+                end: WireEnd::B,
+                target: EndpointTarget::WireSensePort(WireSensePortRef {
+                    wire: WireId(EntityId(9)),
+                    end: WireEnd::A,
+                }),
+            }),
+        }
+        .canonical_bytes()
+        .expect("Wire Sense endpoint encodes");
+        assert!(sense.ends_with(&[3, 0, 0, 0, 0, 0, 0, 0, 1, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
 
     #[test]

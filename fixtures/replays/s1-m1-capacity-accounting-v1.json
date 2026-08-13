@@ -1,15 +1,15 @@
 {
   "scenarioPath": "../scenarios/s1-m1-capacity-accounting-v1.json",
   "header": {
-    "formatVersion": 1,
+    "formatVersion": 2,
     "semanticsVersion": "aon-semantics-v1",
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c",
-    "stateHashVersion": "aon-state-v5",
+    "stateHashVersion": "aon-state-v6",
     "worldGeneratorVersion": "aon-main-core-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b",
+    "initialStateHash": "39b3c5e4d9f0855c46c7b2e80d91d623f641675516fe0770416dc4e52402a230",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -275,19 +275,19 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b"
+      "stateHash": "39b3c5e4d9f0855c46c7b2e80d91d623f641675516fe0770416dc4e52402a230"
     },
     {
       "nextTick": 1,
-      "stateHash": "7598152049dc0f10fc8798a9b6feb3ef98d63649f3ecb05db16949570b767845"
+      "stateHash": "61984461a1270f40b24fb0261f52ade15088b6887113f85004ddd598bafdd14c"
     },
     {
       "nextTick": 2,
-      "stateHash": "4891d29198b6762f4dfc29dbff2b1e629d38ba307ab9f91c9f8db0f72b156d0f"
+      "stateHash": "a2c8f0e8b70e61133e187455905ec3b5fb2ad17eb3e5ec301bdda1434145764b"
     },
     {
       "nextTick": 3,
-      "stateHash": "cbe2f28ada7d5b969de8e220e694996a76391c2d5bf5605c55f28dab803150df"
+      "stateHash": "ffa752a27489371a0b30d61b47dba49af275e7298ad9259548feec67fa238114"
     }
   ]
 }

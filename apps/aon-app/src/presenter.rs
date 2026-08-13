@@ -1003,7 +1003,9 @@ fn bound_gate_ports(snapshot: &RenderSnapshot) -> BTreeSet<GatePortRef> {
             aon_sim::EndpointTarget::Free
             | aon_sim::EndpointTarget::Junction(_)
             | aon_sim::EndpointTarget::MobilePort(_)
-            | aon_sim::EndpointTarget::MainCoreAnchor(_) => None,
+            | aon_sim::EndpointTarget::MainCoreAnchor(_)
+            | aon_sim::EndpointTarget::PowerSourceAnchor(_)
+            | aon_sim::EndpointTarget::WireSensePort(_) => None,
         })
         .collect()
 }

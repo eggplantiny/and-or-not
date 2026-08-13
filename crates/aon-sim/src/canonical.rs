@@ -2,15 +2,16 @@ use crate::event::{
     DriverSample, DriverTransition, EventCalendar, EventKey, EventPayloadAllocator, SignalArrival,
 };
 use crate::path_certificate::{PathCertificateArena, PathElementStamp};
-use crate::signal::{DriveVector, SignalWorld};
+use crate::power_source::PowerSourceStore;
+use crate::signal::{DriveVector, GateSignalRecord, SignalWorld, WireSignalSnapshot};
 use crate::structural::StructuralWorld;
 use crate::{
     EndpointTarget, EntityLocation, EntityRegistry, FixedAabb, FixedVec2, Heading, LogicLevel,
     MainCoreState, Revision, RoutingDomain, SimulationContract, StateHash, Tick, TrackPosition,
 };
 
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V5\0";
-pub(crate) const STATE_ENCODER_VERSION: u16 = 5;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V6\0";
+pub(crate) const STATE_ENCODER_VERSION: u16 = 6;
 const RESERVED_EMPTY_STORE_COUNT: usize = 3;
 
 #[derive(Clone, Copy)]
@@ -19,6 +20,7 @@ pub(crate) struct StateView<'a> {
     pub next_tick: Tick,
     pub topology_revision: Revision,
     pub main_core: Option<&'a MainCoreState>,
+    pub power_sources: &'a PowerSourceStore,
     pub structural: &'a StructuralWorld,
     pub signal: &'a SignalWorld,
     pub event_payloads: &'a EventPayloadAllocator,
@@ -34,6 +36,7 @@ struct StateComponents<'a> {
     topology_revision: Revision,
     entities: &'a EntityRegistry,
     main_core: Option<&'a MainCoreState>,
+    power_sources: &'a PowerSourceStore,
     structural: Option<&'a StructuralWorld>,
     signal: &'a SignalWorld,
     event_payloads: &'a EventPayloadAllocator,
@@ -58,6 +61,7 @@ fn encode_state(state: StateView<'_>, write: &mut dyn FnMut(&[u8])) {
             topology_revision: state.topology_revision,
             entities: state.structural.entities(),
             main_core: state.main_core,
+            power_sources: state.power_sources,
             structural: Some(state.structural),
             signal: state.signal,
             event_payloads: state.event_payloads,
@@ -101,6 +105,9 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
                     write_u8(0, write);
                     write_u64(id.entity_id().0, write);
                 }
+                crate::TopologyNodeId::PowerSourceAnchor(_) => {
+                    unreachable!("a Main Core cannot expose a Power Source anchor")
+                }
             }
             write_u64(core.capacity().0, write);
             write_u64(core.integrity().0, write);
@@ -108,6 +115,8 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
         }
         None => write_u8(0, write),
     }
+
+    encode_power_sources(state.power_sources, write);
 
     if let Some(structural) = state.structural {
         encode_structural_stores(structural, write);
@@ -122,11 +131,31 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     encode_driver_events(state.driver_events, write);
     encode_signal_events(state.signal_events, write);
 
-    // Destruction, radiation, and relay stores remain reserved in V5.
+    // Destruction, radiation, and relay stores remain reserved in V6.
     for _ in 0..RESERVED_EMPTY_STORE_COUNT {
         write_u64(0, write);
     }
     encode_path_certificates(state.path_certificates, write);
+}
+
+fn encode_power_sources(sources: &PowerSourceStore, write: &mut dyn FnMut(&[u8])) {
+    let live_count = u32::try_from(sources.len())
+        .expect("Power Source store live count must fit the canonical u32 boundary");
+    write_u32(live_count, write);
+    for source in sources.iter() {
+        write_u64(source.id().entity_id().0, write);
+        encode_point(source.position(), write);
+        match source.power_attachment() {
+            crate::TopologyNodeId::PowerSourceAnchor(id) => {
+                write_u8(1, write);
+                write_u64(id.entity_id().0, write);
+            }
+            crate::TopologyNodeId::MainCoreAnchor(_) => {
+                unreachable!("a Power Source cannot expose a Main Core anchor")
+            }
+        }
+        write_u64(source.generation_per_tick().0, write);
+    }
 }
 
 fn encode_path_certificates(certificates: &PathCertificateArena, write: &mut dyn FnMut(&[u8])) {
@@ -193,25 +222,7 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
     let gates: Vec<_> = signal.iter_gates().collect();
     write_u64(gates.len() as u64, write);
     for gate in gates {
-        write_u64(gate.gate.entity_id().0, write);
-        write_u64(gate.ports.input_a.sink.entity_id().0, write);
-        write_u64(gate.ports.input_a.external_driver.entity_id().0, write);
-        match gate.ports.input_b {
-            Some(input_b) => {
-                write_u8(1, write);
-                write_u64(input_b.sink.entity_id().0, write);
-                write_u64(input_b.external_driver.entity_id().0, write);
-            }
-            None => write_u8(0, write),
-        }
-        write_u64(gate.ports.output.entity_id().0, write);
-        write_u8(logic_level_tag(gate.current_output), write);
-        write_u8(logic_level_tag(gate.desired_output), write);
-        write_u32(gate.pending_generation, write);
-        encode_optional_tick(gate.pending_due_tick, write);
-        encode_optional_level(gate.pending_level, write);
-        encode_optional_u64(gate.pending_switch_energy.map(|energy| energy.0), write);
-        write_u64(gate.cancelled_switching_heat.0, write);
+        encode_gate_signal_record(gate, write);
     }
 
     let mobiles: Vec<_> = signal.iter_mobile_entries().collect();
@@ -226,9 +237,7 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
     let wires: Vec<_> = signal.iter_wires().collect();
     write_u64(wires.len() as u64, write);
     for (wire_id, state) in wires {
-        write_u64(wire_id.entity_id().0, write);
-        encode_drive_vector(state.active, write);
-        encode_drive_vector(state.previous, write);
+        encode_wire_signal_record(signal, wire_id, state, write);
     }
 
     let slots: Vec<_> = signal.iter_slots().collect();
@@ -240,6 +249,51 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         write_u64(slot.strength.0, write);
         write_u64(slot.revision.0, write);
         write_u64(slot.emitted_at.0, write);
+    }
+}
+
+fn encode_gate_signal_record(gate: GateSignalRecord, write: &mut dyn FnMut(&[u8])) {
+    write_u64(gate.gate.entity_id().0, write);
+    write_u64(gate.ports.input_a.sink.entity_id().0, write);
+    write_u64(gate.ports.input_a.external_driver.entity_id().0, write);
+    match gate.ports.input_b {
+        Some(input_b) => {
+            write_u8(1, write);
+            write_u64(input_b.sink.entity_id().0, write);
+            write_u64(input_b.external_driver.entity_id().0, write);
+        }
+        None => write_u8(0, write),
+    }
+    write_u64(gate.ports.output.entity_id().0, write);
+    write_u8(logic_level_tag(gate.current_output), write);
+    write_u8(logic_level_tag(gate.desired_output), write);
+    write_u32(gate.pending_generation, write);
+    encode_optional_tick(gate.pending_due_tick, write);
+    encode_optional_level(gate.pending_level, write);
+    encode_optional_u64(gate.pending_switch_energy.map(|energy| energy.0), write);
+    write_u64(gate.cancelled_switching_heat.0, write);
+    write_u64(gate.unpowered_ticks, write);
+}
+
+fn encode_wire_signal_record(
+    signal: &SignalWorld,
+    wire_id: crate::WireId,
+    state: WireSignalSnapshot,
+    write: &mut dyn FnMut(&[u8]),
+) {
+    write_u64(wire_id.entity_id().0, write);
+    encode_drive_vector(state.active, write);
+    encode_drive_vector(state.previous, write);
+    match signal.wire_sense_snapshot(wire_id) {
+        Some(sense) => {
+            write_u8(1, write);
+            write_u64(sense.ports.a.entity_id().0, write);
+            write_u64(sense.ports.b.entity_id().0, write);
+            write_u8(u8::from(sense.sampled_presence), write);
+            write_u8(logic_level_tag(sense.intended_level), write);
+            write_u64(sense.intended_strength.0, write);
+        }
+        None => write_u8(0, write),
     }
 }
 
@@ -466,6 +520,11 @@ fn encode_endpoint(endpoint: EndpointTarget, write: &mut dyn FnMut(&[u8])) {
             write_u8(reference.port.canonical_tag(), write);
         }
         EndpointTarget::MainCoreAnchor(core) => write_u64(core.entity_id().0, write),
+        EndpointTarget::PowerSourceAnchor(source) => write_u64(source.entity_id().0, write),
+        EndpointTarget::WireSensePort(reference) => {
+            write_u64(reference.wire.entity_id().0, write);
+            write_u8(reference.end.canonical_tag(), write);
+        }
     }
 }
 
@@ -533,6 +592,7 @@ mod tests {
     }
 
     struct TestRuntime {
+        power_sources: PowerSourceStore,
         signal: SignalWorld,
         payloads: EventPayloadAllocator,
         driver_events: EventCalendar<DriverTransition>,
@@ -543,6 +603,7 @@ mod tests {
     impl TestRuntime {
         fn new() -> Self {
             Self {
+                power_sources: PowerSourceStore::default(),
                 signal: SignalWorld::new(),
                 payloads: EventPayloadAllocator::new(),
                 driver_events: EventCalendar::new(),
@@ -563,6 +624,7 @@ mod tests {
                 next_tick,
                 topology_revision,
                 main_core: None,
+                power_sources: &self.power_sources,
                 structural,
                 signal: &self.signal,
                 event_payloads: &self.payloads,
@@ -583,6 +645,7 @@ mod tests {
                 topology_revision: Revision(0),
                 entities,
                 main_core: None,
+                power_sources: &runtime.power_sources,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -624,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn state_encoding_v5_has_exact_contract_tick_revision_and_identity_order() {
+    fn state_encoding_v6_has_exact_contract_tick_revision_and_identity_order() {
         let mut entities = EntityRegistry::new();
         entities
             .allocate(EntityLocation::Gate(GateIndex(7)))
@@ -643,6 +706,7 @@ mod tests {
                 topology_revision: Revision(3),
                 entities: &entities,
                 main_core: None,
+                power_sources: &runtime.power_sources,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -654,8 +718,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V5\0");
-        expected.extend_from_slice(&5_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V6\0");
+        expected.extend_from_slice(&6_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -676,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn main_core_v5_section_has_exact_anchor_order_and_is_hash_sensitive() {
+    fn main_core_v6_section_has_exact_anchor_order_and_is_hash_sensitive() {
         let mut entities = EntityRegistry::new();
         let id = crate::MainCoreId(
             entities
@@ -700,6 +764,7 @@ mod tests {
                     topology_revision: Revision(0),
                     entities: &entities,
                     main_core: Some(&core),
+                    power_sources: &runtime.power_sources,
                     structural: None,
                     signal: &runtime.signal,
                     event_payloads: &runtime.payloads,
@@ -725,8 +790,8 @@ mod tests {
         assert_eq!(&baseline[header_len..header_len + expected.len()], expected);
 
         let mut full_expected = Vec::new();
-        full_expected.extend_from_slice(b"AON\0STATE\0V5\0");
-        full_expected.extend_from_slice(&5_u16.to_le_bytes());
+        full_expected.extend_from_slice(b"AON\0STATE\0V6\0");
+        full_expected.extend_from_slice(&6_u16.to_le_bytes());
         full_expected.push(0);
         full_expected.extend_from_slice(&[0x11; 32]);
         full_expected.extend_from_slice(&[0x22; 32]);
@@ -790,8 +855,55 @@ mod tests {
         let hash = StateHash::from_bytes(*blake3::hash(&baseline).as_bytes());
         assert_eq!(
             hash.to_string(),
-            "2c5bc081e8adeca01a63770fe0a2be0335d9bc0a2ca96ae8dc691e8cf6b5d125"
+            "b53415b52909b20aa0b89623689961f14bb51386e0313edbf3ae84aead89c341"
         );
+    }
+
+    #[test]
+    fn power_source_v6_section_has_exact_sorted_records_and_field_sensitive_hash() {
+        let source = |id, x, y, generation| {
+            crate::PowerSourceState::new(
+                crate::PowerSourceId(EntityId(id)),
+                point(x, y),
+                crate::Energy(generation),
+            )
+        };
+        let encode = |states| {
+            let store = PowerSourceStore::new(states).expect("Power Source fixture is valid");
+            let mut bytes = Vec::new();
+            encode_power_sources(&store, &mut |part| bytes.extend_from_slice(part));
+            bytes
+        };
+
+        let actual = encode(vec![source(7, 131_072, -65_536, 19), source(2, -1, 3, 11)]);
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2_u32.to_le_bytes());
+        for (id, position, generation) in [
+            (2_u64, point(-1, 3), 11_u64),
+            (7, point(131_072, -65_536), 19),
+        ] {
+            expected.extend_from_slice(&id.to_le_bytes());
+            append_point(&mut expected, position);
+            expected.push(1); // TopologyNodeId::PowerSourceAnchor.
+            expected.extend_from_slice(&id.to_le_bytes());
+            expected.extend_from_slice(&generation.to_le_bytes());
+        }
+        assert_eq!(actual, expected);
+
+        let baseline_hash = blake3::hash(&actual);
+        assert_eq!(
+            baseline_hash.to_hex().as_str(),
+            "07c4372486f3f926f550153d8ec7cdbe927108aaa63f465b1a07bcdb23f88592"
+        );
+        for changed in [
+            encode(vec![source(8, 131_072, -65_536, 19), source(2, -1, 3, 11)]),
+            encode(vec![source(7, 131_073, -65_536, 19), source(2, -1, 3, 11)]),
+            encode(vec![source(7, 131_072, -65_535, 19), source(2, -1, 3, 11)]),
+            encode(vec![source(7, 131_072, -65_536, 20), source(2, -1, 3, 11)]),
+            encode(vec![source(7, 131_072, -65_536, 19)]),
+        ] {
+            assert_ne!(blake3::hash(&changed), baseline_hash);
+        }
     }
 
     #[test]
@@ -954,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_state_encoding_has_exact_v5_entity_order_records_and_raw_vertices() {
+    fn structural_state_encoding_has_exact_v6_entity_order_records_and_raw_vertices() {
         const WORLD_PITCH: i64 = 65_536;
         let physical = PhysicalScaleProfile::stage0_alpha("canonical-structural-test");
         let mut world = StructuralWorld::new();
@@ -1032,8 +1144,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V5\0");
-        expected.extend_from_slice(&5_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V6\0");
+        expected.extend_from_slice(&6_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -1047,6 +1159,8 @@ mod tests {
         }
 
         expected.push(0);
+
+        expected.extend_from_slice(&0_u32.to_le_bytes());
 
         expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.extend_from_slice(&2_u64.to_le_bytes());
@@ -1087,12 +1201,12 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(
             state_hash(runtime.view(&contract, Tick(3), Revision(2), &world)).to_string(),
-            "268e9b354667b0f4c66cb8954f8dd8c0da3f3dfb3cb5f854cd39d7ca32081818"
+            "617bb627b25d3da52a28a3295246f086e8cb639ed08edea5ca8401cfb000844e"
         );
     }
 
     #[test]
-    fn mobile_track_positions_have_exact_v5_bytes_and_field_boundaries() {
+    fn mobile_track_positions_have_exact_v6_bytes_and_field_boundaries() {
         const EDGE_LENGTH: i64 = 65_536;
         let edge = |edge, offset, heading| TrackPosition::Edge {
             edge: WireId(EntityId(edge)),
@@ -1185,7 +1299,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Forward,
             }),
-            "Edge identity reaches the full V5 state hash"
+            "Edge identity reaches the full V6 state hash"
         );
         assert_ne!(
             baseline,
@@ -1194,7 +1308,7 @@ mod tests {
                 offset: Fixed(WORLD_PITCH),
                 heading: Heading::Forward,
             }),
-            "the exact edge-length offset boundary reaches the full V5 state hash"
+            "the exact edge-length offset boundary reaches the full V6 state hash"
         );
         assert_ne!(
             baseline,
@@ -1203,7 +1317,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Reverse,
             }),
-            "Heading reaches the full V5 state hash"
+            "Heading reaches the full V6 state hash"
         );
 
         let at_junction = TrackPosition::Junction {
@@ -1213,7 +1327,7 @@ mod tests {
         let junction_hash = hash(at_junction);
         assert_ne!(
             baseline, junction_hash,
-            "Edge/Junction discriminant reaches the full V5 state hash"
+            "Edge/Junction discriminant reaches the full V6 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1221,7 +1335,7 @@ mod tests {
                 junction: junction_b,
                 incoming_edge: edge_a,
             }),
-            "Junction identity reaches the full V5 state hash"
+            "Junction identity reaches the full V6 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1229,12 +1343,12 @@ mod tests {
                 junction: junction_a,
                 incoming_edge: edge_b,
             }),
-            "incoming Edge identity reaches the full V5 state hash"
+            "incoming Edge identity reaches the full V6 state hash"
         );
     }
 
     #[test]
-    fn populated_mobile_control_sink_map_has_exact_v5_signal_bytes() {
+    fn populated_mobile_control_sink_map_has_exact_v6_signal_bytes() {
         let mobile = MobileId(EntityId(17));
         let mut signal = SignalWorld::new();
         let ports = signal
@@ -1275,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_port_endpoint_has_exact_v5_bytes_for_all_control_sinks() {
+    fn mobile_port_endpoint_has_exact_v6_bytes_for_all_control_sinks() {
         let endpoint = |mobile, port| {
             endpoint_bytes(EndpointTarget::MobilePort(MobilePortRef {
                 mobile: MobileId(EntityId(mobile)),
@@ -1300,7 +1414,7 @@ mod tests {
     }
 
     #[test]
-    fn main_core_anchor_endpoint_has_exact_v5_bytes() {
+    fn main_core_anchor_endpoint_has_exact_v6_bytes() {
         let endpoint = |id| {
             endpoint_bytes(EndpointTarget::MainCoreAnchor(crate::MainCoreId(EntityId(
                 id,
@@ -1538,12 +1652,14 @@ mod tests {
             .expect("right events stage");
         let signal_events = EventCalendar::new();
         let path_certificates = PathCertificateArena::new();
+        let power_sources = PowerSourceStore::default();
 
         let left = state_hash(StateView {
             contract: &contract,
             next_tick: Tick(3),
             topology_revision: Revision(0),
             main_core: None,
+            power_sources: &power_sources,
             structural: &structural,
             signal: &signal,
             event_payloads: &left_payloads,
@@ -1559,6 +1675,7 @@ mod tests {
                 next_tick: Tick(3),
                 topology_revision: Revision(0),
                 main_core: None,
+                power_sources: &power_sources,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1581,6 +1698,7 @@ mod tests {
                 next_tick: Tick(3),
                 topology_revision: Revision(0),
                 main_core: None,
+                power_sources: &power_sources,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1596,6 +1714,7 @@ mod tests {
             next_tick: Tick(5),
             topology_revision: Revision(0),
             main_core: None,
+            power_sources: &power_sources,
             structural: &structural,
             signal: &signal,
             event_payloads: &fresh_payloads,
@@ -1655,6 +1774,12 @@ mod tests {
             .expect("cancelled heat changes");
         assert_ne!(signal_bytes(&gate_changed), base_bytes);
 
+        let mut unpowered_changed = base.clone();
+        unpowered_changed
+            .set_gate_unpowered_ticks(gate, 3)
+            .expect("unpowered Tick counter changes");
+        assert_ne!(signal_bytes(&unpowered_changed), base_bytes);
+
         let mut wire_changed = base.clone();
         wire_changed
             .set_wire_excitations(&std::collections::BTreeMap::from([(
@@ -1671,6 +1796,102 @@ mod tests {
         let mut tombstoned = base;
         tombstoned.remove_gate(gate).expect("Gate endpoints remove");
         assert_ne!(signal_bytes(&tombstoned), base_bytes);
+    }
+
+    #[test]
+    fn gate_v6_row_appends_exact_unpowered_tick_counter() {
+        let gate = GateId(EntityId(41));
+        let mut signal = SignalWorld::new();
+        signal
+            .activate_gate(gate, GateType::Not, Tick(0))
+            .expect("Gate signal state activates");
+
+        let encode = |signal: &SignalWorld| {
+            let mut bytes = Vec::new();
+            encode_gate_signal_record(
+                *signal.gate_record(gate).expect("Gate record is live"),
+                &mut |part| bytes.extend_from_slice(part),
+            );
+            bytes
+        };
+        let baseline = encode(&signal);
+        let mut expected = Vec::new();
+        for value in [41_u64, 1, 1] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        expected.push(0); // No input B.
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&[0, 0]); // Current and desired LOW.
+        expected.extend_from_slice(&0_u32.to_le_bytes());
+        expected.extend_from_slice(&[0, 0, 0]); // No pending tuple.
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Cancelled switching heat.
+        expected.extend_from_slice(&0_u64.to_le_bytes()); // Unpowered Tick count.
+        assert_eq!(baseline, expected);
+
+        signal
+            .set_gate_unpowered_ticks(gate, 9)
+            .expect("unpowered Tick counter changes");
+        let changed = encode(&signal);
+        assert_eq!(
+            &changed[..changed.len() - 8],
+            &baseline[..baseline.len() - 8]
+        );
+        assert_eq!(&changed[changed.len() - 8..], &9_u64.to_le_bytes());
+        assert_ne!(blake3::hash(&changed), blake3::hash(&baseline));
+    }
+
+    #[test]
+    fn wire_v6_row_has_exact_optional_sense_state_and_field_sensitive_hash() {
+        let wire = WireId(EntityId(41));
+        let mut signal = SignalWorld::new();
+        signal.activate_wire(wire).expect("Wire activates");
+
+        let encode = |signal: &SignalWorld| {
+            let mut bytes = Vec::new();
+            encode_wire_signal_record(
+                signal,
+                wire,
+                signal.wire_snapshot(wire).expect("Wire record is live"),
+                &mut |part| bytes.extend_from_slice(part),
+            );
+            bytes
+        };
+        let without_sense = encode(&signal);
+        let mut expected_without_sense = Vec::new();
+        expected_without_sense.extend_from_slice(&41_u64.to_le_bytes());
+        expected_without_sense.extend_from_slice(&[0; 16 * 6]);
+        expected_without_sense.push(0);
+        assert_eq!(without_sense, expected_without_sense);
+
+        let ports = signal
+            .activate_wire_sensing(wire, Tick(0))
+            .expect("Wire sensing activates");
+        signal
+            .set_wire_sense_intent(wire, true, LogicLevel::High, crate::DriveStrength(333))
+            .expect("Wire Sense intent changes");
+        let with_sense = encode(&signal);
+        let mut expected_with_sense = expected_without_sense;
+        expected_with_sense.pop();
+        expected_with_sense.push(1);
+        expected_with_sense.extend_from_slice(&ports.a.entity_id().0.to_le_bytes());
+        expected_with_sense.extend_from_slice(&ports.b.entity_id().0.to_le_bytes());
+        expected_with_sense.push(1); // Sampled presence.
+        expected_with_sense.push(1); // Intended HIGH.
+        expected_with_sense.extend_from_slice(&333_u64.to_le_bytes());
+        assert_eq!(with_sense, expected_with_sense);
+
+        let baseline_hash = blake3::hash(&with_sense);
+        for (sampled, level, strength) in [
+            (false, LogicLevel::High, 333_u64),
+            (true, LogicLevel::Low, 333),
+            (true, LogicLevel::High, 334),
+        ] {
+            let mut changed = signal.clone();
+            changed
+                .set_wire_sense_intent(wire, sampled, level, crate::DriveStrength(strength))
+                .expect("single Wire Sense field changes");
+            assert_ne!(blake3::hash(&encode(&changed)), baseline_hash);
+        }
     }
 
     fn append_point(output: &mut Vec<u8>, point: FixedVec2) {
@@ -1695,6 +1916,7 @@ mod tests {
     }
 
     fn append_empty_runtime(output: &mut Vec<u8>) {
+        output.extend_from_slice(&0_u32.to_le_bytes());
         for _ in 0..5 {
             output.extend_from_slice(&0_u64.to_le_bytes());
         }
@@ -1838,11 +2060,13 @@ mod tests {
         let payloads = EventPayloadAllocator::new();
         let driver_events = EventCalendar::new();
         let signal_events = EventCalendar::new();
+        let power_sources = PowerSourceStore::default();
         state_hash(StateView {
             contract: &contract,
             next_tick: Tick(0),
             topology_revision: Revision(0),
             main_core: None,
+            power_sources: &power_sources,
             structural: &structural,
             signal: &signal,
             event_payloads: &payloads,

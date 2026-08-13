@@ -5,6 +5,7 @@ use aon_fuzz_harness::{
     exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
     exercise_stateful_commands, exercise_topology_runtime,
 };
+use aon_sim::decode_balance_profile;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const DECODER_CORPUS: &[(&str, &[u8])] = &[
@@ -54,6 +55,16 @@ const REPLAY_CORPUS: &[(&str, &[u8], bool)] = &[
     (
         "valid-s1-m1-capacity",
         include_bytes!("../../../fixtures/replays/s1-m1-capacity-accounting-v1.json"),
+        true,
+    ),
+    (
+        "valid-s1-m2-c07-sensing",
+        include_bytes!("../../../fixtures/replays/s1-m2-c07-sensing-v1.json"),
+        true,
+    ),
+    (
+        "valid-s1-m2-c08-brownout-half",
+        include_bytes!("../../../fixtures/replays/s1-m2-c08-brownout-half-v1.json"),
         true,
     ),
     (
@@ -153,6 +164,30 @@ fn decoder_regression_corpus_never_panics() {
         let result = catch_unwind(AssertUnwindSafe(|| exercise_decoder(bytes)));
         assert!(result.is_ok(), "decoder regression case `{name}` panicked");
     }
+}
+
+#[test]
+fn s1m2_scenario_and_balance_artifacts_reach_the_bounded_decoder_without_panics() {
+    let mut scenario = vec![0];
+    scenario.extend_from_slice(include_bytes!(
+        "../../../fixtures/scenarios/s1-m2-c07-sensing-v1.json"
+    ));
+    let scenario = catch_unwind(AssertUnwindSafe(|| exercise_decoder(&scenario)))
+        .expect("S1-M2 Scenario decoder input must not panic");
+    assert!(
+        scenario.result.is_ok(),
+        "S1-M2 Scenario fixture must remain accepted: {:?}",
+        scenario.result
+    );
+
+    let balance = include_bytes!("../../../profiles/balance/s1-m2-power-probe-alpha.json");
+    let balance = catch_unwind(AssertUnwindSafe(|| decode_balance_profile(balance)))
+        .expect("S1-M2 Balance decoder input must not panic");
+    assert!(
+        balance.is_ok(),
+        "S1-M2 Balance fixture must remain accepted: {:?}",
+        balance
+    );
 }
 
 #[test]

@@ -148,7 +148,7 @@ $requiredTests = @(
         Package = "aon-sim"
         TargetArguments = @("--test", "replay_golden")
         TestName = "retained_feedback_ring_is_the_exact_canonical_replay_encoding"
-        Evidence = "regenerated feedback Replay preserves its command stream and V5 checkpoints"
+        Evidence = "regenerated feedback Replay preserves its command stream under the current V6 encoder"
     },
     @{
         Gates = @(1, 10)
@@ -252,8 +252,8 @@ $requiredTests = @(
         Gates = @(4, 10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::main_core_anchor_endpoint_has_exact_v5_bytes"
-        Evidence = "independent State V5 MainCoreAnchor endpoint bytes"
+        TestName = "canonical::tests::main_core_anchor_endpoint_has_exact_v6_bytes"
+        Evidence = "independent current-State MainCoreAnchor endpoint bytes"
     },
     @{
         Gates = @(5)
@@ -323,7 +323,7 @@ $requiredTests = @(
         Package = "aon-headless"
         TargetArguments = @("--test", "capacity_retained_replay")
         TestName = "retained_capacity_replay_is_canonical_and_executes_headlessly_with_exact_c21_accounting"
-        Evidence = "retained C-21 Replay exact 10/12 NCU reports, Analyzer rows, V5 trace, and restart"
+        Evidence = "retained C-21 Replay exact 10/12 NCU reports, Analyzer rows, current trace, and restart"
     },
     @{
         Gates = @(8)
@@ -364,22 +364,22 @@ $requiredTests = @(
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--test", "bootstrap_simulation")
-        TestName = "s1m1_empty_state_v5_hash_has_a_golden_value"
-        Evidence = "retained Empty world State V5 golden"
+        TestName = "s1m2_empty_state_v6_hash_has_a_golden_value"
+        Evidence = "retained Empty world hash under the current global State encoder"
     },
     @{
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::state_encoding_v5_has_exact_contract_tick_revision_and_identity_order"
-        Evidence = "independent Empty-compatible State V5 prefix and identity field order"
+        TestName = "canonical::tests::state_encoding_v6_has_exact_contract_tick_revision_and_identity_order"
+        Evidence = "independent Empty-compatible current-State prefix and identity field order"
     },
     @{
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::main_core_v5_section_has_exact_anchor_order_and_is_hash_sensitive"
-        Evidence = "independent Main Core State V5 field order and sensitivity"
+        TestName = "canonical::tests::main_core_v6_section_has_exact_anchor_order_and_is_hash_sensitive"
+        Evidence = "independent Main Core current-State field order and sensitivity"
     },
     @{
         Gates = @(10)
@@ -407,28 +407,28 @@ $requiredTests = @(
         Package = "aon-headless"
         TargetArguments = @("--test", "mobility_retained_replay")
         TestName = "retained_mobility_stop_replay_is_canonical_and_executes_headlessly"
-        Evidence = "regenerated retained-state mobility Replay command stream and V5 trace"
+        Evidence = "regenerated retained-state mobility Replay command stream and current trace"
     },
     @{
         Gates = @(10)
         Package = "aon-headless"
         TargetArguments = @("--test", "mobility_retained_replay")
         TestName = "current_input_only_replay_is_canonical_and_resumes_after_the_matched_set_release"
-        Evidence = "regenerated current-input mobility Replay command stream and V5 trace"
+        Evidence = "regenerated current-input mobility Replay command stream and current trace"
     },
     @{
         Gates = @(10)
         Package = "aon-fuzz-harness"
         TargetArguments = @("--test", "regression_corpus")
         TestName = "replay_regression_corpus_never_panics_and_preserves_acceptance_class"
-        Evidence = "bounded decoder corpus includes retained S1-M1 V5 Replay"
+        Evidence = "bounded decoder corpus includes the retained S1-M1 Replay"
     },
     @{
         Gates = @(11)
         Package = "aon-app"
         TargetArguments = @("--test", "replay_host")
         TestName = "retained_s1m1_capacity_replay_matches_headless_and_bevy_fixed_update"
-        Evidence = "Headless and Bevy hosts preserve capacity reports and V5 hashes across presentation paths"
+        Evidence = "Headless and Bevy hosts preserve capacity reports and current hashes across presentation paths"
     },
     @{
         Gates = @(11)
@@ -441,8 +441,8 @@ $requiredTests = @(
         Gates = @(12)
         Package = "aon-sim"
         TargetArguments = @("--test", "artifact_stage_features")
-        TestName = "later_stage_features_remain_unsupported"
-        Evidence = "Sensing, Power, Relay, Payload, and Radiation remain outside S1-M1"
+        TestName = "s1m2_features_require_the_power_world_and_later_features_remain_unsupported"
+        Evidence = "Sensing and Power require their complete world while Relay, Payload, and Radiation remain unsupported"
     }
 )
 

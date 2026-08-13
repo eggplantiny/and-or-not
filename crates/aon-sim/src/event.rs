@@ -91,6 +91,7 @@ pub enum DriverTransitionCause {
     ExternalDriver = 0,
     GateOutput = 1,
     GateStrengthResponse = 2,
+    WireSense = 3,
 }
 
 impl DriverTransitionCause {

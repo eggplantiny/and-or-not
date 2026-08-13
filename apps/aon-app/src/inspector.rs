@@ -578,6 +578,12 @@ fn endpoint_text(endpoint: EndpointTarget) -> String {
         EndpointTarget::MainCoreAnchor(core) => {
             format!("main-core-anchor:{}", core.entity_id().0)
         }
+        EndpointTarget::PowerSourceAnchor(source) => {
+            format!("power-source-anchor:{}", source.entity_id().0)
+        }
+        EndpointTarget::WireSensePort(port) => {
+            format!("wire-sense-port:{}:{:?}", port.wire.entity_id().0, port.end)
+        }
     }
 }
 

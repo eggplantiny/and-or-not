@@ -1,4 +1,4 @@
-use crate::{Capacity, FixedVec2, HeatEnergy, Integrity, MainCoreId};
+use crate::{Capacity, FixedVec2, HeatEnergy, Integrity, MainCoreId, PowerSourceId};
 
 /// Canonical state for the single Main Core created by world generation.
 ///
@@ -21,6 +21,7 @@ pub struct MainCoreState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TopologyNodeId {
     MainCoreAnchor(MainCoreId),
+    PowerSourceAnchor(PowerSourceId),
 }
 
 impl MainCoreState {

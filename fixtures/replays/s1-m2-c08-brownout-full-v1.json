@@ -1,0 +1,207 @@
+{
+  "scenarioPath": "../scenarios/s1-m2-c08-brownout-full-v1.json",
+  "header": {
+    "formatVersion": 2,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63",
+    "stateHashVersion": "aon-state-v6",
+    "worldGeneratorVersion": "aon-main-core-power-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "086b4b71ba63d0795c1bda727e06ff3b949c1daac60b22cd59da9df27fe46db7",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 1048576,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": 262144,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -131072,
+            "y": -131072
+          },
+          "max": {
+            "x": 131072,
+            "y": 131072
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -131072,
+            "y": -131072
+          },
+          "max": {
+            "x": 131072,
+            "y": 131072
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 1,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": {
+          "x": 0,
+          "y": 262144
+        },
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 3
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 3
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 0,
+            "y": 245760
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 6,
+          "port": "power"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 3
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": -262144,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "086b4b71ba63d0795c1bda727e06ff3b949c1daac60b22cd59da9df27fe46db7"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "35b0e4658ec22033555ee990c8bca8f8ded3d72be976f9535649bc63cf141aef"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "ec335954982159c0ad3be89524d244742725ac5845c391efd614bcb54ae49bad"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "8f4ec40acbd437949bd69afc6dd73a3b6985fc505f00dd2ff8753c5b484df658"
+    },
+    {
+      "nextTick": 4,
+      "stateHash": "c92073953f8bd8c8290b4f706dbf208c2e6330bd32bfdc429e667f7c0b30a889"
+    },
+    {
+      "nextTick": 5,
+      "stateHash": "516070270ef1ef46bf312d2c2e906a0597974b6e3afa4546c7642a5e6224b3f3"
+    }
+  ]
+}

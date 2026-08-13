@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -433,12 +433,100 @@ impl TrackGraph {
         }
     }
 
+    /// Resolves a canonical Track position to its physical Wire and offset from stored endpoint A.
+    ///
+    /// Heading does not change the attachment point. A Junction position remains attached to its
+    /// unique incoming incident: endpoint A maps to zero and endpoint B maps to the Wire length.
+    pub(crate) fn power_attachment_position(
+        &self,
+        position: TrackPosition,
+    ) -> Result<(WireId, Fixed), TrackGraphError> {
+        match position {
+            TrackPosition::Edge { edge, offset, .. } => {
+                let record = self
+                    .edges
+                    .get(&edge)
+                    .ok_or(TrackGraphError::InvalidCanonicalState)?;
+                if record.id != edge
+                    || record.length.0 <= 0
+                    || offset.0 < 0
+                    || offset.0 > record.length.0
+                {
+                    return Err(TrackGraphError::InvalidCanonicalState);
+                }
+                Ok((edge, offset))
+            }
+            TrackPosition::Junction {
+                junction,
+                incoming_edge,
+            } => {
+                if !self.junctions.contains_key(&junction) {
+                    return Err(TrackGraphError::InvalidCanonicalState);
+                }
+                let mut matching = self
+                    .incidents
+                    .get(&junction)
+                    .into_iter()
+                    .flatten()
+                    .filter(|incident| incident.edge == incoming_edge);
+                let incident = matching
+                    .next()
+                    .copied()
+                    .ok_or(TrackGraphError::InvalidCanonicalState)?;
+                if matching.next().is_some() {
+                    return Err(TrackGraphError::InvalidCanonicalState);
+                }
+                let edge = self
+                    .edges
+                    .get(&incoming_edge)
+                    .ok_or(TrackGraphError::InvalidCanonicalState)?;
+                let endpoint_junction = match incident.end {
+                    WireEnd::A => edge.junction_a,
+                    WireEnd::B => edge.junction_b,
+                };
+                if edge.id != incoming_edge
+                    || edge.length.0 <= 0
+                    || endpoint_junction != Some(junction)
+                {
+                    return Err(TrackGraphError::InvalidCanonicalState);
+                }
+                let offset = match incident.end {
+                    WireEnd::A => Fixed::ZERO,
+                    WireEnd::B => edge.length,
+                };
+                Ok((incoming_edge, offset))
+            }
+        }
+    }
+
     pub fn stage_movement(
         &self,
         mobile: MobileId,
         start: TrackPosition,
         controls: MobileControlSample,
         granted_budget: Fixed,
+    ) -> Result<MobileMovementObservation, TrackGraphError> {
+        self.stage_movement_with_power(mobile, start, controls, granted_budget, None)
+    }
+
+    pub(crate) fn stage_powered_movement(
+        &self,
+        mobile: MobileId,
+        start: TrackPosition,
+        controls: MobileControlSample,
+        granted_budget: Fixed,
+        powered_edges: &BTreeSet<WireId>,
+    ) -> Result<MobileMovementObservation, TrackGraphError> {
+        self.stage_movement_with_power(mobile, start, controls, granted_budget, Some(powered_edges))
+    }
+
+    fn stage_movement_with_power(
+        &self,
+        mobile: MobileId,
+        start: TrackPosition,
+        controls: MobileControlSample,
+        granted_budget: Fixed,
+        powered_edges: Option<&BTreeSet<WireId>>,
     ) -> Result<MobileMovementObservation, TrackGraphError> {
         if granted_budget.0 < 0 {
             return Err(TrackGraphError::InvalidCanonicalState);
@@ -538,6 +626,9 @@ impl TrackGraph {
                     let Some(selected) = selected else {
                         break;
                     };
+                    if powered_edges.is_some_and(|edges| !edges.contains(&selected.edge)) {
+                        break;
+                    }
                     position = self.position_leaving_incident(selected)?;
                 }
             }
@@ -676,8 +767,7 @@ impl TrackGraph {
         ))
     }
 
-    #[cfg(test)]
-    fn edge_ids(&self) -> impl Iterator<Item = WireId> + '_ {
+    pub(crate) fn edge_ids(&self) -> impl Iterator<Item = WireId> + '_ {
         self.edges.keys().copied()
     }
 }
@@ -1042,6 +1132,121 @@ mod tests {
                 incoming_edge: WireId(EntityId(3)),
             }
         );
+    }
+
+    #[test]
+    fn power_attachment_uses_stored_a_offset_for_edge_positions_independent_of_heading() {
+        let (wires, junctions) = graph_fixture();
+        let graph = TrackGraph::compile(&wires, &junctions).expect("graph");
+        let edge = WireId(EntityId(3));
+
+        for heading in [Heading::Forward, Heading::Reverse] {
+            for offset in [Fixed::ZERO, Fixed(4), Fixed(10)] {
+                assert_eq!(
+                    graph.power_attachment_position(TrackPosition::Edge {
+                        edge,
+                        offset,
+                        heading,
+                    }),
+                    Ok((edge, offset))
+                );
+            }
+        }
+        assert_eq!(
+            graph.power_attachment_position(TrackPosition::Edge {
+                edge,
+                offset: Fixed(-1),
+                heading: Heading::Forward,
+            }),
+            Err(TrackGraphError::InvalidCanonicalState)
+        );
+        assert_eq!(
+            graph.power_attachment_position(TrackPosition::Edge {
+                edge,
+                offset: Fixed(11),
+                heading: Heading::Reverse,
+            }),
+            Err(TrackGraphError::InvalidCanonicalState)
+        );
+        assert_eq!(
+            graph.power_attachment_position(TrackPosition::Edge {
+                edge: WireId(EntityId(99)),
+                offset: Fixed::ZERO,
+                heading: Heading::Forward,
+            }),
+            Err(TrackGraphError::InvalidCanonicalState)
+        );
+    }
+
+    #[test]
+    fn power_attachment_maps_junction_incident_a_to_zero_and_b_to_edge_length() {
+        let (wires, junctions) = graph_fixture();
+        let graph = TrackGraph::compile(&wires, &junctions).expect("graph");
+        let junction = JunctionId(EntityId(40));
+
+        assert_eq!(
+            graph.power_attachment_position(TrackPosition::Junction {
+                junction,
+                incoming_edge: WireId(EntityId(9)),
+            }),
+            Ok((WireId(EntityId(9)), Fixed::ZERO)),
+            "Wire 9 stores the Junction at endpoint A"
+        );
+        assert_eq!(
+            graph.power_attachment_position(TrackPosition::Junction {
+                junction,
+                incoming_edge: WireId(EntityId(3)),
+            }),
+            Ok((WireId(EntityId(3)), Fixed(10))),
+            "Wire 3 stores the Junction at endpoint B"
+        );
+    }
+
+    #[test]
+    fn power_attachment_rejects_malformed_junction_positions() {
+        let (wires, junctions) = graph_fixture();
+        let graph = TrackGraph::compile(&wires, &junctions).expect("graph");
+
+        for position in [
+            TrackPosition::Junction {
+                junction: JunctionId(EntityId(99)),
+                incoming_edge: WireId(EntityId(3)),
+            },
+            TrackPosition::Junction {
+                junction: JunctionId(EntityId(40)),
+                incoming_edge: WireId(EntityId(99)),
+            },
+        ] {
+            assert_eq!(
+                graph.power_attachment_position(position),
+                Err(TrackGraphError::InvalidCanonicalState)
+            );
+        }
+    }
+
+    #[test]
+    fn power_attachment_is_invariant_to_dense_wire_and_junction_layout() {
+        let (mut wires, mut junctions) = graph_fixture();
+        let position = TrackPosition::Junction {
+            junction: JunctionId(EntityId(40)),
+            incoming_edge: WireId(EntityId(9)),
+        };
+        let baseline = TrackGraph::compile(&wires, &junctions)
+            .expect("baseline graph")
+            .power_attachment_position(position)
+            .expect("baseline attachment");
+
+        wires
+            .swap_slots_for_test(WireIndex(0), WireIndex(2))
+            .expect("wire slots swap");
+        junctions
+            .swap_slots_for_test(JunctionIndex(0), JunctionIndex(1))
+            .expect("junction slots swap");
+        let permuted = TrackGraph::compile(&wires, &junctions)
+            .expect("permuted graph")
+            .power_attachment_position(position)
+            .expect("permuted attachment");
+        assert_eq!(permuted, baseline);
     }
 
     #[test]
@@ -1718,6 +1923,94 @@ mod tests {
                 kind: JunctionDecisionKind::Reverse,
             }
         );
+    }
+
+    #[test]
+    fn powered_movement_stops_at_an_unpowered_junction_edge_boundary() {
+        let junction = JunctionId(EntityId(40));
+        let incoming = WireId(EntityId(1));
+        let outgoing = WireId(EntityId(2));
+        let mut junctions = JunctionStore::default();
+        junctions
+            .push(junction, RoutingDomain::OpenWorld, point(2, 0))
+            .expect("Junction");
+        let mut wires = WireStore::default();
+        wires
+            .push(
+                incoming,
+                RoutingDomain::OpenWorld,
+                &[point(0, 0), point(2, 0)],
+                EndpointTarget::Free,
+                EndpointTarget::Junction(junction),
+            )
+            .expect("powered incoming Track");
+        wires
+            .push(
+                outgoing,
+                RoutingDomain::OpenWorld,
+                &[point(2, 0), point(6, 0)],
+                EndpointTarget::Junction(junction),
+                EndpointTarget::Free,
+            )
+            .expect("candidate outgoing Track");
+        let graph = TrackGraph::compile(&wires, &junctions).expect("two-edge Track graph");
+        let mobile = MobileId(EntityId(99));
+        let start = TrackPosition::Edge {
+            edge: incoming,
+            offset: Fixed(1),
+            heading: Heading::Forward,
+        };
+        let controls = MobileControlSample {
+            stop: LogicLevel::Low,
+            left: LogicLevel::Low,
+            right: LogicLevel::Low,
+        };
+        let boundary = TrackPosition::Junction {
+            junction,
+            incoming_edge: incoming,
+        };
+
+        let stopped = graph
+            .stage_powered_movement(
+                mobile,
+                start,
+                controls,
+                Fixed(3),
+                &BTreeSet::from([incoming]),
+            )
+            .expect("powered movement stops at the first unpowered edge");
+        assert_eq!(stopped.end, boundary);
+        assert_eq!(stopped.granted_budget, Fixed(3));
+        assert_eq!(stopped.consumed_budget, Fixed(1));
+        assert_eq!(
+            stopped.junction_decisions,
+            vec![MobileJunctionDecision {
+                junction,
+                incoming_edge: incoming,
+                selected_edge: Some(outgoing),
+                kind: JunctionDecisionKind::Straight,
+            }]
+        );
+
+        let entered = graph
+            .stage_powered_movement(
+                mobile,
+                start,
+                controls,
+                Fixed(3),
+                &BTreeSet::from([incoming, outgoing]),
+            )
+            .expect("power on the selected next edge permits entry");
+        assert_eq!(
+            entered.end,
+            TrackPosition::Edge {
+                edge: outgoing,
+                offset: Fixed(2),
+                heading: Heading::Forward,
+            }
+        );
+        assert_eq!(entered.consumed_budget, Fixed(3));
+        assert_eq!(entered.junction_decisions, stopped.junction_decisions);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use thiserror::Error;
 
 pub const PROFILE_SCHEMA_VERSION_V1: u32 = 1;
 pub const PROFILE_SCHEMA_VERSION_V2: u32 = 2;
+pub const PROFILE_SCHEMA_VERSION_V3: u32 = 3;
 
 pub const REFERENCE_WIRE_GEOMETRY_QUANTUM: Fixed = Fixed(FIXED_ONE / 64);
 pub const REFERENCE_CIRCUIT_ROUTING_PITCH: Fixed = Fixed(FIXED_ONE / 4);
@@ -407,6 +408,28 @@ pub struct CapacityProbeProfile {
     pub support_heat_fraction: Rational,
 }
 
+/// S1-M2 conformance coefficients for the first deterministic Power solver.
+///
+/// These values are semantic inputs, not inferred tuning values. Generation remains part of the
+/// Scenario's absolute initial world so that two otherwise identical circuits can exercise
+/// different brownout ratios without changing this profile.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PowerProbeProfile {
+    pub gate_idle_demand: u64,
+    pub gate_drive_demand: u64,
+    pub gate_switch_demand_per_energy: Rational,
+    #[serde(rename = "wireLeakagePerWU")]
+    pub wire_leakage_per_wu: Rational,
+    #[serde(rename = "wireSenseDemandPerWU")]
+    pub wire_sense_demand_per_wu: Rational,
+    #[serde(rename = "movementDemandPerWU")]
+    pub movement_demand_per_wu: Rational,
+    pub power_loss_k: Rational,
+    pub sense_nominal_drive: u64,
+    pub gate_state_retention_ticks: u64,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrientationWeightTable {
@@ -459,6 +482,8 @@ pub struct BalanceProfile {
     pub capacity_probe: Option<CapacityProbeProfile>,
     #[serde(default)]
     pub radiation_reference: Option<RadiationReferenceProfile>,
+    #[serde(default)]
+    pub power_probe: Option<PowerProbeProfile>,
 }
 
 impl BalanceProfile {
@@ -486,6 +511,7 @@ impl BalanceProfile {
             radiation_cell_size: Fixed(FIXED_ONE),
             capacity_probe: None,
             radiation_reference: None,
+            power_probe: None,
         }
     }
 
@@ -521,14 +547,38 @@ impl BalanceProfile {
         profile
     }
 
+    /// Reference S1-M2 conformance profile.
+    ///
+    /// Unit coefficients deliberately make the retained C-07/C-08 arithmetic transparent. They
+    /// are not a claim about final product balance.
+    pub fn power_probe_alpha(profile_id: impl Into<String>) -> Self {
+        let mut profile = Self::capacity_probe_alpha(profile_id);
+        profile.schema_version = PROFILE_SCHEMA_VERSION_V3;
+        profile.power_probe = Some(PowerProbeProfile {
+            gate_idle_demand: 1,
+            gate_drive_demand: 1,
+            gate_switch_demand_per_energy: ratio(1, 1),
+            wire_leakage_per_wu: ratio(1, 1),
+            wire_sense_demand_per_wu: ratio(1, 1),
+            movement_demand_per_wu: ratio(1, 1),
+            power_loss_k: ratio(0, 1),
+            sense_nominal_drive: 400,
+            gate_state_retention_ticks: 3,
+        });
+        profile
+    }
+
     pub fn validate(&self) -> Result<(), ProfileValidationError> {
-        validate_header(
+        if !matches!(
             self.schema_version,
-            &self.profile_id,
-            self.kind,
-            ProfileKind::Balance,
-            PROFILE_SCHEMA_VERSION_V2,
-        )?;
+            PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3
+        ) {
+            return Err(ProfileValidationError::UnsupportedSchema {
+                expected: PROFILE_SCHEMA_VERSION_V3,
+                actual: self.schema_version,
+            });
+        }
+        validate_non_schema_header(&self.profile_id, self.kind, ProfileKind::Balance)?;
         for (field, valid) in [
             ("simulationHz", self.simulation_hz > 0),
             ("gateBaseDelay", self.gate_base_delay > 0),
@@ -569,6 +619,25 @@ impl BalanceProfile {
         }
         if let Some(radiation_reference) = self.radiation_reference {
             validate_radiation_reference(radiation_reference)?;
+        }
+        match (self.schema_version, self.power_probe) {
+            (PROFILE_SCHEMA_VERSION_V2, None) => {}
+            (PROFILE_SCHEMA_VERSION_V2, Some(_)) => {
+                return Err(ProfileValidationError::FieldForbiddenForSchema {
+                    field: "powerProbe",
+                    schema_version: PROFILE_SCHEMA_VERSION_V2,
+                });
+            }
+            (PROFILE_SCHEMA_VERSION_V3, Some(power_probe)) => {
+                validate_power_probe(power_probe)?;
+            }
+            (PROFILE_SCHEMA_VERSION_V3, None) => {
+                return Err(ProfileValidationError::FieldRequiredForSchema {
+                    field: "powerProbe",
+                    schema_version: PROFILE_SCHEMA_VERSION_V3,
+                });
+            }
+            _ => unreachable!("supported Balance schemas were checked above"),
         }
         Ok(())
     }
@@ -614,6 +683,14 @@ impl BalanceProfile {
                 write_u8(1, write);
                 encode_radiation_reference(radiation_reference, write);
             }
+        }
+        // Schema v2 bytes are retained exactly. The v3 suffix is selected by the schema tag that
+        // is already part of the canonical header.
+        if self.schema_version == PROFILE_SCHEMA_VERSION_V3 {
+            let power_probe = self
+                .power_probe
+                .expect("validated Balance v3 has a Power probe");
+            encode_power_probe(power_probe, write);
         }
     }
 }
@@ -665,6 +742,18 @@ pub struct ProfileHashes {
 pub enum ProfileValidationError {
     #[error("unsupported profile schema: expected {expected}, got {actual}")]
     UnsupportedSchema { expected: u32, actual: u32 },
+
+    #[error("profile field `{field}` is required by schema {schema_version}")]
+    FieldRequiredForSchema {
+        field: &'static str,
+        schema_version: u32,
+    },
+
+    #[error("profile field `{field}` is forbidden by schema {schema_version}")]
+    FieldForbiddenForSchema {
+        field: &'static str,
+        schema_version: u32,
+    },
 
     #[error("profileId must not be empty")]
     EmptyProfileId,
@@ -733,6 +822,14 @@ fn validate_header(
             actual: schema_version,
         });
     }
+    validate_non_schema_header(profile_id, actual_kind, expected_kind)
+}
+
+fn validate_non_schema_header(
+    profile_id: &str,
+    actual_kind: ProfileKind,
+    expected_kind: ProfileKind,
+) -> Result<(), ProfileValidationError> {
     if profile_id.trim().is_empty() {
         return Err(ProfileValidationError::EmptyProfileId);
     }
@@ -937,6 +1034,49 @@ fn validate_capacity_probe(profile: CapacityProbeProfile) -> Result<(), ProfileV
     )
 }
 
+fn validate_power_probe(profile: PowerProbeProfile) -> Result<(), ProfileValidationError> {
+    for (field, valid) in [
+        ("powerProbe.gateIdleDemand", profile.gate_idle_demand > 0),
+        ("powerProbe.gateDriveDemand", profile.gate_drive_demand > 0),
+        (
+            "powerProbe.senseNominalDrive",
+            profile.sense_nominal_drive > 0,
+        ),
+        (
+            "powerProbe.gateStateRetentionTicks",
+            profile.gate_state_retention_ticks > 0,
+        ),
+    ] {
+        if !valid {
+            return Err(ProfileValidationError::NonPositiveField {
+                profile: ProfileKind::Balance,
+                field,
+            });
+        }
+    }
+    require_positive_rational(
+        "powerProbe.gateSwitchDemandPerEnergy",
+        profile.gate_switch_demand_per_energy,
+    )?;
+    require_positive_rational("powerProbe.wireLeakagePerWU", profile.wire_leakage_per_wu)?;
+    require_positive_rational(
+        "powerProbe.wireSenseDemandPerWU",
+        profile.wire_sense_demand_per_wu,
+    )?;
+    require_positive_rational(
+        "powerProbe.movementDemandPerWU",
+        profile.movement_demand_per_wu,
+    )?;
+    require_nonnegative_rational("powerProbe.powerLossK", profile.power_loss_k)?;
+    if profile.sense_nominal_drive < 1 {
+        return Err(ProfileValidationError::InvalidBalanceRelation {
+            field: "powerProbe.senseNominalDrive",
+            relation: "must be nonzero",
+        });
+    }
+    Ok(())
+}
+
 fn validate_radiation_reference(
     profile: RadiationReferenceProfile,
 ) -> Result<(), ProfileValidationError> {
@@ -1078,6 +1218,18 @@ fn encode_radiation_reference(profile: RadiationReferenceProfile, write: &mut dy
     ] {
         write_u64(value, write);
     }
+}
+
+fn encode_power_probe(profile: PowerProbeProfile, write: &mut dyn FnMut(&[u8])) {
+    write_u64(profile.gate_idle_demand, write);
+    write_u64(profile.gate_drive_demand, write);
+    encode_rational(profile.gate_switch_demand_per_energy, write);
+    encode_rational(profile.wire_leakage_per_wu, write);
+    encode_rational(profile.wire_sense_demand_per_wu, write);
+    encode_rational(profile.movement_demand_per_wu, write);
+    encode_rational(profile.power_loss_k, write);
+    write_u64(profile.sense_nominal_drive, write);
+    write_u64(profile.gate_state_retention_ticks, write);
 }
 
 fn write_u8(value: u8, write: &mut dyn FnMut(&[u8])) {
@@ -1281,7 +1433,7 @@ mod tests {
         assert_eq!(
             old_balance.validate(),
             Err(ProfileValidationError::UnsupportedSchema {
-                expected: PROFILE_SCHEMA_VERSION_V2,
+                expected: PROFILE_SCHEMA_VERSION_V3,
                 actual: PROFILE_SCHEMA_VERSION_V1,
             })
         );
@@ -1377,7 +1529,162 @@ mod tests {
         assert_eq!(profile.radiation_cell_size, Fixed(65_536));
         assert_eq!(profile.capacity_probe, None);
         assert_eq!(profile.radiation_reference, None);
+        assert_eq!(profile.power_probe, None);
         assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn balance_v3_requires_and_hashes_the_complete_power_probe_without_changing_v2() {
+        let retained_v2 = BalanceProfile::stage0_alpha("stage0-alpha");
+        assert!(retained_v2.validate().is_ok());
+
+        let profile = BalanceProfile::power_probe_alpha("s1-m2-alpha");
+        assert_eq!(profile.schema_version, PROFILE_SCHEMA_VERSION_V3);
+        assert!(profile.validate().is_ok());
+        assert_ne!(profile.canonical_hash(), retained_v2.canonical_hash());
+
+        let mut missing = profile.clone();
+        missing.power_probe = None;
+        assert_eq!(
+            missing.validate(),
+            Err(ProfileValidationError::FieldRequiredForSchema {
+                field: "powerProbe",
+                schema_version: PROFILE_SCHEMA_VERSION_V3,
+            })
+        );
+
+        let mut forbidden = retained_v2.clone();
+        forbidden.power_probe = profile.power_probe;
+        assert_eq!(
+            forbidden.validate(),
+            Err(ProfileValidationError::FieldForbiddenForSchema {
+                field: "powerProbe",
+                schema_version: PROFILE_SCHEMA_VERSION_V2,
+            })
+        );
+    }
+
+    #[test]
+    fn balance_v3_every_power_probe_field_is_hash_sensitive_and_boundary_validated() {
+        type ProbeMutation = fn(&mut PowerProbeProfile);
+
+        let profile = BalanceProfile::power_probe_alpha("s1-m2-hash-sensitivity");
+        let baseline = profile.canonical_hash().expect("valid v3 hash");
+        let hash_mutations: [(&str, ProbeMutation); 9] = [
+            ("gateIdleDemand", |probe| probe.gate_idle_demand += 1),
+            ("gateDriveDemand", |probe| probe.gate_drive_demand += 1),
+            ("gateSwitchDemandPerEnergy", |probe| {
+                probe.gate_switch_demand_per_energy = ratio(2, 1)
+            }),
+            ("wireLeakagePerWU", |probe| {
+                probe.wire_leakage_per_wu = ratio(2, 1)
+            }),
+            ("wireSenseDemandPerWU", |probe| {
+                probe.wire_sense_demand_per_wu = ratio(2, 1)
+            }),
+            ("movementDemandPerWU", |probe| {
+                probe.movement_demand_per_wu = ratio(2, 1)
+            }),
+            ("powerLossK", |probe| probe.power_loss_k = ratio(1, 1)),
+            ("senseNominalDrive", |probe| probe.sense_nominal_drive += 1),
+            ("gateStateRetentionTicks", |probe| {
+                probe.gate_state_retention_ticks += 1
+            }),
+        ];
+        for (field, mutate) in hash_mutations {
+            let mut changed = profile.clone();
+            mutate(changed.power_probe.as_mut().expect("v3 probe"));
+            assert!(changed.validate().is_ok(), "{field} mutation remains valid");
+            assert_ne!(
+                baseline,
+                changed.canonical_hash().expect("changed v3 hash"),
+                "{field} must be independently hash-sensitive"
+            );
+        }
+
+        let invalid_mutations: [(&str, ProbeMutation, ProfileValidationError); 9] = [
+            (
+                "gateIdleDemand",
+                |probe| probe.gate_idle_demand = 0,
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.gateIdleDemand",
+                },
+            ),
+            (
+                "gateDriveDemand",
+                |probe| probe.gate_drive_demand = 0,
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.gateDriveDemand",
+                },
+            ),
+            (
+                "gateSwitchDemandPerEnergy",
+                |probe| probe.gate_switch_demand_per_energy = ratio(0, 1),
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.gateSwitchDemandPerEnergy",
+                },
+            ),
+            (
+                "wireLeakagePerWU",
+                |probe| probe.wire_leakage_per_wu = ratio(0, 1),
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.wireLeakagePerWU",
+                },
+            ),
+            (
+                "wireSenseDemandPerWU",
+                |probe| probe.wire_sense_demand_per_wu = ratio(0, 1),
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.wireSenseDemandPerWU",
+                },
+            ),
+            (
+                "movementDemandPerWU",
+                |probe| probe.movement_demand_per_wu = ratio(0, 1),
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.movementDemandPerWU",
+                },
+            ),
+            (
+                "powerLossK",
+                |probe| probe.power_loss_k = ratio(-1, 1),
+                ProfileValidationError::NegativeField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.powerLossK",
+                },
+            ),
+            (
+                "senseNominalDrive",
+                |probe| probe.sense_nominal_drive = 0,
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.senseNominalDrive",
+                },
+            ),
+            (
+                "gateStateRetentionTicks",
+                |probe| probe.gate_state_retention_ticks = 0,
+                ProfileValidationError::NonPositiveField {
+                    profile: ProfileKind::Balance,
+                    field: "powerProbe.gateStateRetentionTicks",
+                },
+            ),
+        ];
+        for (field, mutate, expected) in invalid_mutations {
+            let mut invalid = profile.clone();
+            mutate(invalid.power_probe.as_mut().expect("v3 probe"));
+            assert_eq!(
+                invalid.validate(),
+                Err(expected),
+                "{field} invalid boundary"
+            );
+        }
     }
 
     #[test]

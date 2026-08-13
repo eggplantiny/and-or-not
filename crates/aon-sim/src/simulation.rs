@@ -10,10 +10,26 @@ use crate::mobility::{
     MobileControlSample, MobileMovementObservation, TrackGraph, TrackGraphError, TrackPosition,
 };
 use crate::path_certificate::{PathCertificateArena, PathCertificateError};
-use crate::profile::{BalanceProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError};
+use crate::power::{
+    DemandId, DemandKind, PowerError, PowerRatio, PowerSourceState, brownout_gate_delay,
+    scale_drive, scale_movement,
+};
+use crate::power_adapter::{PowerAdapterError, compile_power_topology_with_loads};
+use crate::power_runtime::{
+    GatePowerDemandInput, MovementPowerDemandInput, NominalPowerDemandSet, PowerGateReport,
+    PowerHeatReport, PowerMobileReport, PowerRuntimeError, PowerSenseAnalyzerSnapshot,
+    PowerSenseReport, PowerStepReport, WirePowerDemandInput, collect_nominal_power_demands,
+    solve_power_step,
+};
+use crate::power_source::PowerSourceStore;
+use crate::profile::{
+    BalanceProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError, Rational,
+};
 use crate::replay::{
     ReplayFormatVersion, ReplayHeader, Seed, StateHashVersion, WorldGeneratorVersion,
+    WorldInputEvent,
 };
+use crate::sensing::{HostileCollider, WireSensingInput, WireSensingOutput, sample_wire_sensing};
 use crate::signal::{
     DriverChangeRecord, DriverRole, GateSignalPorts, GateSignalSnapshot, SignalChangeRecord,
     SignalError, SignalStepCounters, SignalWorld, SinkRole, SlotApplyOutcome, WireSignalSnapshot,
@@ -22,12 +38,15 @@ use crate::signal_topology::{
     CompiledSignalTopology, RouteDiff, SignalTopologyError, switch_energy,
 };
 use crate::snapshot::{RenderSnapshotSource, SignalProbeSample, SignalProbeTarget, sample_signal};
-use crate::structural::{StructuralError, StructuralPhaseReport, StructuralWorld};
+use crate::structural::{
+    PowerSourceAnchorView, StructuralCommandContext, StructuralError, StructuralPhaseReport,
+    StructuralWorld,
+};
 use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
-    Fixed, FixedVec2, GateId, GateType, InitialWorld, LogicLevel, MobileId, MobileSubstrateIndex,
-    RenderSnapshot, Revision, ScenarioManifest, SimulationError, SinkId, StageFeatureSet,
-    StateHash, Tick, WireId, canonical,
+    Energy, Fixed, FixedVec2, GateId, GateType, InitialWorld, LogicLevel, MobileId,
+    MobileSubstrateIndex, RenderSnapshot, Revision, ScenarioManifest, SimulationError, SinkId,
+    StageFeatureSet, StateHash, Tick, WireEnd, WireId, canonical, polyline_length,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -117,6 +136,7 @@ pub struct StepReport {
     pub signal_counters: SignalStepCounters,
     pub mobile_movements: Vec<MobileMovementObservation>,
     pub network_accounting: Option<crate::NetworkAccounting>,
+    pub power: Option<PowerStepReport>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +147,7 @@ struct MobileIntent {
     start_world_point: FixedVec2,
     controls: MobileControlSample,
     granted_budget: Fixed,
+    power_attachment: Option<(WireId, Fixed)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,11 +156,13 @@ struct MobilePhase1Snapshot {
     mobile: MobileId,
     start: TrackPosition,
     world_point: FixedVec2,
+    power_attachment: Option<(WireId, Fixed)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Phase1Snapshot {
     mobiles: Vec<MobilePhase1Snapshot>,
+    wire_sensing: Vec<WireSensingOutput>,
 }
 
 struct Phase0Output {
@@ -147,6 +170,30 @@ struct Phase0Output {
     topology: CompiledSignalTopology,
     track_graph: TrackGraph,
     signal_counters: SignalStepCounters,
+}
+
+struct Phase4Output {
+    network_accounting: Option<crate::NetworkAccounting>,
+    nominal_power: Option<NominalPowerDemandSet>,
+}
+
+/// Phase-5 Power output before Phase 8 publishes derived Heat Contributions.
+///
+/// Keeping heat outside `report` makes the Phase-8 ownership boundary explicit even though the
+/// pure Power solver also remains useful as a complete standalone kernel.
+#[derive(Default)]
+struct Phase5Output {
+    report: Option<PowerStepReport>,
+    private_heat: Vec<PowerHeatReport>,
+}
+
+struct Phase6Inputs<'a> {
+    topology: &'a CompiledSignalTopology,
+    tick: Tick,
+    balance: &'a BalanceProfile,
+    movement_budget: Fixed,
+    wire_sensing: &'a [WireSensingOutput],
+    power_report: Option<&'a mut PowerStepReport>,
 }
 
 struct Phase11Output {
@@ -226,6 +273,7 @@ struct CanonicalWorld {
     topology_revision: Revision,
     contract: SimulationContract,
     main_core: Option<MainCoreState>,
+    power_sources: PowerSourceStore,
     structural: StructuralWorld,
     signal: SignalWorld,
     event_payloads: EventPayloadAllocator,
@@ -241,6 +289,7 @@ impl CanonicalWorld {
             next_tick: self.next_tick,
             topology_revision: self.topology_revision,
             main_core: self.main_core.as_ref(),
+            power_sources: &self.power_sources,
             structural: &self.structural,
             signal: &self.signal,
             event_payloads: &self.event_payloads,
@@ -255,6 +304,7 @@ pub struct Simulation {
     scenario_id: String,
     canonical: CanonicalWorld,
     profiles: ProfileBundle,
+    required_features: StageFeatureSet,
     initial_state_hash: StateHash,
     world_generator_version: WorldGeneratorVersion,
 }
@@ -271,12 +321,25 @@ impl Simulation {
             .validate_profiles(&package.profiles)
             .map_err(SimulationError::from)?;
 
-        let (structural, main_core, world_generator_version) = match package.initial_world {
+        let (structural, main_core, power_sources, world_generator_version) = match package
+            .initial_world
+        {
             InitialWorld::Empty => {
                 if package.required_features.capacity {
                     return Err(SimulationError::CapacityRequiresMainCore);
                 }
-                (StructuralWorld::new(), None, WorldGeneratorVersion::EmptyV1)
+                if package.required_features.sensing || package.required_features.power {
+                    return Err(SimulationError::PowerFeaturesRequireMainCorePowerWorld);
+                }
+                if package.profiles.balance.power_probe.is_some() {
+                    return Err(SimulationError::PowerProbeRequiresMainCorePowerWorld);
+                }
+                (
+                    StructuralWorld::new(),
+                    None,
+                    PowerSourceStore::default(),
+                    WorldGeneratorVersion::EmptyV1,
+                )
             }
             InitialWorld::MainCoreV1 {
                 position,
@@ -285,6 +348,12 @@ impl Simulation {
             } => {
                 if !package.required_features.capacity {
                     return Err(SimulationError::MainCoreRequiresCapacity);
+                }
+                if package.required_features.sensing || package.required_features.power {
+                    return Err(SimulationError::PowerFeaturesRequireMainCorePowerWorld);
+                }
+                if package.profiles.balance.power_probe.is_some() {
+                    return Err(SimulationError::PowerProbeRequiresMainCorePowerWorld);
                 }
                 let capacity_profile = package
                     .profiles
@@ -314,7 +383,71 @@ impl Simulation {
                         integrity,
                         heat_energy,
                     )),
+                    PowerSourceStore::default(),
                     WorldGeneratorVersion::MainCoreV1,
+                )
+            }
+            InitialWorld::MainCorePowerV1 {
+                main_core_position,
+                main_core_integrity,
+                main_core_heat_energy,
+                power_sources,
+            } => {
+                if !package.required_features.capacity
+                    || !package.required_features.sensing
+                    || !package.required_features.power
+                {
+                    return Err(SimulationError::MainCorePowerRequiresFeatures);
+                }
+                let capacity_profile = package
+                    .profiles
+                    .balance
+                    .capacity_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                package
+                    .profiles
+                    .balance
+                    .power_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                if main_core_integrity.0 == 0 {
+                    return Err(SimulationError::InvalidMainCoreIntegrity);
+                }
+                let quantum = package.profiles.physical_scale.wire_geometry_quantum;
+                if crate::validate_quantized(main_core_position, quantum).is_err() {
+                    return Err(SimulationError::InvalidMainCoreGeometryQuantum);
+                }
+                if power_sources
+                    .iter()
+                    .any(|source| crate::validate_quantized(source.position(), quantum).is_err())
+                {
+                    return Err(SimulationError::InvalidPowerSourceGeometryQuantum);
+                }
+                let capacity =
+                    crate::Capacity::from_whole_ncu(capacity_profile.main_core_capacity)?;
+                let (structural, core_id, source_ids) =
+                    StructuralWorld::new_with_main_core_and_power_source_registry_entries(
+                        power_sources.len(),
+                    )?;
+                let source_states = source_ids
+                    .into_iter()
+                    .zip(power_sources)
+                    .map(|(id, source)| {
+                        PowerSourceState::new(id, source.position(), source.generation_per_tick())
+                    })
+                    .collect();
+                let power_sources = PowerSourceStore::new(source_states)
+                    .map_err(|_| SimulationError::InvalidCanonicalState)?;
+                (
+                    structural,
+                    Some(MainCoreState::new(
+                        core_id,
+                        main_core_position,
+                        capacity,
+                        main_core_integrity,
+                        main_core_heat_energy,
+                    )),
+                    power_sources,
+                    WorldGeneratorVersion::MainCorePowerV1,
                 )
             }
         };
@@ -324,6 +457,7 @@ impl Simulation {
             topology_revision: Revision(0),
             contract: package.contract,
             main_core,
+            power_sources,
             structural,
             signal: SignalWorld::new(),
             event_payloads: EventPayloadAllocator::new(),
@@ -337,12 +471,22 @@ impl Simulation {
             scenario_id: package.scenario_id,
             canonical,
             profiles: package.profiles,
+            required_features: package.required_features,
             initial_state_hash,
             world_generator_version,
         })
     }
 
     pub fn step(&mut self, commands: &[CommandEnvelope]) -> Result<StepReport, SimulationError> {
+        self.step_with_world_inputs(commands, &[])
+    }
+
+    pub fn step_with_world_inputs(
+        &mut self,
+        commands: &[CommandEnvelope],
+        world_inputs: &[WorldInputEvent],
+    ) -> Result<StepReport, SimulationError> {
+        let hostiles = validate_world_inputs(world_inputs, self.canonical.next_tick)?;
         let mut candidate = self.canonical.clone();
         let completed_tick = candidate.next_tick;
         let next_tick = completed_tick.checked_add(Tick(1))?;
@@ -358,7 +502,14 @@ impl Simulation {
         )?;
 
         phases.enter(TickPhase::SnapshotAndWorldSample)?;
-        let phase1 = run_phase1_snapshot_and_world_sample(&candidate, &phase0.track_graph)?;
+        let phase1 = run_phase1_snapshot_and_world_sample(
+            &candidate,
+            &phase0.track_graph,
+            hostiles,
+            self.required_features.sensing,
+            self.profiles.balance.sense_radius,
+            self.profiles.physical_scale.world_routing_pitch,
+        )?;
 
         phases.enter(TickPhase::DriverAndSignalArrival)?;
         let phase2 = run_phase2(
@@ -373,27 +524,41 @@ impl Simulation {
         let mut mobile_intents = run_phase3(&mut candidate, &phase1)?;
 
         phases.enter(TickPhase::GlobalAccountingAndNominalDemand)?;
-        let network_accounting =
-            run_phase4_global_accounting_and_nominal_demand(&candidate, &mobile_intents)?;
+        let phase4 = run_phase4_global_accounting_and_nominal_demand(
+            &candidate,
+            &phase0.topology,
+            &mobile_intents,
+            &self.profiles.balance,
+            self.profiles.physical_scale.world_routing_pitch,
+        )?;
 
         phases.enter(TickPhase::PowerSolveAndBrownout)?;
-        run_phase5_power_solve_and_brownout();
+        let mut phase5 = run_phase5_power_solve_and_brownout(
+            &candidate,
+            phase4.nominal_power.as_ref(),
+            &self.profiles.balance,
+        )?;
 
         phases.enter(TickPhase::SchedulingAndGrantedWork)?;
         run_phase6(
             &mut candidate,
-            &phase0.topology,
-            completed_tick,
-            &self.profiles.balance,
             &mut mobile_intents,
-            self.profiles.physical_scale.world_routing_pitch,
+            Phase6Inputs {
+                topology: &phase0.topology,
+                tick: completed_tick,
+                balance: &self.profiles.balance,
+                movement_budget: self.profiles.physical_scale.world_routing_pitch,
+                wire_sensing: &phase1.wire_sensing,
+                power_report: phase5.report.as_mut(),
+            },
         )?;
 
         phases.enter(TickPhase::Trajectory)?;
-        let staged_mobiles = run_phase7(&phase0.track_graph, &mobile_intents)?;
+        let staged_mobiles =
+            run_phase7(&phase0.track_graph, &mobile_intents, phase5.report.as_ref())?;
 
         phases.enter(TickPhase::Interaction)?;
-        run_phase8_interaction(&staged_mobiles);
+        run_phase8_interaction(&staged_mobiles, &mut phase5)?;
 
         phases.enter(TickPhase::ThermalIntegration)?;
         run_phase9_thermal_integration();
@@ -419,7 +584,8 @@ impl Simulation {
             signal_arrivals: phase2.signal_arrivals,
             signal_counters: phase0.signal_counters,
             mobile_movements: phase11.mobile_movements,
-            network_accounting,
+            network_accounting: phase4.network_accounting,
+            power: phase5.report,
         })
     }
 
@@ -464,7 +630,7 @@ impl Simulation {
 
     pub fn replay_header(&self) -> ReplayHeader {
         ReplayHeader {
-            format_version: ReplayFormatVersion::V1,
+            format_version: ReplayFormatVersion::V2,
             semantics_version: self.canonical.contract.semantics_version,
             numeric_profile_hash: self.canonical.contract.numeric_profile_hash,
             physical_scale_profile_hash: self.canonical.contract.physical_scale_profile_hash,
@@ -489,6 +655,14 @@ impl Simulation {
         self.canonical.main_core.as_ref()
     }
 
+    pub fn power_sources(&self) -> impl ExactSizeIterator<Item = &PowerSourceState> {
+        self.canonical.power_sources.iter()
+    }
+
+    pub fn power_source_state(&self, id: crate::PowerSourceId) -> Option<&PowerSourceState> {
+        self.canonical.power_sources.get(id)
+    }
+
     pub fn network_analyzer_snapshot(
         &self,
     ) -> Result<Option<crate::NetworkAnalyzerSnapshot>, SimulationError> {
@@ -499,6 +673,47 @@ impl Simulation {
                 analyzer_snapshot(self.canonical.next_tick, &self.canonical.structural, core)
             })
             .transpose()
+    }
+
+    /// Recomputes persistent Power routes and current Sense/Gate observations without mutation.
+    ///
+    /// Tick-local Movement intents, hostile samples, and Phase-8 Heat Contributions are excluded.
+    pub fn power_sense_analyzer_snapshot(
+        &self,
+    ) -> Result<Option<PowerSenseAnalyzerSnapshot>, SimulationError> {
+        if !self.required_features.power {
+            return Ok(None);
+        }
+        let balance = &self.profiles.balance;
+        let probe = balance
+            .power_probe
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let signal_topology = CompiledSignalTopology::compile(
+            &self.canonical.structural,
+            &self.canonical.signal,
+            balance,
+        )?;
+        let gates = collect_gate_power_inputs(&self.canonical, &signal_topology, balance)?;
+        let wires = collect_wire_power_inputs(&self.canonical)?;
+        let nominal = collect_nominal_power_demands(probe, &gates, &wires, &[])?;
+        let topology = compile_power_topology_with_loads(
+            &self.canonical.structural,
+            &self.canonical.power_sources,
+            nominal.load_attachments(),
+        )?;
+        let solved = solve_power_step(&topology, &self.canonical.power_sources, &nominal, probe)?;
+        let mut senses = collect_power_sense_reports(&self.canonical, &solved, probe)?;
+        let mut gates =
+            collect_power_gate_reports(&self.canonical, &signal_topology, &solved, balance)?;
+        senses.sort_unstable_by_key(|sense| (sense.wire, sense.end));
+        gates.sort_unstable_by_key(|gate| gate.gate);
+        Ok(Some(PowerSenseAnalyzerSnapshot {
+            next_tick: self.canonical.next_tick,
+            regions: solved.regions,
+            loads: solved.loads,
+            senses,
+            gates,
+        }))
     }
 
     pub fn gate_signal_ports(&self, gate: GateId) -> Option<GateSignalPorts> {
@@ -524,10 +739,18 @@ impl Simulation {
     pub fn wire_signal_state(&self, wire: WireId) -> Option<WireSignalSnapshot> {
         self.canonical.signal.wire_snapshot(wire)
     }
+
+    pub fn wire_sense_state(&self, wire: WireId) -> Option<crate::WireSenseSnapshot> {
+        self.canonical.signal.wire_sense_snapshot(wire)
+    }
 }
 
 fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationError> {
-    validate_structural_registry_links(&world.structural, world.main_core.as_ref())?;
+    validate_structural_registry_links(
+        &world.structural,
+        world.main_core.as_ref(),
+        &world.power_sources,
+    )?;
     let signal = &world.signal;
     let driver_frontier = signal.driver_frontier().entity_id().0;
     let sink_frontier = signal.sink_frontier().entity_id().0;
@@ -631,7 +854,12 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
             ),
             None => None,
         };
-        if crate::signal::gate_output(gate.gate_type, input_a, input_b)? != gate.desired_output {
+        let ordinary_desired = crate::signal::gate_output(gate.gate_type, input_a, input_b)?;
+        let retention_reset = gate.unpowered_ticks > 0
+            && gate.desired_output == LogicLevel::Low
+            && gate.pending_level == Some(LogicLevel::Low)
+            && gate.pending_switch_energy == Some(Energy(0));
+        if ordinary_desired != gate.desired_output && !retention_reset {
             return Err(SimulationError::InvalidCanonicalState);
         }
 
@@ -646,7 +874,7 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
                     || due_tick < world.next_tick
                     || level != gate.desired_output
                     || level == gate.current_output
-                    || energy.0 == 0
+                    || (energy.0 == 0 && level != LogicLevel::Low)
                     || !world.driver_events.canonical_view().any(|event| {
                         event.cause == DriverTransitionCause::GateOutput
                             && event.driver_id == gate.ports.output
@@ -697,6 +925,34 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
             SinkRole::MobileRight,
             &mut referenced_sinks,
         )?;
+    }
+
+    for (wire, sense) in signal.iter_wire_sensing() {
+        if !world
+            .structural
+            .wires()
+            .iter_alive()
+            .any(|(_, record)| record.id == wire)
+            || sense.ports.a == sense.ports.b
+            || !matches!(sense.intended_level, LogicLevel::Low | LogicLevel::High)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        let a = signal
+            .driver_record(sense.ports.a)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let b = signal
+            .driver_record(sense.ports.b)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        if a.owner != wire.entity_id()
+            || b.owner != wire.entity_id()
+            || a.role != DriverRole::WireSenseA
+            || b.role != DriverRole::WireSenseB
+            || !referenced_drivers.insert(sense.ports.a)
+            || !referenced_drivers.insert(sense.ports.b)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
     }
 
     let mut live_drivers = BTreeSet::new();
@@ -771,6 +1027,7 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
 fn validate_structural_registry_links(
     structural: &StructuralWorld,
     main_core: Option<&MainCoreState>,
+    power_sources: &PowerSourceStore,
 ) -> Result<(), SimulationError> {
     let registry = structural.entities();
     let frontier = registry.next_id().0;
@@ -793,6 +1050,7 @@ fn validate_structural_registry_links(
     let mut registry_junctions = BTreeSet::new();
     let mut registry_substrates = BTreeSet::new();
     let mut registry_mobiles = BTreeSet::new();
+    let mut registry_power_sources = BTreeMap::new();
     let mut registry_main_core = None;
     for (id, location) in slots {
         if id.0 == 0 || id.0 >= frontier {
@@ -852,6 +1110,11 @@ fn validate_structural_registry_links(
                     return Err(SimulationError::InvalidCanonicalState);
                 }
             }
+            crate::EntityLocation::PowerSource(index) => {
+                if registry_power_sources.insert(id, index).is_some() {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
             _ => return Err(SimulationError::InvalidCanonicalState),
         }
     }
@@ -861,6 +1124,25 @@ fn validate_structural_registry_links(
     }
     if main_core.is_some_and(|core| core.id().entity_id() != crate::FIRST_ENTITY_ID) {
         return Err(SimulationError::InvalidCanonicalState);
+    }
+    let store_power_sources: BTreeMap<_, _> = power_sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let index = u32::try_from(index).map_err(|_| SimulationError::NumericOverflow)?;
+            Ok((source.id().entity_id(), crate::PowerSourceIndex(index)))
+        })
+        .collect::<Result<_, SimulationError>>()?;
+    if registry_power_sources != store_power_sources {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    for (index, source) in power_sources.iter().enumerate() {
+        let expected = 2_u64
+            .checked_add(u64::try_from(index).map_err(|_| SimulationError::NumericOverflow)?)
+            .ok_or(SimulationError::NumericOverflow)?;
+        if source.id().entity_id().0 != expected {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
     }
 
     let mut store_gates = BTreeSet::new();
@@ -888,6 +1170,11 @@ fn validate_structural_registry_links(
                 && (record.routing_domain != crate::RoutingDomain::OpenWorld
                     || point != main_core.map(|core| core.position())
                     || main_core.map(|core| core.id()) != Some(id))
+            {
+                return Err(SimulationError::InvalidCanonicalState);
+            }
+            if let crate::EndpointTarget::PowerSourceAnchor(id) = target
+                && point != power_sources.get(id).map(|source| source.position())
             {
                 return Err(SimulationError::InvalidCanonicalState);
             }
@@ -1053,6 +1340,9 @@ fn validate_event_state(
             DriverTransitionCause::GateOutput if event.pending_generation == 0 => {
                 return Err(SimulationError::EventQueueInvariantViolation);
             }
+            DriverTransitionCause::WireSense if event.pending_generation != 0 => {
+                return Err(SimulationError::EventQueueInvariantViolation);
+            }
             _ => {}
         }
         if live_drivers.contains(&event.driver_id) {
@@ -1064,6 +1354,9 @@ fn validate_event_state(
                 DriverTransitionCause::ExternalDriver => record.role.is_external(),
                 DriverTransitionCause::GateOutput | DriverTransitionCause::GateStrengthResponse => {
                     record.role == DriverRole::GateOutput
+                }
+                DriverTransitionCause::WireSense => {
+                    matches!(record.role, DriverRole::WireSenseA | DriverRole::WireSenseB)
                 }
             };
             if !valid_role {
@@ -1220,12 +1513,24 @@ fn run_phase0_structural_commit(
 ) -> Result<Phase0Output, SimulationError> {
     let old_topology = CompiledSignalTopology::compile(&world.structural, &world.signal, balance)?;
     let main_core = world.main_core.map(MainCoreState::anchor_view);
+    let power_sources = world
+        .power_sources
+        .iter()
+        .map(|source| PowerSourceAnchorView {
+            id: source.id(),
+            position: source.position(),
+        })
+        .collect::<Vec<_>>();
     let structural_report = world.structural.apply_phase0_with_signal_and_core(
         &mut world.signal,
         tick,
         commands,
-        physical,
-        main_core,
+        StructuralCommandContext {
+            physical,
+            main_core,
+            power_sources: &power_sources,
+            sensing_enabled: balance.power_probe.is_some(),
+        },
     )?;
     world.topology_revision = if structural_report.topology_changed {
         world.topology_revision.checked_add(Revision(1))?
@@ -1253,6 +1558,10 @@ fn run_phase0_structural_commit(
 fn run_phase1_snapshot_and_world_sample(
     world: &CanonicalWorld,
     track_graph: &TrackGraph,
+    hostiles: &[HostileCollider],
+    sensing_enabled: bool,
+    sense_radius: Fixed,
+    chunk_size: Fixed,
 ) -> Result<Phase1Snapshot, SimulationError> {
     let mut mobiles = Vec::new();
     for (index, record) in world.structural.mobile_substrates().iter_alive() {
@@ -1262,6 +1571,9 @@ fn run_phase1_snapshot_and_world_sample(
             mobile: record.id,
             start,
             world_point: track_graph.world_position(start)?,
+            power_attachment: sensing_enabled
+                .then(|| track_graph.power_attachment_position(start))
+                .transpose()?,
         });
     }
     mobiles.sort_unstable_by_key(|snapshot| snapshot.mobile.entity_id());
@@ -1271,7 +1583,62 @@ fn run_phase1_snapshot_and_world_sample(
     {
         return Err(SimulationError::InvalidCanonicalState);
     }
-    Ok(Phase1Snapshot { mobiles })
+    let wire_sensing = if sensing_enabled {
+        let wires = world
+            .structural
+            .wires()
+            .iter_alive()
+            .map(|(_, wire)| WireSensingInput {
+                id: wire.id,
+                points: wire.points,
+            })
+            .collect::<Vec<_>>();
+        sample_wire_sensing(&wires, hostiles, sense_radius, chunk_size)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?
+    } else {
+        Vec::new()
+    };
+    Ok(Phase1Snapshot {
+        mobiles,
+        wire_sensing,
+    })
+}
+
+fn validate_world_inputs(
+    inputs: &[WorldInputEvent],
+    tick: Tick,
+) -> Result<&[HostileCollider], SimulationError> {
+    if inputs.len() > 1 {
+        return Err(SimulationError::DuplicateWorldInputFrame);
+    }
+    let Some(input) = inputs.first() else {
+        return Ok(&[]);
+    };
+    let WorldInputEvent::HostileFrame {
+        target_tick,
+        hostiles,
+    } = input;
+    if *target_tick != tick {
+        return Err(SimulationError::WorldInputTickMismatch);
+    }
+    let mut previous = None;
+    for hostile in hostiles {
+        if hostile.id == 0 {
+            return Err(SimulationError::InvalidHostileId);
+        }
+        if hostile.radius.0 < 0 {
+            return Err(SimulationError::NegativeHostileRadius { id: hostile.id });
+        }
+        if previous.is_some_and(|id| id >= hostile.id) {
+            return if previous == Some(hostile.id) {
+                Err(SimulationError::DuplicateHostileId { id: hostile.id })
+            } else {
+                Err(SimulationError::InvalidCanonicalState)
+            };
+        }
+        previous = Some(hostile.id);
+    }
+    Ok(hostiles)
 }
 
 #[derive(Clone, Copy)]
@@ -1303,7 +1670,7 @@ fn run_phase2(
                 .ok_or(SimulationError::NumericOverflow)?;
             continue;
         };
-        match valid.get(&event.driver_id) {
+        match valid.get(&event.driver_id).copied() {
             None => {
                 valid.insert(event.driver_id, candidate);
             }
@@ -1311,6 +1678,28 @@ fn run_phase2(
                 if existing.event.level == event.level
                     && existing.event.strength == event.strength
                     && existing.clear_pending_gate == candidate.clear_pending_gate => {}
+            Some(existing)
+                if matches!(
+                    (existing.event.cause, candidate.event.cause),
+                    (
+                        DriverTransitionCause::GateOutput,
+                        DriverTransitionCause::GateStrengthResponse
+                    ) | (
+                        DriverTransitionCause::GateStrengthResponse,
+                        DriverTransitionCause::GateOutput
+                    )
+                ) =>
+            {
+                let (level_transition, strength_transition) =
+                    if existing.event.cause == DriverTransitionCause::GateOutput {
+                        (existing, candidate)
+                    } else {
+                        (candidate, existing)
+                    };
+                let mut combined = level_transition;
+                combined.event.strength = strength_transition.event.strength;
+                valid.insert(event.driver_id, combined);
+            }
             Some(_) => return Err(SimulationError::InvalidCanonicalState),
         }
     }
@@ -1514,7 +1903,7 @@ fn add_counter(counter: &mut u64, amount: u64) -> Result<(), SimulationError> {
 
 fn validate_driver_transition(
     world: &CanonicalWorld,
-    event: DriverTransition,
+    mut event: DriverTransition,
     tick: Tick,
 ) -> Result<Option<ValidDriverTransition>, SimulationError> {
     if event.key.due_tick != tick
@@ -1554,6 +1943,10 @@ fn validate_driver_transition(
             {
                 return Ok(None);
             }
+            // Logic delay is frozen when the level transition is scheduled, but Drive strength
+            // continues to follow Power independently. A due level event therefore preserves the
+            // latest applied strength unless a same-Tick strength response is merged in Phase 2.
+            event.strength = driver.sample.strength;
             Ok(Some(ValidDriverTransition {
                 event,
                 clear_pending_gate: Some(GateId(driver.owner)),
@@ -1567,8 +1960,19 @@ fn validate_driver_transition(
                 .signal
                 .gate_record(GateId(driver.owner))
                 .ok_or(SimulationError::InvalidCanonicalState)?;
-            if gate.current_output != event.level || gate.pending_due_tick.is_some() {
+            if gate.current_output != event.level {
                 return Ok(None);
+            }
+            Ok(Some(ValidDriverTransition {
+                event,
+                clear_pending_gate: None,
+            }))
+        }
+        DriverTransitionCause::WireSense => {
+            if !matches!(driver.role, DriverRole::WireSenseA | DriverRole::WireSenseB)
+                || event.pending_generation != 0
+            {
+                return Err(SimulationError::InvalidCanonicalState);
             }
             Ok(Some(ValidDriverTransition {
                 event,
@@ -1616,6 +2020,7 @@ fn run_phase3(
                     right: level(ports.right)?,
                 },
                 granted_budget: Fixed::ZERO,
+                power_attachment: mobile_snapshot.power_attachment,
             })
         })
         .collect()
@@ -1623,17 +2028,123 @@ fn run_phase3(
 
 fn run_phase4_global_accounting_and_nominal_demand(
     world: &CanonicalWorld,
-    _mobile_intents: &[MobileIntent],
-) -> Result<Option<crate::NetworkAccounting>, SimulationError> {
-    world
+    topology: &CompiledSignalTopology,
+    mobile_intents: &[MobileIntent],
+    balance: &BalanceProfile,
+    movement_budget: Fixed,
+) -> Result<Phase4Output, SimulationError> {
+    let network_accounting = world
         .main_core
         .as_ref()
         .map(|core| account_network(&world.structural, Some(core)))
-        .transpose()
+        .transpose()?;
+    let Some(probe) = balance.power_probe else {
+        return Ok(Phase4Output {
+            network_accounting,
+            nominal_power: None,
+        });
+    };
+
+    let gates = collect_gate_power_inputs(world, topology, balance)?;
+    let wires = collect_wire_power_inputs(world)?;
+    let movements = mobile_intents
+        .iter()
+        .map(|intent| {
+            let (wire, offset) = intent
+                .power_attachment
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            Ok(MovementPowerDemandInput {
+                mobile: intent.mobile,
+                wire,
+                offset,
+                base_distance: movement_budget,
+                movement_enabled: intent.controls.grants_stage0_movement(),
+            })
+        })
+        .collect::<Result<Vec<_>, SimulationError>>()?;
+    let nominal_power = collect_nominal_power_demands(probe, &gates, &wires, &movements)
+        .map_err(SimulationError::from)?;
+    Ok(Phase4Output {
+        network_accounting,
+        nominal_power: Some(nominal_power),
+    })
 }
 
-fn run_phase5_power_solve_and_brownout() {
-    // Stage 0 freezes the power ratio at one, so there is no Power Region solve yet.
+fn collect_gate_power_inputs(
+    world: &CanonicalWorld,
+    topology: &CompiledSignalTopology,
+    balance: &BalanceProfile,
+) -> Result<Vec<GatePowerDemandInput>, SimulationError> {
+    world
+        .signal
+        .iter_gates()
+        .map(|gate| {
+            let load = topology
+                .driver_load(gate.ports.output)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let retains_identical_pending = matches!(
+                (
+                    gate.pending_due_tick,
+                    gate.pending_level,
+                    gate.pending_switch_energy,
+                ),
+                (Some(_), Some(level), Some(_))
+                    if level == gate.desired_output
+                        && gate.desired_output != gate.current_output
+            );
+            let switch_energy =
+                if gate.desired_output != gate.current_output && !retains_identical_pending {
+                    Some(switch_energy(load.total_load, balance)?)
+                } else {
+                    None
+                };
+            Ok(GatePowerDemandInput {
+                gate: gate.gate,
+                output_has_reachable_load: topology.routes_from(gate.ports.output).next().is_some(),
+                switch_energy,
+            })
+        })
+        .collect()
+}
+
+fn collect_wire_power_inputs(
+    world: &CanonicalWorld,
+) -> Result<Vec<WirePowerDemandInput>, SimulationError> {
+    world
+        .structural
+        .wires()
+        .iter_alive()
+        .map(|(_, wire)| {
+            Ok(WirePowerDemandInput {
+                wire: wire.id,
+                length: polyline_length(wire.points)?,
+            })
+        })
+        .collect()
+}
+
+fn run_phase5_power_solve_and_brownout(
+    world: &CanonicalWorld,
+    nominal: Option<&NominalPowerDemandSet>,
+    balance: &BalanceProfile,
+) -> Result<Phase5Output, SimulationError> {
+    let Some(nominal) = nominal else {
+        return Ok(Phase5Output::default());
+    };
+    let probe = balance
+        .power_probe
+        .ok_or(SimulationError::InvalidCanonicalState)?;
+    let topology = compile_power_topology_with_loads(
+        &world.structural,
+        &world.power_sources,
+        nominal.load_attachments(),
+    )?;
+    let mut report = solve_power_step(&topology, &world.power_sources, nominal, probe)?;
+    let private_heat = std::mem::take(&mut report.heat_contributions);
+    Ok(Phase5Output {
+        report: Some(report),
+        private_heat,
+    })
 }
 
 fn grant_stage0_mobile_budgets(intents: &mut [MobileIntent], budget: Fixed) {
@@ -1646,24 +2157,130 @@ fn grant_stage0_mobile_budgets(intents: &mut [MobileIntent], budget: Fixed) {
     }
 }
 
+fn power_ratio_from_rational(value: Rational) -> Result<PowerRatio, SimulationError> {
+    if value.numerator() < 0 || value.denominator() <= 0 {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let numerator = i128::from(value.numerator())
+        .checked_mul(i128::from(crate::FIXED_ONE))
+        .ok_or(SimulationError::NumericOverflow)?;
+    let raw = crate::round_div_nearest_even(numerator, i128::from(value.denominator()))?;
+    let raw = i64::try_from(raw).map_err(|_| SimulationError::NumericOverflow)?;
+    PowerRatio::new(Fixed(raw)).map_err(SimulationError::from)
+}
+
+fn required_power_ratio(
+    report: &PowerStepReport,
+    owner: crate::EntityId,
+    kind: DemandKind,
+) -> Result<PowerRatio, SimulationError> {
+    report
+        .ratio_for(DemandId::new(owner, kind))
+        .ok_or(SimulationError::InvalidCanonicalState)
+}
+
+fn collect_power_sense_reports(
+    world: &CanonicalWorld,
+    report: &PowerStepReport,
+    probe: crate::PowerProbeProfile,
+) -> Result<Vec<PowerSenseReport>, SimulationError> {
+    world
+        .signal
+        .iter_wire_sensing()
+        .flat_map(|(wire, sense)| {
+            [(WireEnd::A, sense.ports.a), (WireEnd::B, sense.ports.b)]
+                .map(move |(end, driver)| (wire, end, driver, sense))
+        })
+        .map(|(wire, end, driver, sense)| {
+            let ratio = required_power_ratio(report, wire.entity_id(), DemandKind::WireSensing)?;
+            let current_driver = world
+                .signal
+                .driver_sample(driver)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let intended_strength = scale_drive(DriveStrength(probe.sense_nominal_drive), ratio)?;
+            Ok(PowerSenseReport {
+                wire,
+                end,
+                sampled_presence: sense.sampled_presence,
+                intended_level: sense.intended_level,
+                intended_strength,
+                current_driver,
+            })
+        })
+        .collect()
+}
+
+fn collect_power_gate_reports(
+    world: &CanonicalWorld,
+    topology: &CompiledSignalTopology,
+    report: &PowerStepReport,
+    balance: &BalanceProfile,
+) -> Result<Vec<PowerGateReport>, SimulationError> {
+    let delay_floor = power_ratio_from_rational(balance.brownout_delay_floor)?;
+    world
+        .signal
+        .iter_gates()
+        .map(|gate| {
+            let ratio = required_power_ratio(report, gate.gate.entity_id(), DemandKind::GateIdle)?;
+            let load = topology
+                .driver_load(gate.ports.output)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            Ok(PowerGateReport {
+                gate: gate.gate,
+                ratio,
+                effective_delay: brownout_gate_delay(load.gate_delay, ratio, delay_floor)?,
+                effective_drive: scale_drive(DriveStrength(balance.nominal_gate_drive), ratio)?,
+                unpowered_ticks: gate.unpowered_ticks,
+            })
+        })
+        .collect()
+}
+
 fn run_phase7(
     track_graph: &TrackGraph,
     intents: &[MobileIntent],
+    power_report: Option<&PowerStepReport>,
 ) -> Result<Vec<StagedMobileMovement>, SimulationError> {
+    let powered_edges = power_report
+        .map(|report| {
+            track_graph
+                .edge_ids()
+                .filter_map(|edge| {
+                    let ratio =
+                        required_power_ratio(report, edge.entity_id(), DemandKind::WireLeakage);
+                    match ratio {
+                        Ok(ratio) if ratio > PowerRatio::ZERO => Some(Ok(edge)),
+                        Ok(_) => None,
+                        Err(error) => Some(Err(error)),
+                    }
+                })
+                .collect::<Result<BTreeSet<_>, SimulationError>>()
+        })
+        .transpose()?;
     intents
         .iter()
         .map(|intent| {
             if track_graph.world_position(intent.start)? != intent.start_world_point {
                 return Err(SimulationError::InvalidCanonicalState);
             }
-            Ok(StagedMobileMovement {
-                index: intent.index,
-                observation: track_graph.stage_movement(
+            let observation = match powered_edges.as_ref() {
+                Some(powered_edges) => track_graph.stage_powered_movement(
+                    intent.mobile,
+                    intent.start,
+                    intent.controls,
+                    intent.granted_budget,
+                    powered_edges,
+                )?,
+                None => track_graph.stage_movement(
                     intent.mobile,
                     intent.start,
                     intent.controls,
                     intent.granted_budget,
                 )?,
+            };
+            Ok(StagedMobileMovement {
+                index: intent.index,
+                observation,
             })
         })
         .collect()
@@ -1671,57 +2288,152 @@ fn run_phase7(
 
 fn run_phase6(
     world: &mut CanonicalWorld,
-    topology: &CompiledSignalTopology,
-    tick: Tick,
-    balance: &BalanceProfile,
     mobile_intents: &mut [MobileIntent],
-    movement_budget: Fixed,
+    inputs: Phase6Inputs<'_>,
 ) -> Result<(), SimulationError> {
+    let Phase6Inputs {
+        topology,
+        tick,
+        balance,
+        movement_budget,
+        wire_sensing,
+        power_report,
+    } = inputs;
+    let power_enabled = power_report.is_some();
+    if let Some(report) = power_report.as_deref()
+        && (!report.sense.is_empty()
+            || !report.gates.is_empty()
+            || !report.mobiles.is_empty()
+            || !report.heat_contributions.is_empty())
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
     let gates: Vec<_> = world.signal.iter_gates().collect();
     let mut candidates = Vec::new();
+    let mut gate_reports = Vec::with_capacity(gates.len());
     for gate in gates {
-        let mut replacement_generation = None;
-        match (
+        let load = topology
+            .driver_load(gate.ports.output)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let (ratio, effective_strength, operate_threshold, delay_floor, retention_ticks) =
+            match (power_report.as_deref(), balance.power_probe) {
+                (None, None) => (
+                    PowerRatio::ONE,
+                    DriveStrength(balance.nominal_gate_drive),
+                    PowerRatio::ZERO,
+                    PowerRatio::ONE,
+                    u64::MAX,
+                ),
+                (Some(report), Some(probe)) => {
+                    let ratio =
+                        required_power_ratio(report, gate.gate.entity_id(), DemandKind::GateIdle)?;
+                    (
+                        ratio,
+                        scale_drive(DriveStrength(balance.nominal_gate_drive), ratio)?,
+                        power_ratio_from_rational(balance.logic_operate_threshold)?,
+                        power_ratio_from_rational(balance.brownout_delay_floor)?,
+                        probe.gate_state_retention_ticks,
+                    )
+                }
+                _ => return Err(SimulationError::InvalidCanonicalState),
+            };
+        let effective_delay = if power_enabled {
+            brownout_gate_delay(load.gate_delay, ratio, delay_floor)?
+        } else {
+            load.gate_delay
+        };
+        let powered = ratio >= operate_threshold;
+        let unpowered_ticks = if !power_enabled || powered {
+            0
+        } else {
+            gate.unpowered_ticks
+                .checked_add(1)
+                .ok_or(SimulationError::NumericOverflow)?
+        };
+        world
+            .signal
+            .set_gate_unpowered_ticks(gate.gate, unpowered_ticks)?;
+
+        let retention_expired = power_enabled
+            && !powered
+            && unpowered_ticks >= retention_ticks
+            && gate.current_output != LogicLevel::Low;
+        let target = if retention_expired {
+            world
+                .signal
+                .set_gate_desired_level(gate.gate, LogicLevel::Low)?;
+            Some((LogicLevel::Low, Energy(0)))
+        } else if powered && gate.desired_output != gate.current_output {
+            Some((
+                gate.desired_output,
+                switch_energy(load.total_load, balance)?,
+            ))
+        } else {
+            None
+        };
+
+        let pending = (
             gate.pending_due_tick,
             gate.pending_level,
             gate.pending_switch_energy,
-        ) {
-            (Some(_), Some(level), Some(_))
-                if level == gate.desired_output && gate.desired_output != gate.current_output =>
-            {
-                continue;
-            }
-            (Some(_), Some(_), Some(energy)) => {
-                world.signal.add_cancelled_heat(gate.gate, energy)?;
-                replacement_generation = Some(world.signal.advance_pending_generation(gate.gate)?);
-                world.signal.clear_pending(gate.gate)?;
-            }
-            (None, None, None) => {}
-            _ => return Err(SimulationError::InvalidCanonicalState),
-        }
-
-        if gate.desired_output != gate.current_output {
-            let generation = match replacement_generation {
-                Some(generation) => generation,
-                None => world.signal.advance_pending_generation(gate.gate)?,
+        );
+        let pending_conflicts = matches!(
+            pending,
+            (Some(_), Some(level), Some(_)) if level != gate.desired_output
+        );
+        if target.is_none() && pending_conflicts {
+            let (Some(_), Some(_), Some(energy)) = pending else {
+                return Err(SimulationError::InvalidCanonicalState);
             };
-            let load = topology
-                .driver_load(gate.ports.output)
-                .ok_or(SimulationError::InvalidCanonicalState)?;
-            let due_tick = tick.checked_add(load.gate_delay)?;
-            let energy = switch_energy(load.total_load, balance)?;
-            world
-                .signal
-                .set_pending(gate.gate, due_tick, gate.desired_output, energy)?;
-            candidates.push(DriverTransition::s0m3(
-                due_tick,
-                gate.ports.output,
-                gate.desired_output,
-                DriveStrength(balance.nominal_gate_drive),
-                generation,
-                DriverTransitionCause::GateOutput,
-            ));
-            continue;
+            world.signal.add_cancelled_heat(gate.gate, energy)?;
+            world.signal.advance_pending_generation(gate.gate)?;
+            world.signal.clear_pending(gate.gate)?;
+        } else if let Some((target_level, switch_energy)) = target {
+            let retains_identical_pending = matches!(
+                (
+                    gate.pending_due_tick,
+                    gate.pending_level,
+                    gate.pending_switch_energy,
+                ),
+                (Some(_), Some(level), Some(_)) if level == target_level
+            );
+            if !retains_identical_pending {
+                let generation = match (
+                    gate.pending_due_tick,
+                    gate.pending_level,
+                    gate.pending_switch_energy,
+                ) {
+                    (Some(_), Some(_), Some(energy)) => {
+                        world.signal.add_cancelled_heat(gate.gate, energy)?;
+                        let generation = world.signal.advance_pending_generation(gate.gate)?;
+                        world.signal.clear_pending(gate.gate)?;
+                        generation
+                    }
+                    (None, None, None) => world.signal.advance_pending_generation(gate.gate)?,
+                    _ => return Err(SimulationError::InvalidCanonicalState),
+                };
+                let due_tick = tick.checked_add(effective_delay)?;
+                world
+                    .signal
+                    .set_pending(gate.gate, due_tick, target_level, switch_energy)?;
+                candidates.push(DriverTransition::s0m3(
+                    due_tick,
+                    gate.ports.output,
+                    target_level,
+                    effective_strength,
+                    generation,
+                    DriverTransitionCause::GateOutput,
+                ));
+            }
+        } else {
+            match (
+                gate.pending_due_tick,
+                gate.pending_level,
+                gate.pending_switch_energy,
+            ) {
+                (Some(_), Some(_), Some(_)) | (None, None, None) => {}
+                _ => return Err(SimulationError::InvalidCanonicalState),
+            }
         }
 
         let output = world
@@ -1731,27 +2443,153 @@ fn run_phase6(
         if output.level != gate.current_output {
             return Err(SimulationError::InvalidCanonicalState);
         }
-        if output.strength != DriveStrength(balance.nominal_gate_drive) {
-            let due_tick = tick.checked_add(Tick(1))?;
+        if output.strength != effective_strength {
             candidates.push(DriverTransition::s0m3(
-                due_tick,
+                tick.checked_add(Tick(1))?,
                 gate.ports.output,
                 gate.current_output,
-                DriveStrength(balance.nominal_gate_drive),
+                effective_strength,
                 0,
                 DriverTransitionCause::GateStrengthResponse,
             ));
         }
+        if power_enabled {
+            gate_reports.push(PowerGateReport {
+                gate: gate.gate,
+                ratio,
+                effective_delay,
+                effective_drive: effective_strength,
+                unpowered_ticks,
+            });
+        }
     }
+
+    let mut sense_reports = Vec::with_capacity(wire_sensing.len().saturating_mul(2));
+    match (power_report.as_deref(), balance.power_probe) {
+        (None, None) if !wire_sensing.is_empty() => {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        (Some(report), Some(probe)) => {
+            for sampled in wire_sensing {
+                let ratio =
+                    required_power_ratio(report, sampled.id.entity_id(), DemandKind::WireSensing)?;
+                let level = if sampled.occupied {
+                    LogicLevel::High
+                } else {
+                    LogicLevel::Low
+                };
+                let strength = scale_drive(DriveStrength(probe.sense_nominal_drive), ratio)?;
+                let (ports, changed) = world.signal.set_wire_sense_intent(
+                    sampled.id,
+                    sampled.occupied,
+                    level,
+                    strength,
+                )?;
+                if changed {
+                    let due_tick = tick.checked_add(Tick(balance.sense_delay))?;
+                    for driver in [ports.a, ports.b] {
+                        candidates.push(DriverTransition::s0m3(
+                            due_tick,
+                            driver,
+                            level,
+                            strength,
+                            0,
+                            DriverTransitionCause::WireSense,
+                        ));
+                    }
+                }
+                for (end, driver) in [(WireEnd::A, ports.a), (WireEnd::B, ports.b)] {
+                    let current_driver = world
+                        .signal
+                        .driver_sample(driver)
+                        .ok_or(SimulationError::InvalidCanonicalState)?;
+                    sense_reports.push(PowerSenseReport {
+                        wire: sampled.id,
+                        end,
+                        sampled_presence: sampled.occupied,
+                        intended_level: level,
+                        intended_strength: strength,
+                        current_driver,
+                    });
+                }
+            }
+        }
+        (None, None) => {}
+        _ => return Err(SimulationError::InvalidCanonicalState),
+    }
+
     world
         .driver_events
         .stage(&mut world.event_payloads, candidates)?;
-    grant_stage0_mobile_budgets(mobile_intents, movement_budget);
+    let mut mobile_reports = Vec::with_capacity(mobile_intents.len());
+    if let Some(report) = power_report.as_deref() {
+        for intent in mobile_intents {
+            let (nominal_budget, granted_budget, ratio) = if intent
+                .controls
+                .grants_stage0_movement()
+            {
+                let ratio =
+                    required_power_ratio(report, intent.mobile.entity_id(), DemandKind::Movement)?;
+                (
+                    movement_budget,
+                    scale_movement(movement_budget, ratio)?,
+                    Some(ratio),
+                )
+            } else {
+                (Fixed::ZERO, Fixed::ZERO, None)
+            };
+            intent.granted_budget = granted_budget;
+            mobile_reports.push(PowerMobileReport {
+                mobile: intent.mobile,
+                nominal_budget,
+                granted_budget,
+                ratio,
+            });
+        }
+    } else {
+        grant_stage0_mobile_budgets(mobile_intents, movement_budget);
+    }
+    if let Some(report) = power_report {
+        gate_reports.sort_unstable_by_key(|gate| gate.gate);
+        sense_reports.sort_unstable_by_key(|sense| (sense.wire, sense.end));
+        mobile_reports.sort_unstable_by_key(|mobile| mobile.mobile);
+        report.gates = gate_reports;
+        report.sense = sense_reports;
+        report.mobiles = mobile_reports;
+    }
     Ok(())
 }
 
-fn run_phase8_interaction(_staged_mobiles: &[StagedMobileMovement]) {
-    // Stage 0 has no collision, payload, construction, radiation, or heat contribution stores.
+fn run_phase8_interaction(
+    staged_mobiles: &[StagedMobileMovement],
+    phase5: &mut Phase5Output,
+) -> Result<(), SimulationError> {
+    let Some(report) = phase5.report.as_mut() else {
+        return if phase5.private_heat.is_empty() {
+            Ok(())
+        } else {
+            Err(SimulationError::InvalidCanonicalState)
+        };
+    };
+    if !report.heat_contributions.is_empty() || report.mobiles.len() != staged_mobiles.len() {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
+    // Phase 7 is the authority for the budget attached to the staged trajectory observation.
+    for staged in staged_mobiles {
+        let index = report
+            .mobiles
+            .binary_search_by_key(&staged.observation.mobile, |mobile| mobile.mobile)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        report.mobiles[index].granted_budget = staged.observation.granted_budget;
+    }
+
+    // Heat is not public report data until Phase 8. M2 emits it without mutating thermal state.
+    phase5
+        .private_heat
+        .sort_unstable_by_key(|heat| (heat.owner, heat.kind, heat.demand));
+    report.heat_contributions = std::mem::take(&mut phase5.private_heat);
+    Ok(())
 }
 
 fn run_phase9_thermal_integration() {
@@ -1823,6 +2661,43 @@ impl From<SignalTopologyError> for SimulationError {
         match error {
             SignalTopologyError::NumericOverflow => Self::NumericOverflow,
             SignalTopologyError::InvalidCanonicalState => Self::InvalidCanonicalState,
+        }
+    }
+}
+
+impl From<PowerAdapterError> for SimulationError {
+    fn from(error: PowerAdapterError) -> Self {
+        match error {
+            PowerAdapterError::NumericOverflow => Self::NumericOverflow,
+            PowerAdapterError::IndistinguishableWireEndpoints { .. }
+            | PowerAdapterError::InvalidCanonicalState => Self::InvalidCanonicalState,
+            PowerAdapterError::Topology(error) => match error {
+                crate::PowerTopologyError::NumericOverflow => Self::NumericOverflow,
+                crate::PowerTopologyError::PowerKernel(PowerError::NumericOverflow) => {
+                    Self::NumericOverflow
+                }
+                _ => Self::InvalidCanonicalState,
+            },
+        }
+    }
+}
+
+impl From<PowerRuntimeError> for SimulationError {
+    fn from(error: PowerRuntimeError) -> Self {
+        match error {
+            PowerRuntimeError::NumericOverflow
+            | PowerRuntimeError::Power(PowerError::NumericOverflow) => Self::NumericOverflow,
+            _ => Self::InvalidCanonicalState,
+        }
+    }
+}
+
+impl From<PowerError> for SimulationError {
+    fn from(error: PowerError) -> Self {
+        match error {
+            PowerError::NumericOverflow => Self::NumericOverflow,
+            PowerError::InvalidNumericDivisor => Self::InvalidNumericDivisor,
+            _ => Self::InvalidCanonicalState,
         }
     }
 }
@@ -2011,8 +2886,15 @@ mod tests {
         .expect("canonical Track compiles");
         let tick_before = simulation.next_tick();
         let hash_before = simulation.state_hash();
-        let snapshot = run_phase1_snapshot_and_world_sample(&simulation.canonical, &graph)
-            .expect("Phase 1 samples canonical Mobile state");
+        let snapshot = run_phase1_snapshot_and_world_sample(
+            &simulation.canonical,
+            &graph,
+            &[],
+            false,
+            simulation.profiles.balance.sense_radius,
+            simulation.profiles.physical_scale.world_routing_pitch,
+        )
+        .expect("Phase 1 samples canonical Mobile state");
         assert_eq!(snapshot.mobiles.len(), 1);
         assert_eq!(
             snapshot.mobiles[0].start,
@@ -2044,6 +2926,7 @@ mod tests {
             scenario_id: simulation.scenario_id.clone(),
             canonical: simulation.canonical.clone(),
             profiles: simulation.profiles.clone(),
+            required_features: simulation.required_features,
             initial_state_hash: simulation.initial_state_hash,
             world_generator_version: simulation.world_generator_version,
         };
@@ -2304,6 +3187,7 @@ mod tests {
             scenario_id: simulation.scenario_id.clone(),
             canonical: simulation.canonical.clone(),
             profiles: simulation.profiles.clone(),
+            required_features: simulation.required_features,
             initial_state_hash: simulation.initial_state_hash,
             world_generator_version: simulation.world_generator_version,
         };
@@ -2939,6 +3823,65 @@ mod tests {
     }
 
     #[test]
+    fn canonical_validator_rejects_x_as_a_wire_sense_intended_level() {
+        let profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-sense-x-validator"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-sense-x-validator"),
+            balance: BalanceProfile::power_probe_alpha("balance-sense-x-validator"),
+        };
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        let pitch = profiles.physical_scale.world_routing_pitch;
+        let point = |x: i64, y: i64| FixedVec2::new(Fixed(x), Fixed(y));
+        let mut simulation = Simulation::new(SimulationPackage::new(
+            "sense-x-validator",
+            InitialWorld::MainCorePowerV1 {
+                main_core_position: point(-16 * pitch.0, -16 * pitch.0),
+                main_core_integrity: crate::Integrity(1_000),
+                main_core_heat_energy: crate::HeatEnergy(0),
+                power_sources: Vec::new(),
+            },
+            StageFeatureSet {
+                capacity: true,
+                sensing: true,
+                power: true,
+                ..StageFeatureSet::none()
+            },
+            contract,
+            profiles,
+        ))
+        .expect("S1-M2 source-less world starts");
+        simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![point(0, 0), point(2 * pitch.0, 0)],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("sensing-enabled Wire placement succeeds");
+        let wire = simulation
+            .canonical
+            .signal
+            .iter_wire_sensing()
+            .next()
+            .expect("placed Wire has Sense state")
+            .0;
+        simulation
+            .canonical
+            .signal
+            .set_wire_sense_intent(wire, false, LogicLevel::X, DriveStrength(0))
+            .expect("test injects malformed intended level");
+
+        assert_eq!(
+            validate_canonical_world(&simulation.canonical),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+    }
+
+    #[test]
     fn committed_validator_rejects_gate_map_key_mismatch() {
         let mut simulation = Simulation::new(package()).expect("test package is valid");
         let gate = place_test_not(&mut simulation);
@@ -3271,14 +4214,98 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_later_stage_feature_rejects_simulation_start() {
+    fn power_features_require_the_s1m2_world_before_later_runtime_work() {
         let mut package = package();
         package.required_features.mobility = true;
         package.required_features.sensing = true;
 
         assert_eq!(
             Simulation::new(package).err(),
-            Some(SimulationError::UnsupportedStageFeature { feature: "sensing" })
+            Some(SimulationError::PowerFeaturesRequireMainCorePowerWorld)
+        );
+    }
+
+    fn retained_world_package_with_power_probe(
+        scenario_id: &'static str,
+        initial_world: InitialWorld,
+        required_features: StageFeatureSet,
+    ) -> SimulationPackage {
+        let profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-power-probe-coherence"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-power-probe-coherence"),
+            balance: BalanceProfile::power_probe_alpha("balance-power-probe-coherence"),
+        };
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        SimulationPackage::new(
+            scenario_id,
+            initial_world,
+            required_features,
+            contract,
+            profiles,
+        )
+    }
+
+    #[test]
+    fn balance_v3_power_probe_rejects_retained_empty_world_before_tick_zero() {
+        let package = retained_world_package_with_power_probe(
+            "empty-with-power-probe",
+            InitialWorld::Empty,
+            StageFeatureSet::none(),
+        );
+
+        assert_eq!(
+            Simulation::new(package).err(),
+            Some(SimulationError::PowerProbeRequiresMainCorePowerWorld)
+        );
+
+        let with_power_feature = retained_world_package_with_power_probe(
+            "empty-with-power-feature-and-probe",
+            InitialWorld::Empty,
+            StageFeatureSet {
+                power: true,
+                ..StageFeatureSet::none()
+            },
+        );
+        assert_eq!(
+            Simulation::new(with_power_feature).err(),
+            Some(SimulationError::PowerFeaturesRequireMainCorePowerWorld),
+            "the retained feature/world coherence error must precede the probe/world error"
+        );
+    }
+
+    #[test]
+    fn balance_v3_power_probe_rejects_retained_main_core_world_before_tick_zero() {
+        let package = retained_world_package_with_power_probe(
+            "main-core-with-power-probe",
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                integrity: crate::Integrity(1),
+                heat_energy: crate::HeatEnergy(0),
+            },
+            StageFeatureSet {
+                capacity: true,
+                ..StageFeatureSet::none()
+            },
+        );
+
+        assert_eq!(
+            Simulation::new(package).err(),
+            Some(SimulationError::PowerProbeRequiresMainCorePowerWorld)
+        );
+
+        let without_capacity = retained_world_package_with_power_probe(
+            "main-core-without-capacity-and-with-probe",
+            InitialWorld::MainCoreV1 {
+                position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                integrity: crate::Integrity(1),
+                heat_energy: crate::HeatEnergy(0),
+            },
+            StageFeatureSet::none(),
+        );
+        assert_eq!(
+            Simulation::new(without_capacity).err(),
+            Some(SimulationError::MainCoreRequiresCapacity),
+            "the retained capacity/world coherence error must precede the probe/world error"
         );
     }
 
@@ -3335,6 +4362,7 @@ mod tests {
             scenario_id: canonical.scenario_id.clone(),
             canonical: canonical.canonical.clone(),
             profiles: canonical.profiles.clone(),
+            required_features: canonical.required_features,
             initial_state_hash: canonical.initial_state_hash,
             world_generator_version: canonical.world_generator_version,
         };
@@ -3424,6 +4452,7 @@ mod tests {
             scenario_id: canonical.scenario_id.clone(),
             canonical: canonical.canonical.clone(),
             profiles: canonical.profiles.clone(),
+            required_features: canonical.required_features,
             initial_state_hash: canonical.initial_state_hash,
             world_generator_version: canonical.world_generator_version,
         };
@@ -3463,5 +4492,107 @@ mod tests {
         );
         assert_eq!(simulation.profiles().numeric.fixed_one, crate::FIXED_ONE);
         assert_eq!(simulation.topology_revision(), Revision(0));
+    }
+
+    #[test]
+    fn phase8_is_the_only_seam_that_publishes_phase5_heat_scratch() {
+        let heat = PowerHeatReport {
+            owner: WireId(crate::EntityId(3)),
+            kind: crate::PowerHeatKind::LeakageDissipation,
+            demand: DemandId::new(crate::EntityId(3), DemandKind::WireLeakage),
+            energy: crate::HeatEnergy(7),
+        };
+        let mut phase5 = Phase5Output {
+            report: Some(PowerStepReport::default()),
+            private_heat: vec![heat],
+        };
+        assert!(
+            phase5
+                .report
+                .as_ref()
+                .expect("Power report exists")
+                .heat_contributions
+                .is_empty()
+        );
+
+        run_phase8_interaction(&[], &mut phase5).expect("Phase 8 publishes derived heat");
+
+        assert!(phase5.private_heat.is_empty());
+        assert_eq!(
+            phase5
+                .report
+                .expect("Power report remains available")
+                .heat_contributions,
+            vec![heat]
+        );
+    }
+
+    #[test]
+    fn enabled_power_analyzer_preserves_signal_frontiers_and_state_hash() {
+        const NUMERIC: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../profiles/numeric/v1.json"
+        ));
+        const PHYSICAL: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../profiles/physical-scale/stage0-alpha.json"
+        ));
+        const BALANCE: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../profiles/balance/s1-m2-power-probe-alpha.json"
+        ));
+        const SCENARIO: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/scenarios/s1-m2-c08-brownout-full-v1.json"
+        ));
+        const REPLAY: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/replays/s1-m2-c08-brownout-full-v1.json"
+        ));
+        let package = crate::decode_package(crate::ArtifactBytes {
+            scenario: SCENARIO,
+            numeric_profile: NUMERIC,
+            physical_scale_profile: PHYSICAL,
+            balance_profile: BALANCE,
+        })
+        .expect("the retained C08 package decodes");
+        let (_, replay) = crate::decode_replay_artifact(REPLAY)
+            .expect("the retained C08 Replay decodes")
+            .into_parts();
+        let mut simulation = Simulation::new(package).expect("the retained C08 Simulation starts");
+        while simulation.next_tick() < Tick(3) {
+            let tick = simulation.next_tick();
+            let commands = replay.commands_for_tick(tick).cloned().collect::<Vec<_>>();
+            let world_inputs = replay
+                .world_inputs_for_tick(tick)
+                .cloned()
+                .collect::<Vec<_>>();
+            simulation
+                .step_with_world_inputs(&commands, &world_inputs)
+                .expect("the retained construction Tick succeeds");
+        }
+        let hash_before = simulation.state_hash();
+        let driver_frontier_before = simulation.canonical.signal.driver_frontier();
+        let sink_frontier_before = simulation.canonical.signal.sink_frontier();
+
+        let first = simulation
+            .power_sense_analyzer_snapshot()
+            .expect("the first analyzer read succeeds")
+            .expect("Power is enabled");
+        let second = simulation
+            .power_sense_analyzer_snapshot()
+            .expect("the repeated analyzer read succeeds")
+            .expect("Power remains enabled");
+
+        assert_eq!(first, second);
+        assert_eq!(simulation.state_hash(), hash_before);
+        assert_eq!(
+            simulation.canonical.signal.driver_frontier(),
+            driver_frontier_before
+        );
+        assert_eq!(
+            simulation.canonical.signal.sink_frontier(),
+            sink_frontier_before
+        );
     }
 }

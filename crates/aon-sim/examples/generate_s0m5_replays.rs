@@ -232,7 +232,8 @@ fn artifact(
         .collect();
     ReplayArtifact::new(
         "../scenarios/empty.json",
-        Replay::new(initial.replay_header(), commands, checkpoints).expect("Replay is valid"),
+        Replay::new_v2(initial.replay_header(), commands, Vec::new(), checkpoints)
+            .expect("Replay is valid"),
     )
     .expect("Scenario locator is valid")
 }

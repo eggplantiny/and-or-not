@@ -233,8 +233,13 @@ fn record() -> ReplayArtifact {
 
     ReplayArtifact::new(
         "../scenarios/s1-m1-capacity-accounting-v1.json",
-        Replay::new(simulation.replay_header(), commands, checkpoints)
-            .expect("the retained S1-M1 Replay is valid"),
+        Replay::new_v2(
+            simulation.replay_header(),
+            commands,
+            Vec::new(),
+            checkpoints,
+        )
+        .expect("the retained S1-M1 Replay is valid"),
     )
     .expect("the retained Scenario locator is portable")
 }

@@ -9,9 +9,10 @@ scale profile, or balance profile decoding. At most 16 KiB is interpreted. Profi
 only the selected profile in an otherwise valid reference package, ensuring that the selected
 typed decoder is reached.
 
-The `replay` target supplies at most 16 KiB directly to the strict Replay v1 JSON decoder. Its
-retained corpus includes a valid Empty-world Replay plus truncated and unknown-field artifacts, so
-CI preserves both the accepted path and stable rejection paths without treating typed decode
+The `replay` target supplies at most 16 KiB directly to the strict Replay JSON decoder. Its retained
+corpus includes legacy Empty-world input plus current Replay v2/State V6 S1-M1 and S1-M2 capacity,
+sensing, and brownout artifacts, as well as truncated and unknown-field artifacts. CI therefore
+preserves both accepted versioned paths and stable rejection paths without treating typed decode
 errors as harness failures.
 
 The `experiment` and `module` targets independently supply at most 16 KiB to the strict Experiment

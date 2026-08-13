@@ -599,8 +599,25 @@ fn advance_canonical_simulation(
     } else {
         &[]
     };
+    let world_inputs = replay_schedule
+        .as_ref()
+        .map(|schedule| {
+            schedule
+                .replay
+                .world_inputs_for_tick(next_tick)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
-    match canonical.simulation.step(commands) {
+    let step = if replay_schedule.is_some() {
+        canonical
+            .simulation
+            .step_with_world_inputs(commands, &world_inputs)
+    } else {
+        canonical.simulation.step(commands)
+    };
+    match step {
         Ok(report) => {
             trace.checkpoints.push(report.state_hash);
             if let Some(schedule) = replay_schedule.as_ref()

@@ -15,6 +15,7 @@ pub(crate) enum SignalNodeKey {
     GatePort(GateId, GatePort),
     MobilePort(MobileId, MobilePort),
     Junction(JunctionId),
+    SensePort(WireId, WireEnd),
     FreeEnd(WireId, WireEnd),
 }
 
@@ -411,12 +412,23 @@ impl SignalGraph {
             let Some(record) = record else {
                 continue;
             };
-            let port = match record.role {
-                DriverRole::ExternalInputA => GatePort::InputA,
-                DriverRole::ExternalInputB => GatePort::InputB,
-                DriverRole::GateOutput => GatePort::Output,
+            let node = match record.role {
+                DriverRole::ExternalInputA => {
+                    SignalNodeKey::GatePort(GateId(record.owner), GatePort::InputA)
+                }
+                DriverRole::ExternalInputB => {
+                    SignalNodeKey::GatePort(GateId(record.owner), GatePort::InputB)
+                }
+                DriverRole::GateOutput => {
+                    SignalNodeKey::GatePort(GateId(record.owner), GatePort::Output)
+                }
+                DriverRole::WireSenseA => {
+                    SignalNodeKey::SensePort(WireId(record.owner), WireEnd::A)
+                }
+                DriverRole::WireSenseB => {
+                    SignalNodeKey::SensePort(WireId(record.owner), WireEnd::B)
+                }
             };
-            let node = SignalNodeKey::GatePort(GateId(record.owner), port);
             graph.ensure_node(node);
             if graph.driver_nodes.insert(record.id, node).is_some() {
                 return Err(SignalTopologyError::InvalidCanonicalState);
@@ -606,6 +618,10 @@ fn signal_node_for_endpoint(
         // Signal processor nor an automatic router. Each incident Signal Wire therefore remains
         // a terminal at the anchor rather than being joined into a shared Signal net.
         crate::EndpointTarget::MainCoreAnchor(_) => SignalNodeKey::FreeEnd(wire, end),
+        crate::EndpointTarget::PowerSourceAnchor(_) => SignalNodeKey::FreeEnd(wire, end),
+        crate::EndpointTarget::WireSensePort(reference) => {
+            SignalNodeKey::SensePort(reference.wire, reference.end)
+        }
     }
 }
 
@@ -1610,6 +1626,39 @@ mod tests {
                 WireEnd::A,
                 crate::EndpointTarget::Junction(junction)
             )
+        );
+
+        let source = crate::PowerSourceId(EntityId(14));
+        assert_ne!(
+            signal_node_for_endpoint(
+                first_wire,
+                WireEnd::B,
+                crate::EndpointTarget::PowerSourceAnchor(source)
+            ),
+            signal_node_for_endpoint(
+                second_wire,
+                WireEnd::A,
+                crate::EndpointTarget::PowerSourceAnchor(source)
+            ),
+            "Power Source anchors terminate rather than joining Signal nets"
+        );
+
+        let sense = crate::topology::WireSensePortRef {
+            wire: first_wire,
+            end: WireEnd::A,
+        };
+        assert_eq!(
+            signal_node_for_endpoint(
+                first_wire,
+                WireEnd::B,
+                crate::EndpointTarget::WireSensePort(sense)
+            ),
+            SignalNodeKey::SensePort(first_wire, WireEnd::A)
+        );
+        assert_ne!(
+            SignalNodeKey::SensePort(first_wire, WireEnd::A),
+            signal_node_for_endpoint(first_wire, WireEnd::A, crate::EndpointTarget::Free),
+            "SensePort stays isolated from its owner Wire's ordinary Signal surface"
         );
 
         let port = crate::GatePortRef {

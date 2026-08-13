@@ -98,12 +98,12 @@ fn record_mobility_artifact() -> RecordedMobilityArtifact {
         .iter()
         .map(|checkpoint| checkpoint.state_hash)
         .collect::<Vec<_>>();
-    let replay = Replay::new(recorder.replay_header(), commands, checkpoints)
+    let replay = Replay::new_v2(recorder.replay_header(), commands, Vec::new(), checkpoints)
         .expect("recorded mobility Replay is valid");
     assert_eq!(
         replay.header().state_hash_version,
-        StateHashVersion::V5,
-        "mobility artifact must bind the complete canonical V5 state domain"
+        StateHashVersion::V6,
+        "mobility artifact must bind the complete canonical V6 state domain"
     );
     let artifact = ReplayArtifact::new("../scenarios/empty.json", replay)
         .expect("portable mobility Replay artifact path");
@@ -133,13 +133,13 @@ fn complete_playback(laboratory: &mut LaboratorySession) {
 }
 
 #[test]
-fn mobility_replay_json_restart_repeats_full_v5_trace_reports_and_snapshot() {
+fn mobility_replay_json_restart_repeats_full_v6_trace_reports_and_snapshot() {
     let recorded = record_mobility_artifact();
     let decoded = decode_replay_artifact(&recorded.json).expect("mobility Replay JSON decodes");
     assert_eq!(decoded.scenario_path(), "../scenarios/empty.json");
     assert_eq!(
         decoded.replay().header().state_hash_version,
-        StateHashVersion::V5
+        StateHashVersion::V6
     );
     assert_eq!(
         encode_replay_artifact(&decoded).expect("decoded Replay re-encodes"),

@@ -17,8 +17,14 @@ mod mobility;
 mod module;
 mod numeric;
 mod path_certificate;
+mod power;
+mod power_adapter;
+mod power_runtime;
+mod power_source;
+mod power_topology;
 mod profile;
 mod replay;
+mod sensing;
 mod signal;
 mod signal_topology;
 mod simulation;
@@ -28,8 +34,9 @@ mod structural_geometry;
 mod topology;
 
 pub use artifact::{
-    ArtifactBytes, ArtifactKind, InitialWorld, PhysicalScaleProfileArtifactError, ProfileKind,
-    ProfileReference, ProfileReferences, SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2,
+    ArtifactBytes, ArtifactKind, InitialWorld, PhysicalScaleProfileArtifactError,
+    PowerSourceInitialState, ProfileKind, ProfileReference, ProfileReferences,
+    SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2, SCENARIO_SCHEMA_VERSION_V3,
     ScenarioHashError, ScenarioManifest, StageFeatureSet, decode_balance_profile,
     decode_numeric_profile, decode_package, decode_physical_scale_profile,
     decode_scenario_manifest, encode_physical_scale_profile,
@@ -75,8 +82,8 @@ pub use identity::{
     ConnectionGeneration, ConnectionGenerationError, ConstructionSiteIndex, DepositIndex, DriverId,
     EnemyIndex, EntityLocation, EntityRegistry, EntityRegistryError, FIRST_ENTITY_ID,
     FixedSubstrateIndex, GateId, GateIndex, JunctionId, JunctionIndex, MainCoreId, MobileId,
-    MobileSubstrateIndex, PowerSourceIndex, QuartzIndex, RESERVED_ENTITY_ID, RelaySiteId,
-    RelaySiteIndex, SinkId, WireId, WireIndex,
+    MobileSubstrateIndex, PowerSourceId, PowerSourceIndex, QuartzIndex, RESERVED_ENTITY_ID,
+    RelaySiteId, RelaySiteIndex, SinkId, WireId, WireIndex,
 };
 pub use main_core::{MainCoreState, TopologyNodeId};
 pub use mobility::{
@@ -95,26 +102,54 @@ pub use numeric::{
     round_div_nearest_even,
 };
 pub use path_certificate::PathCertificateId;
+pub use power::{
+    CanonicalPowerRoute, DemandId, DemandKind, POWER_RATIO_SOLVER_COMPARISONS, PowerDemand,
+    PowerError, PowerGrant, PowerHeatContribution, PowerLossCoefficient, PowerPathToken,
+    PowerRatio, PowerRegionId, PowerRegionSolution, PowerRouteKey, PowerRouteWire,
+    PowerSourceState, brownout_gate_delay, distribute_transmission_heat, scale_drive,
+    scale_movement, scale_work, select_canonical_source_route, solve_power_region,
+    transmission_loss,
+};
+pub use power_runtime::{
+    GatePowerDemandInput, MovementPowerDemandInput, NominalPowerDemand, NominalPowerDemandSet,
+    PowerGateReport, PowerHeatKind, PowerHeatReport, PowerLoadReport, PowerMobileReport,
+    PowerRegionReport, PowerRuntimeError, PowerSenseAnalyzerSnapshot, PowerSenseReport,
+    PowerStepReport, WirePowerDemandInput, bind_nominal_power_demands, build_gate_nominal_demands,
+    build_movement_nominal_demand, build_wire_nominal_demands, collect_nominal_power_demands,
+    power_loss_coefficient, solve_power_step,
+};
+pub use power_source::{PowerSourceStore, PowerSourceStoreError};
+pub use power_topology::{
+    CompiledPowerLoad, CompiledPowerRegion, CompiledPowerTopology, PowerBodyEdge,
+    PowerLoadAttachment, PowerNodeKey, PowerSourceAttachment, PowerTopologyError,
+    PowerTopologyInput,
+};
 pub use profile::{
     BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile, DivisionProfile, GateFootprint,
     GateFootprintTable, GatePortTable, GeometryLengthProfile,
     MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile, OrientationBoundaryMultipliers,
     OrientationWeightTable, OverflowPolicy, PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2,
-    PhysicalScaleProfile, PortAnchor, ProfileBundle, ProfileHashes, ProfileValidationError,
-    REFERENCE_CIRCUIT_ROUTING_PITCH, REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS,
-    REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile,
-    Rational, UnaryGatePortAnchors,
+    PROFILE_SCHEMA_VERSION_V3, PhysicalScaleProfile, PortAnchor, PowerProbeProfile, ProfileBundle,
+    ProfileHashes, ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH,
+    REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM,
+    REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
 };
 pub use replay::{
-    HashCheckpoint, REPLAY_FORMAT_VERSION_V1, Replay, ReplayArtifact, ReplayContractField,
-    ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4,
-    STATE_HASH_VERSION_V5, Seed, SeedParseError, StateHashVersion,
-    WORLD_GENERATOR_VERSION_EMPTY_V1, WORLD_GENERATOR_VERSION_MAIN_CORE_V1, WorldGeneratorVersion,
-    WorldInputEvent, decode_replay_artifact, encode_replay_artifact,
+    HashCheckpoint, REPLAY_FORMAT_VERSION_V1, REPLAY_FORMAT_VERSION_V2, Replay, ReplayArtifact,
+    ReplayContractField, ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3,
+    STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5, STATE_HASH_VERSION_V6, Seed, SeedParseError,
+    StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1, WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1,
+    WORLD_GENERATOR_VERSION_MAIN_CORE_V1, WorldGeneratorVersion, WorldInputEvent,
+    decode_replay_artifact, encode_replay_artifact,
+};
+pub use sensing::{
+    HostileCollider, SensingError, SparseOrderedChunkGrid, WireSensingInput, WireSensingOutput,
+    circle_intersects_polyline_capsule, sample_wire_sensing, sample_wire_sensing_with_grid,
 };
 pub use signal::{
     DriveVector, DriverChangeRecord, DriverRole, GateInputSignalPort, GateSignalPorts,
-    GateSignalSnapshot, SignalChangeRecord, SignalStepCounters, SinkRole, WireSignalSnapshot,
+    GateSignalSnapshot, SignalChangeRecord, SignalStepCounters, SinkRole, WireSensePorts,
+    WireSenseSnapshot, WireSignalSnapshot,
 };
 pub use simulation::{SignalArrivalObservation, Simulation, SimulationPackage, StepReport};
 pub use snapshot::{
@@ -124,4 +159,5 @@ pub use snapshot::{
 };
 pub use topology::{
     EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,
+    WireSensePortRef,
 };

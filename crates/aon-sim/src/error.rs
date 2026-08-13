@@ -1,5 +1,6 @@
 use crate::{
-    ArtifactKind, HashParseError, NumericError, ProfileHash, ProfileKind, ProfileValidationError,
+    ArtifactKind, FixedVec2, HashParseError, NumericError, ProfileHash, ProfileKind,
+    ProfileValidationError,
 };
 use thiserror::Error;
 
@@ -67,6 +68,9 @@ pub enum PackageError {
 
     #[error("Scenario initial-world field `{field}` must be positive")]
     NonPositiveInitialWorldField { field: &'static str },
+
+    #[error("Scenario initial world contains duplicate Power Source position {position:?}")]
+    DuplicateInitialPowerSourcePosition { position: FixedVec2 },
 
     #[error("profile kind mismatch: expected {expected}, got {actual}")]
     ProfileKindMismatch {
@@ -147,6 +151,40 @@ pub enum SimulationError {
 
     #[error("Main Core integrity must be positive at world generation")]
     InvalidMainCoreIntegrity,
+
+    #[error(
+        "the `main-core-power-v1` initial world requires capacity, sensing, and power features"
+    )]
+    MainCorePowerRequiresFeatures,
+
+    #[error("capacity, sensing, and power features require the `main-core-power-v1` initial world")]
+    PowerFeaturesRequireMainCorePowerWorld,
+
+    #[error("Balance section `powerProbe` requires the `main-core-power-v1` initial world")]
+    PowerProbeRequiresMainCorePowerWorld,
+
+    #[error(
+        "the `main-core-power-v1` initial world requires Balance sections `capacityProbe` and `powerProbe`"
+    )]
+    MainCorePowerRequiresProfiles,
+
+    #[error("Power Source position is not aligned to wireGeometryQuantum")]
+    InvalidPowerSourceGeometryQuantum,
+
+    #[error("WorldInput events must target the Tick currently being executed")]
+    WorldInputTickMismatch,
+
+    #[error("at most one HostileFrame is allowed for one Tick")]
+    DuplicateWorldInputFrame,
+
+    #[error("hostile collider ID 0 is reserved")]
+    InvalidHostileId,
+
+    #[error("a HostileFrame contains duplicate hostile collider ID {id}")]
+    DuplicateHostileId { id: u64 },
+
+    #[error("hostile collider {id} has a negative radius")]
+    NegativeHostileRadius { id: u64 },
 }
 
 impl From<NumericError> for SimulationError {

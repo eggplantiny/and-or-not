@@ -70,8 +70,15 @@ fn mobility_feature_is_decoded_and_supported_at_simulation_start() {
 }
 
 #[test]
-fn later_stage_features_remain_unsupported() {
-    for feature in ["sensing", "power", "relay", "payload", "radiation"] {
+fn s1m2_features_require_the_power_world_and_later_features_remain_unsupported() {
+    for feature in ["sensing", "power"] {
+        let scenario = scenario_requiring(feature);
+        assert_eq!(
+            Simulation::new(decode_test_package(&scenario)).err(),
+            Some(SimulationError::PowerFeaturesRequireMainCorePowerWorld)
+        );
+    }
+    for feature in ["relay", "payload", "radiation"] {
         let scenario = scenario_requiring(feature);
         assert_eq!(
             Simulation::new(decode_test_package(&scenario)).err(),
@@ -90,7 +97,7 @@ fn capacity_is_supported_only_by_a_main_core_initial_world() {
 }
 
 #[test]
-fn stage_zero_features_do_not_mask_an_unsupported_feature() {
+fn stage_zero_features_do_not_mask_the_s1m2_world_dependency() {
     let mut scenario: serde_json::Value =
         serde_json::from_slice(SCENARIO).expect("reference scenario JSON is valid");
     scenario["requiredFeatures"]["signal"] = true.into();
@@ -100,6 +107,6 @@ fn stage_zero_features_do_not_mask_an_unsupported_feature() {
 
     assert_eq!(
         Simulation::new(decode_test_package(&scenario)).err(),
-        Some(SimulationError::UnsupportedStageFeature { feature: "sensing" })
+        Some(SimulationError::PowerFeaturesRequireMainCorePowerWorld)
     );
 }

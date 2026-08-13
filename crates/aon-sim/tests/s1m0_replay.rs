@@ -52,8 +52,9 @@ fn record_replay(package: SimulationPackage) -> (Vec<aon_sim::StateHash>, Vec<u8
                 .state_hash,
         );
     }
-    let replay = Replay::new(
+    let replay = Replay::new_v2(
         header,
+        Vec::new(),
         Vec::new(),
         vec![
             HashCheckpoint {

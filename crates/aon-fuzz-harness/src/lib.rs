@@ -129,7 +129,7 @@ impl fmt::Display for ModuleDecoderError {
 
 impl std::error::Error for ModuleDecoderError {}
 
-/// Supplies a bounded arbitrary byte stream to the strict Replay v1 decoder.
+/// Supplies a bounded arbitrary byte stream to the strict versioned Replay decoder.
 pub fn exercise_replay_decoder(input: &[u8]) -> ReplayDecoderObservation {
     let bounded = &input[..input.len().min(MAX_REPLAY_INPUT_BYTES)];
     ReplayDecoderObservation {

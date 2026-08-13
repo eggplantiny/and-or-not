@@ -5,7 +5,7 @@ use crate::profile::{
     BalanceProfile, NumericProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
 };
 use crate::{
-    ArtifactHash, Fixed, FixedVec2, HeatEnergy, Integrity, JsonErrorCategory, ProfileHash,
+    ArtifactHash, Energy, Fixed, FixedVec2, HeatEnergy, Integrity, JsonErrorCategory, ProfileHash,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,10 +13,13 @@ use thiserror::Error;
 
 pub const SCENARIO_SCHEMA_VERSION_V1: u32 = 1;
 pub const SCENARIO_SCHEMA_VERSION_V2: u32 = 2;
+pub const SCENARIO_SCHEMA_VERSION_V3: u32 = 3;
 const SCENARIO_HASH_DOMAIN_V1: &[u8] = b"AON\0SCENARIO\0V1\0";
 const SCENARIO_HASH_DOMAIN_V2: &[u8] = b"AON\0SCENARIO\0V2\0";
+const SCENARIO_HASH_DOMAIN_V3: &[u8] = b"AON\0SCENARIO\0V3\0";
 const SCENARIO_HASH_ENCODER_VERSION_V1: u16 = 1;
 const SCENARIO_HASH_ENCODER_VERSION_V2: u16 = 2;
+const SCENARIO_HASH_ENCODER_VERSION_V3: u16 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -69,6 +72,40 @@ pub enum InitialWorld {
         integrity: Integrity,
         heat_energy: HeatEnergy,
     },
+    MainCorePowerV1 {
+        main_core_position: FixedVec2,
+        main_core_integrity: Integrity,
+        main_core_heat_energy: HeatEnergy,
+        power_sources: Vec<PowerSourceInitialState>,
+    },
+}
+
+/// Immutable world-generator input for one Scenario-owned Power Source.
+///
+/// Scenario v3 canonicalizes the collection by semantic value before exposing it. Entity IDs and
+/// topology attachment identities are assigned later by world generation, not by artifact order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PowerSourceInitialState {
+    position: FixedVec2,
+    generation_per_tick: Energy,
+}
+
+impl PowerSourceInitialState {
+    pub const fn position(self) -> FixedVec2 {
+        self.position
+    }
+
+    pub const fn generation_per_tick(self) -> Energy {
+        self.generation_per_tick
+    }
+}
+
+fn power_source_semantic_key(source: &PowerSourceInitialState) -> (i64, i64, u64) {
+    (
+        source.position.x.0,
+        source.position.y.0,
+        source.generation_per_tick.0,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -99,13 +136,9 @@ impl StageFeatureSet {
     }
 
     pub(crate) const fn first_unsupported(self) -> Option<&'static str> {
-        // Signal and mobility are implemented by Stage 0, and capacity accounting is implemented
-        // by S1-M1. Only remaining later-stage requirements are rejected here.
-        if self.sensing {
-            Some("sensing")
-        } else if self.power {
-            Some("power")
-        } else if self.relay {
+        // Signal/mobility are implemented by Stage 0, capacity by S1-M1, and sensing/power by
+        // S1-M2. Only later-stage requirements are rejected here.
+        if self.relay {
             Some("relay")
         } else if self.payload {
             Some("payload")
@@ -213,6 +246,9 @@ impl ScenarioManifest {
             SCENARIO_SCHEMA_VERSION_V2 => {
                 (SCENARIO_HASH_DOMAIN_V2, SCENARIO_HASH_ENCODER_VERSION_V2)
             }
+            SCENARIO_SCHEMA_VERSION_V3 => {
+                (SCENARIO_HASH_DOMAIN_V3, SCENARIO_HASH_ENCODER_VERSION_V3)
+            }
             _ => unreachable!("ScenarioManifest is created only by the strict decoder"),
         };
         hasher.update(domain);
@@ -240,6 +276,29 @@ impl ScenarioManifest {
                 hasher.update(&integrity.0.to_le_bytes());
                 hasher.update(&heat_energy.0.to_le_bytes());
             }
+            InitialWorld::MainCorePowerV1 {
+                main_core_position,
+                main_core_integrity,
+                main_core_heat_energy,
+                power_sources,
+            } => {
+                hasher.update(&[2]);
+                hasher.update(&main_core_position.x.0.to_le_bytes());
+                hasher.update(&main_core_position.y.0.to_le_bytes());
+                hasher.update(&main_core_integrity.0.to_le_bytes());
+                hasher.update(&main_core_heat_energy.0.to_le_bytes());
+
+                let mut ordered_sources = power_sources.clone();
+                ordered_sources.sort_unstable_by_key(power_source_semantic_key);
+                let source_count = u32::try_from(ordered_sources.len())
+                    .map_err(|_| ScenarioHashError::PowerSourceCountOverflow)?;
+                hasher.update(&source_count.to_le_bytes());
+                for source in ordered_sources {
+                    hasher.update(&source.position.x.0.to_le_bytes());
+                    hasher.update(&source.position.y.0.to_le_bytes());
+                    hasher.update(&source.generation_per_tick.0.to_le_bytes());
+                }
+            }
         };
         for enabled in [
             self.required_features.signal,
@@ -264,6 +323,9 @@ impl ScenarioManifest {
 pub enum ScenarioHashError {
     #[error("Scenario field `{field}` exceeds the canonical u32 byte-length boundary")]
     TextLengthOverflow { field: &'static str },
+
+    #[error("Scenario Power Source count exceeds the canonical u32 boundary")]
+    PowerSourceCountOverflow,
 }
 
 #[derive(Clone, Copy)]
@@ -302,6 +364,12 @@ enum InitialWorldWire {
         #[serde(rename = "heatEnergy")]
         heat_energy: u64,
     },
+    MainCorePowerV1 {
+        #[serde(rename = "mainCore")]
+        main_core: MainCoreInitialWire,
+        #[serde(rename = "powerSources")]
+        power_sources: Vec<PowerSourceInitialWire>,
+    },
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -309,6 +377,21 @@ enum InitialWorldWire {
 struct FixedVec2Wire {
     x: i64,
     y: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MainCoreInitialWire {
+    position: FixedVec2Wire,
+    integrity: u64,
+    heat_energy: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PowerSourceInitialWire {
+    position: FixedVec2Wire,
+    generation_per_tick: u64,
 }
 
 #[derive(Deserialize)]
@@ -334,11 +417,11 @@ pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, crate:
     let envelope: ScenarioSchemaEnvelope = decode_json(bytes, ArtifactKind::Scenario)?;
     if !matches!(
         envelope.schema_version,
-        SCENARIO_SCHEMA_VERSION_V1 | SCENARIO_SCHEMA_VERSION_V2
+        SCENARIO_SCHEMA_VERSION_V1 | SCENARIO_SCHEMA_VERSION_V2 | SCENARIO_SCHEMA_VERSION_V3
     ) {
         return Err(crate::PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Scenario,
-            expected: SCENARIO_SCHEMA_VERSION_V2,
+            expected: SCENARIO_SCHEMA_VERSION_V3,
             actual: envelope.schema_version,
         });
     }
@@ -379,19 +462,70 @@ pub fn decode_scenario_manifest(bytes: &[u8]) -> Result<ScenarioManifest, crate:
                 heat_energy: HeatEnergy(heat_energy),
             }
         }
-        (SCENARIO_SCHEMA_VERSION_V1, InitialWorldWire::MainCoreV1 { .. }) => {
-            return Err(crate::PackageError::UnsupportedInitialWorld {
-                schema_version: SCENARIO_SCHEMA_VERSION_V1,
-                initial_world: "main-core-v1",
-            });
+        (
+            SCENARIO_SCHEMA_VERSION_V3,
+            InitialWorldWire::MainCorePowerV1 {
+                main_core,
+                power_sources,
+            },
+        ) => {
+            if main_core.integrity == 0 {
+                return Err(crate::PackageError::NonPositiveInitialWorldField {
+                    field: "initialWorld.mainCore.integrity",
+                });
+            }
+            let mut power_sources = power_sources
+                .into_iter()
+                .map(|source| PowerSourceInitialState {
+                    position: FixedVec2::new(Fixed(source.position.x), Fixed(source.position.y)),
+                    generation_per_tick: Energy(source.generation_per_tick),
+                })
+                .collect::<Vec<_>>();
+            power_sources.sort_unstable_by_key(power_source_semantic_key);
+            for source in &power_sources {
+                if source.generation_per_tick.0 == 0 {
+                    return Err(crate::PackageError::NonPositiveInitialWorldField {
+                        field: "initialWorld.powerSources[].generationPerTick",
+                    });
+                }
+            }
+            if let Some(duplicate) = power_sources
+                .windows(2)
+                .find(|pair| pair[0].position == pair[1].position)
+            {
+                return Err(crate::PackageError::DuplicateInitialPowerSourcePosition {
+                    position: duplicate[0].position,
+                });
+            }
+
+            InitialWorld::MainCorePowerV1 {
+                main_core_position: FixedVec2::new(
+                    Fixed(main_core.position.x),
+                    Fixed(main_core.position.y),
+                ),
+                main_core_integrity: Integrity(main_core.integrity),
+                main_core_heat_energy: HeatEnergy(main_core.heat_energy),
+                power_sources,
+            }
         }
-        (SCENARIO_SCHEMA_VERSION_V2, InitialWorldWire::Empty) => {
+        (schema_version, InitialWorldWire::Empty) => {
             return Err(crate::PackageError::UnsupportedInitialWorld {
-                schema_version: SCENARIO_SCHEMA_VERSION_V2,
+                schema_version,
                 initial_world: "empty",
             });
         }
-        _ => unreachable!("unsupported Scenario schemas were rejected above"),
+        (schema_version, InitialWorldWire::MainCoreV1 { .. }) => {
+            return Err(crate::PackageError::UnsupportedInitialWorld {
+                schema_version,
+                initial_world: "main-core-v1",
+            });
+        }
+        (schema_version, InitialWorldWire::MainCorePowerV1 { .. }) => {
+            return Err(crate::PackageError::UnsupportedInitialWorld {
+                schema_version,
+                initial_world: "main-core-power-v1",
+            });
+        }
     };
 
     Ok(ScenarioManifest {
@@ -602,5 +736,196 @@ const fn profile_id_field(profile: ProfileKind) -> &'static str {
         ProfileKind::Numeric => "profiles.numeric.profileId",
         ProfileKind::PhysicalScale => "profiles.physicalScale.profileId",
         ProfileKind::Balance => "profiles.balance.profileId",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scenario_v3(initial_world: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 3,
+            "scenarioId": "scenario-v3-unit",
+            "semanticsVersion": "aon-semantics-v1",
+            "hashAlgorithm": "blake3-v1",
+            "initialWorld": initial_world,
+            "requiredFeatures": {
+                "signal": false,
+                "mobility": false,
+                "capacity": false,
+                "sensing": false,
+                "power": false,
+                "relay": false,
+                "payload": false,
+                "radiation": false
+            },
+            "profiles": {
+                "numeric": {
+                    "path": "n",
+                    "profileId": "n",
+                    "profileHash": "0000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "physicalScale": {
+                    "path": "p",
+                    "profileId": "p",
+                    "profileHash": "0000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "balance": {
+                    "path": "b",
+                    "profileId": "b",
+                    "profileHash": "0000000000000000000000000000000000000000000000000000000000000000"
+                }
+            }
+        }))
+        .expect("unit Scenario serializes")
+    }
+
+    fn main_core_power(sources: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "main-core-power-v1",
+            "mainCore": {
+                "position": { "x": 100, "y": 200 },
+                "integrity": 300,
+                "heatEnergy": 400
+            },
+            "powerSources": sources
+        })
+    }
+
+    fn sources_in_reverse_semantic_order() -> serde_json::Value {
+        serde_json::json!([
+            {
+                "position": { "x": 20, "y": 2 },
+                "generationPerTick": 8
+            },
+            {
+                "position": { "x": -10, "y": 1 },
+                "generationPerTick": 5
+            }
+        ])
+    }
+
+    #[test]
+    fn scenario_v3_sorts_sources_and_hashes_an_independent_canonical_stream() {
+        let reverse = sources_in_reverse_semantic_order();
+        let mut forward = reverse.as_array().expect("sources are an array").clone();
+        forward.reverse();
+
+        let first = decode_scenario_manifest(&scenario_v3(main_core_power(reverse)))
+            .expect("v3 Scenario decodes");
+        let second = decode_scenario_manifest(&scenario_v3(main_core_power(forward.into())))
+            .expect("reordered v3 Scenario decodes");
+        assert_eq!(first.canonical_hash(), second.canonical_hash());
+
+        let InitialWorld::MainCorePowerV1 { power_sources, .. } = first.initial_world() else {
+            panic!("v3 decodes the frozen initial-world kind");
+        };
+        assert_eq!(
+            power_sources
+                .iter()
+                .map(|source| source.position().x.0)
+                .collect::<Vec<_>>(),
+            vec![-10, 20]
+        );
+
+        let mut canonical = Vec::new();
+        canonical.extend_from_slice(b"AON\0SCENARIO\0V3\0");
+        canonical.extend_from_slice(&3_u16.to_le_bytes());
+        canonical.extend_from_slice(&3_u32.to_le_bytes());
+        for value in ["scenario-v3-unit", "aon-semantics-v1", "blake3-v1"] {
+            canonical.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            canonical.extend_from_slice(value.as_bytes());
+        }
+        canonical.push(2);
+        for value in [100_i64, 200] {
+            canonical.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [300_u64, 400] {
+            canonical.extend_from_slice(&value.to_le_bytes());
+        }
+        canonical.extend_from_slice(&2_u32.to_le_bytes());
+        for values in [(-10_i64, 1_i64, 5_u64), (20_i64, 2_i64, 8_u64)] {
+            canonical.extend_from_slice(&values.0.to_le_bytes());
+            canonical.extend_from_slice(&values.1.to_le_bytes());
+            canonical.extend_from_slice(&values.2.to_le_bytes());
+        }
+        canonical.extend_from_slice(&[0; 8]);
+        canonical.extend_from_slice(&[0; 32 * 3]);
+        assert_eq!(
+            first
+                .canonical_hash()
+                .expect("v3 Scenario hashes")
+                .as_bytes(),
+            blake3::hash(&canonical).as_bytes()
+        );
+    }
+
+    #[test]
+    fn scenario_v3_allows_source_less_and_rejects_invalid_duplicate_cross_version_payloads() {
+        let source_less =
+            decode_scenario_manifest(&scenario_v3(main_core_power(serde_json::json!([]))))
+                .expect("source-less v3 Scenario decodes for rho zero evidence");
+        assert!(matches!(
+            source_less.initial_world(),
+            InitialWorld::MainCorePowerV1 { power_sources, .. } if power_sources.is_empty()
+        ));
+
+        let duplicate = serde_json::json!([
+            {
+                "position": { "x": 0, "y": 0 },
+                "generationPerTick": 1
+            },
+            {
+                "position": { "x": 0, "y": 0 },
+                "generationPerTick": 2
+            }
+        ]);
+        assert_eq!(
+            decode_scenario_manifest(&scenario_v3(main_core_power(duplicate))),
+            Err(crate::PackageError::DuplicateInitialPowerSourcePosition {
+                position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO)
+            })
+        );
+
+        let zero_generation = serde_json::json!([{
+            "position": { "x": 0, "y": 0 },
+            "generationPerTick": 0
+        }]);
+        assert_eq!(
+            decode_scenario_manifest(&scenario_v3(main_core_power(zero_generation))),
+            Err(crate::PackageError::NonPositiveInitialWorldField {
+                field: "initialWorld.powerSources[].generationPerTick"
+            })
+        );
+
+        let out_of_scope_source_state = serde_json::json!([{
+            "position": { "x": 0, "y": 0 },
+            "generationPerTick": 1,
+            "integrity": 1
+        }]);
+        assert!(matches!(
+            decode_scenario_manifest(&scenario_v3(main_core_power(out_of_scope_source_state))),
+            Err(crate::PackageError::InvalidJson {
+                artifact: ArtifactKind::Scenario,
+                category: JsonErrorCategory::Data,
+                ..
+            })
+        ));
+
+        let mut v2_with_v3_world = serde_json::from_slice::<serde_json::Value>(&scenario_v3(
+            main_core_power(sources_in_reverse_semantic_order()),
+        ))
+        .expect("Scenario is JSON");
+        v2_with_v3_world["schemaVersion"] = 2.into();
+        assert_eq!(
+            decode_scenario_manifest(
+                &serde_json::to_vec(&v2_with_v3_world).expect("Scenario serializes")
+            ),
+            Err(crate::PackageError::UnsupportedInitialWorld {
+                schema_version: 2,
+                initial_world: "main-core-power-v1"
+            })
+        );
     }
 }

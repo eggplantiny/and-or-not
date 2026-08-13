@@ -449,8 +449,13 @@ fn record_fixture(design: Design) -> (ReplayArtifact, Vec<u64>) {
         .map(|&tick| recorder.checkpoint(tick))
         .collect();
     let initial = Simulation::new(package()).expect("reference simulation starts");
-    let replay = Replay::new(initial.replay_header(), recorder.commands, checkpoints)
-        .expect("retained mobility Replay is valid");
+    let replay = Replay::new_v2(
+        initial.replay_header(),
+        recorder.commands,
+        Vec::new(),
+        checkpoints,
+    )
+    .expect("retained mobility Replay is valid");
     let artifact =
         ReplayArtifact::new("../scenarios/empty.json", replay).expect("Scenario locator is valid");
     (artifact, checkpoint_ticks)

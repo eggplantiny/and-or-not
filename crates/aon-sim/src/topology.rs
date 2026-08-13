@@ -1,7 +1,7 @@
 use crate::mobility::MobilePortRef;
 use crate::{
     ConnectionGeneration, EntityId, FixedSubstrateIndex, FixedVec2, GateId, GateIndex, JunctionId,
-    JunctionIndex, MainCoreId, NumericError, WireId, WireIndex,
+    JunctionIndex, MainCoreId, NumericError, PowerSourceId, WireId, WireIndex,
 };
 use std::ops::Range;
 use thiserror::Error;
@@ -81,12 +81,20 @@ impl WireEnd {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WireSensePortRef {
+    pub wire: WireId,
+    pub end: WireEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EndpointTarget {
     Free,
     Junction(JunctionId),
     GatePort(GatePortRef),
     MobilePort(MobilePortRef),
     MainCoreAnchor(MainCoreId),
+    PowerSourceAnchor(PowerSourceId),
+    WireSensePort(WireSensePortRef),
 }
 
 impl EndpointTarget {
@@ -97,6 +105,8 @@ impl EndpointTarget {
             Self::GatePort(_) => 2,
             Self::MobilePort(_) => 3,
             Self::MainCoreAnchor(_) => 4,
+            Self::PowerSourceAnchor(_) => 5,
+            Self::WireSensePort(_) => 6,
         }
     }
 }
