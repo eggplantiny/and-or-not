@@ -30,7 +30,7 @@ C-18, C-19, C-20, C-25.
 - [x] S1-M1 — Main Core / Capacity Accounting *(committed fresh clean-checkout and Windows-native gate passed)*
 - [x] S1-M2 — Sensing / Power / Brownout *(committed fresh clean-checkout and Windows-native gate passed)*
 - [x] S1-M3 — Capacity Support Load *(committed fresh clean-checkout and Windows-native gate passed)*
-- [ ] S1-M4 — Construction / Contact / Damage
+- [x] S1-M4 — Construction / Contact / Damage *(committed fresh clean-checkout and Windows-native gate passed)*
 - [ ] S1-M5 — Reference Architecture Fixture
 - [ ] S1-M6 — Parameter Sweep
 - [ ] Stage 1 technical gate
@@ -578,3 +578,80 @@ Retained closure goldens:
   initial/final V6 State Hashes:
   `47cddc7a4a1a1371d6600953bb7c0acc7c7e5e465741869375026e7efcab9369` and
   `7f687d752df7146141be826dbb74668866494c1a024ec6f157bb3eb264c3445c`.
+
+## Completed slice — S1-M4
+
+S1-M4 completed on 2026-08-14 at verified implementation tree
+`1ce66372e7520c770f08b676cadba2837ceb753b`. The primary feature implementation is
+`161f3fc0ae88cd6683d6fa01310f8f6d520229e0`; the follow-up commit makes canonical Replay and
+Balance bytes clone-stable under Windows checkout. This completes Construction / Contact / Damage
+only; S1-M5, S1-M6, and both complete Stage 1 gates remain open.
+
+- [x] Balance schema v5 appends exact Construction and Contact/Damage probes while retaining v2–v4
+  bytes, hashes, validation, and behavior. Scenario v4 owns sorted canonical Enemy initial states,
+  and State V7 encodes Enemy, Site, optional Damage State/BUILD, pending destruction, and RunStatus.
+- [x] `PlaceConstructionSite` reserves exact Gate/Wire/Junction/Fixed-Substrate geometry. BUILD is a
+  real Mobile-owned Construction Power load, uses the regional common ratio and retained
+  `scale_work`, supports source-less/partial/full and stable multi-builder reduction, and activates
+  a completed Site only on the next Phase 0 with a fresh EntityId.
+- [x] Live Wire demand uses resolved HIGH strength and actual granted Power. Exact swept Wire-body
+  contact and deterministic EntityId remainder allocation conserve every granted Energy unit; C-10
+  freezes grant `20` as Enemy absorption `5+5` plus Wire Heat `10`.
+- [x] Phase 8 Heat sources integrate exactly once in Phase 9. Electrical and prior-Phase-1 thermal
+  damage reduce Integrity simultaneously, mark sorted pending destruction in Phase 10, and remove
+  objects on the next Phase 0 without cancelling their current-Tick work or actions.
+- [x] C-09 freezes lethal Wire damage at Tick 45, all-surface removal and fresh EntityId `13` at
+  Tick 46, and stale in-flight Signal Arrival rejection at Tick 51. Capacity, Signal, Sense, Power,
+  Track, sink-slot, topology generation, region split, tombstone, and no-reconstruction facts are
+  asserted explicitly.
+- [x] Main Core lethal damage commits the complete fatal Tick and terminal State V7 hash before
+  `RunStatus::Ended`; every later step is a typed, non-mutating `RunEnded` boundary in Simulation,
+  Headless, Bevy, and the interactive Laboratory.
+- [x] Five retained Replay v2 artifacts cover partial multi-builder Construction, all four target
+  activations, C-10, C-09, and terminal behavior. Headless and Bevy reproduce every completed-Tick
+  report and V7 checkpoint exactly.
+- [x] Bounded exact kernels, independent oracles, stateful public-runtime corpora, strict
+  Balance/Scenario/Replay/Command decoders, HostileFrame non-contact, mutual lethal actors,
+  two-Tick thermal timing, and Mobile local-to-world geometry remain deterministic and panic-free.
+- [x] `scripts/s1-m4-technical-gate.ps1` runs 95 unique fail-closed exact tests plus two
+  executable/static invariants covering Gates 1–15. The Stage 0 25-test, S1-M0 47-test, S1-M1
+  45-test, S1-M2 70-test, and S1-M3 29-test gates remain green.
+- [x] An independent Windows-native `git clone --no-local` of the verified implementation tree
+  passed locked/offline metadata, formatting, all-target workspace check, strict Clippy, all 761
+  registered workspace tests, all six technical gates, canonical generator byte comparison, and a
+  clean post-run Git status with zero tracked or untracked differences. WSL was not used.
+
+Retained closure goldens:
+
+- S1-M4 authority SHA-256:
+  `00C17ADD8C1DDC5839F88FDE405E8EE5F3BFD6589AF9F414179417A2E5587667`.
+- Balance v5 file SHA-256:
+  `CEB4B24D81E94D85EF5535D1438E8C7A075BC718D4BC4AE5A8458134373E5C05`;
+  semantic `ProfileHash`:
+  `88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a`.
+- S1-M4 Scenario file SHA-256:
+  `0A48404886D661DC2B991B7A904B2B6E7D9008F6D2193C7A7C182B18A284FC5E`;
+  semantic `ArtifactHash`:
+  `a9770d7afc466087664f44846d65f56e93d479738705975c10ab6527b59817cd`;
+  common initial V7 State Hash:
+  `51ace8554724d927c81c68716d15cc58a4115959076d031688ef85915e960111`.
+- Partial multi-builder Replay SHA-256:
+  `BF42606466998A3481E5A11CC2AADE7B0C2AED0CDB053B56E273CEACE84622D0`;
+  final `nextTick=5` V7 State Hash:
+  `31a1089b727c09776cd66796f116b1e0397286604bf2ef261ac38c0bec68efe1`.
+- Four-target Construction Replay SHA-256:
+  `99124936C9513C3EE56801AA114DF41B02FA78411CE6D26F0D46D35483C48D0C`;
+  final `nextTick=21` V7 State Hash:
+  `0670210744f55ef99e67d4170546bcd88f8a90a9dbe506d54163601c93fee3de`.
+- C-10 Replay SHA-256:
+  `61C4BBBF8B247E48031388D61ABBE8E6C1396D025A9A67D62565AAED1B65F62A`;
+  final `nextTick=9` V7 State Hash:
+  `5ba4d9a856a765cd59a98592b82b9de256a389ece2aecfe6cd34ef0e26c4b420`.
+- C-09 Replay SHA-256:
+  `27CB7C0AC4C4D3180B66CFB2B2AB53EB1DEAB291B3F4ED5EC0490D451FF96093`;
+  final `nextTick=52` V7 State Hash:
+  `7452a1b72aa6622f8d894cd64866707ce6c7fdb3c2faf8efdcc4c6ee0c7a0bd4`.
+- Terminal Replay SHA-256:
+  `4CC1303EDA2B1742F9076A7ED56FA6C546D41333FCAEFB7E8653F3A3EA876490`;
+  final `nextTick=56` V7 State Hash:
+  `fe1000209769a38c50440dd1bbcfe70d19d2cb09529343125590b06e4e129777`.

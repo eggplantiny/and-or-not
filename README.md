@@ -28,12 +28,13 @@ materialization을 모두 통과했다.
 70-test S1-M2, 29-test S1-M3 fail-closed 기술 게이트를 모두 통과했다. WSL은 사용하지
 않았다.
 
-**S1-M4 Construction / Contact / Damage는 구현 및 pre-commit 검증을 완료했다.** Balance v5,
-Scenario v4, State V7, Construction Site/BUILD, canonical Enemy, Live Wire contact, Heat/Damage,
-Phase-10→Phase-0 destruction과 terminal RunStatus가 구현됐고, 5개 retained Replay의 Headless/Bevy
-전체 report·V7 trace가 일치한다. 95-test fail-closed S1-M4 게이트는 executable Gates 1–15를
-통과했다. 정식 완료 선언과 S1-M5 진입은 구현 커밋의 별도 Windows-native clean clone에서
-Gate 16까지 통과한 뒤 한다. WSL은 사용하지 않는다.
+**S1-M4 Construction / Contact / Damage도 정식 완료됐다.** 검증된 구현 tree
+`1ce66372e7520c770f08b676cadba2837ceb753b`은 별도 Windows-native `git clone --no-local`
+검증에서 761개 등록 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
+70-test S1-M2, 29-test S1-M3, 95-test S1-M4 fail-closed 기술 게이트를 모두 통과했다.
+기능 본체는 `161f3fc0ae88cd6683d6fa01310f8f6d520229e0`이며, 후속 커밋은 canonical artifact의
+Windows checkout도 LF byte golden과 일치시킨다. WSL은 사용하지 않았다. Stage 1 전체는 아직
+진행 중이며 다음 구현 경계는 S1-M5다.
 
 ## Source baseline
 
