@@ -28,7 +28,7 @@ C-18, C-19, C-20, C-25.
 
 - [x] S1-M0 — Physical Scale Experiment Baseline *(committed fresh clean-checkout and Windows-native gate passed)*
 - [x] S1-M1 — Main Core / Capacity Accounting *(committed fresh clean-checkout and Windows-native gate passed)*
-- [ ] S1-M2 — Sensing / Power / Brownout
+- [x] S1-M2 — Sensing / Power / Brownout *(committed fresh clean-checkout and Windows-native gate passed)*
 - [ ] S1-M3 — Capacity Support Load
 - [ ] S1-M4 — Construction / Contact / Damage
 - [ ] S1-M5 — Reference Architecture Fixture
@@ -450,3 +450,72 @@ Retained closure goldens:
   `d240a7ed885698c6d3197d7df0da1b9d741d702cdfd37a40df4e57f21659d87b`.
 - Retained C-21 final State Hash:
   `cbe2f28ada7d5b969de8e220e694996a76391c2d5bf5605c55f28dab803150df`.
+
+## Completed slice — S1-M2
+
+S1-M2 completed on 2026-08-13 at implementation commit
+`22d6ccd89cb0e1fa422111f98f99c9d371122695`. This completes Sensing / Power /
+Brownout only; S1-M3 through S1-M6 and both Stage 1 gates remain open.
+
+- [x] Balance schema v3 and Scenario schema v3 strictly bind the complete Power Probe,
+  Main Core, and canonical Power Sources. Replay v2 supplies complete nonpersistent
+  `HostileFrame` inputs, and the current global State encoder is V6.
+- [x] Exact capsule sensing samples every live Wire in Phase 1. Its A/B Sense ports are isolated
+  from the Wire signal surface and Junction OR behavior, preserve non-inertial delayed changes,
+  and become passive Low without a Power grant.
+- [x] Source anchors compile deterministic cross-domain Power regions and routes. Intrinsic Gate,
+  Wire, Sense, and Movement demands are collected before a 17-step fixed-point common-ratio solve;
+  route, rounding, zero-length, overflow, and permutation boundaries are fail-closed.
+- [x] Brownout scales Gate delay/drive, Sense drive, Movement budget, and the pure Work-grant seam.
+  Gate retention expires on the exact third under-threshold Tick, while cancellation, same-due
+  event merging, and next-edge movement boundaries remain deterministic and atomic.
+- [x] Leakage and transmission Heat are derived only from granted energy and are published by
+  Phase 8 without adding premature thermal state. Power/Sense and Network Analyzers recompute
+  sorted read-only observations without changing State Hash or identity frontiers.
+- [x] Retained C-07 proves complete hostile counts `0 -> 3 -> 0`, independent A/B Sense output,
+  exact delayed `Low -> High -> Low`, and multiplicity/order invariance.
+- [x] Retained C-08 compares identical circuits at generation 51 and 24: total nominal demand 51,
+  exact common ratios 1 and 1/2, Gate due Ticks 3 and 4, drive 400 and 200, Movement grants 65,536
+  and 32,768, and pure Work grants 8 and 4.
+- [x] Headless and Bevy hosts reproduce every retained C-07/C-08 per-Tick report and V6 hash.
+  Bounded Scenario, Balance, Replay, topology, geometry, and solver corpora remain panic-free.
+- [x] `scripts/s1-m2-technical-gate.ps1` runs 70 fail-closed exact tests for Gates 1–15, while the
+  Stage 0 25-test, S1-M0 47-test, and S1-M1 45-test technical gates remain green.
+- [x] An independent Windows-native `git clone --no-local` of the implementation commit passed
+  locked/offline metadata, formatting, all-target workspace check, strict Clippy, all 629
+  registered workspace tests, all four technical gates, and a clean post-run Git status. WSL was
+  not used.
+
+Retained closure goldens:
+
+- S1-M2 authority SHA-256:
+  `BBE7D7C45752B53714691FD391B77C9FBD52143B65760E9D1BD2E6CDAD555A9D`.
+- Balance v3 file SHA-256:
+  `6E2C5319F0103D731FCF419B5EF970DF12CF3FB41B1B9C0E93FEDEAD0E6177AA`;
+  semantic `ProfileHash`:
+  `96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63`.
+- C-07 Scenario file SHA-256:
+  `C87CF13C383FAB6125DE5A0758A1F91A9B949A1D2E439A72385DE7D4FF383295`;
+  semantic `ArtifactHash`:
+  `5770222301e36fd352a859b4adce2907eac167ed233155ecfafa227f5cc59fef`.
+- C-08 full/half Scenario file SHA-256 values:
+  `3E286FA136028FED6A7D5FBFC9ADDF72032A40F8EB15B1BFD746D37FEFB945E9` and
+  `FDC3A1B3FEBCE918BFFD82AD56E2EC690C6E9CC0AEF32DEC6659BCFACEA51D6C`;
+  semantic `ArtifactHash` values:
+  `98f73f4e267f1c1ddd706a1aafff2f075192592c5ce30dba1cbe17eb3f7af4d2` and
+  `d28c5a918675bd4e00d0b8c62c4cd12cff145f4e09bf1415a8002c508cc066a1`.
+- C-07 Replay file SHA-256:
+  `3588209A8422121F55CA658AD1FFDFDDD80422816E5A62411270C468BC9A2DE6`;
+  initial/final V6 State Hashes:
+  `8b0c8f872b033be3f8c7a33f78c5ead7503cb9f29e39ba5eb9a737ffec0bf5c5` and
+  `f7e3c45129336c4f018e63ad942500701efd98c2963c903fdd0c4e6df6b70d47`.
+- C-08 full Replay file SHA-256:
+  `7403378123A7A24479DF303DA3CD32753337926C037D568AEDDD212D554370EC`;
+  initial/final V6 State Hashes:
+  `086b4b71ba63d0795c1bda727e06ff3b949c1daac60b22cd59da9df27fe46db7` and
+  `516070270ef1ef46bf312d2c2e906a0597974b6e3afa4546c7642a5e6224b3f3`.
+- C-08 half Replay file SHA-256:
+  `75485C5CDE0C5BCAA0CC4635D792C066E1D8AA870911AD81BF7BC6D222E346D6`;
+  initial/final V6 State Hashes:
+  `72a6eb1f246d18b7059e4a4d9efc6394890edd8360582d7f6b12beac3a13a5ed` and
+  `8565e47f3a2a9d652956a9ca692b7cc3c3baaaf5f2dbb07b334acfd25ee7cace`.

@@ -17,10 +17,11 @@ materialization을 모두 통과했다.
 `5554f76266467d9112acdb2bad3ba5fcba4ed011`은 별도 Windows-native `git clone --no-local`
 검증에서 514개 workspace 테스트와 Stage 0, S1-M0, 45-test S1-M1 게이트를 모두 통과했다.
 
-**S1-M2 Sensing / Power / Brownout 구현과 정본 증거가 준비됐다.** Scenario v3, Balance v3,
-Replay v2, 전역 State V6, C-07/C-08 retained Replay, Power/Sense Analyzer와 70-test
-fail-closed 기술 게이트를 포함한다. Stage 1 전체는 아직 진행 중이며, clean committed-tree
-검증 후 다음 구현 경계는 S1-M3이다.
+**S1-M2 Sensing / Power / Brownout도 정식 완료됐다.** 구현 커밋
+`22d6ccd89cb0e1fa422111f98f99c9d371122695`은 별도 Windows-native `git clone --no-local`
+검증에서 629개 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
+70-test S1-M2 fail-closed 기술 게이트를 모두 통과했다. Stage 1 전체는 아직 진행 중이며,
+다음 구현 경계는 S1-M3이다.
 
 ## Source baseline
 
@@ -106,6 +107,8 @@ Retained S1-M2 sensing and brownout Replays:
 ```powershell
 cargo run -p aon-headless --locked --offline -- `
   replay fixtures/replays/s1-m2-c07-sensing-v1.json
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m2-c08-brownout-full-v1.json
 cargo run -p aon-headless --locked --offline -- `
   replay fixtures/replays/s1-m2-c08-brownout-half-v1.json
 ```
