@@ -148,7 +148,7 @@ $requiredTests = @(
         Package = "aon-sim"
         TargetArguments = @("--test", "replay_golden")
         TestName = "retained_feedback_ring_is_the_exact_canonical_replay_encoding"
-        Evidence = "retained feedback Replay command stream under Replay v2 and State V6"
+        Evidence = "retained feedback Replay command stream under Replay v2 and State V7"
     },
     @{
         Gates = @(1, 15)
@@ -518,56 +518,56 @@ $requiredTests = @(
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--test", "bootstrap_simulation")
-        TestName = "s1m2_empty_state_v6_hash_has_a_golden_value"
-        Evidence = "independent Empty-world State V6 hash golden"
+        TestName = "current_empty_state_v7_hash_has_a_golden_value"
+        Evidence = "independent Empty-world State V7 hash golden"
     },
     @{
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--test", "structural_lifecycle")
-        TestName = "every_structural_kind_has_an_independently_encoded_state_hash_golden"
-        Evidence = "independent populated structural State V6 byte stream and hash golden"
+        TestName = "every_structural_kind_has_an_independently_encoded_v7_state_hash_golden"
+        Evidence = "independent populated structural State V7 byte stream and hash golden"
     },
     @{
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::main_core_v6_section_has_exact_anchor_order_and_is_hash_sensitive"
-        Evidence = "independent MainCoreV1 State V6 section has exact bytes and field sensitivity"
+        TestName = "canonical::tests::main_core_v7_section_has_exact_anchor_order_and_is_hash_sensitive"
+        Evidence = "independent MainCoreV1 State V7 section has exact bytes and field sensitivity"
     },
     @{
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::power_source_v6_section_has_exact_sorted_records_and_field_sensitive_hash"
-        Evidence = "MainCorePower Source State V6 section has exact sorted bytes and field sensitivity"
+        TestName = "canonical::tests::power_source_v7_section_has_exact_sorted_records_and_field_sensitive_hash"
+        Evidence = "MainCorePower Source State V7 section has exact sorted bytes and field sensitivity"
     },
     @{
         Gates = @(9, 13)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::gate_v6_row_appends_exact_unpowered_tick_counter"
-        Evidence = "State V6 Gate retention counter bytes and sensitivity are exact"
+        TestName = "canonical::tests::gate_v7_row_retains_exact_unpowered_tick_counter"
+        Evidence = "State V7 Gate retention counter bytes and sensitivity are exact"
     },
     @{
         Gates = @(6, 13)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::wire_v6_row_has_exact_optional_sense_state_and_field_sensitive_hash"
-        Evidence = "State V6 optional Wire Sense records have exact bytes and sensitivity"
+        TestName = "canonical::tests::wire_v7_row_retains_exact_optional_sense_state_and_field_sensitive_hash"
+        Evidence = "State V7 optional Wire Sense records have exact bytes and sensitivity"
     },
     @{
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--test", "s1m2_state_replay")
-        TestName = "every_current_initial_world_advertises_state_v6_in_a_v2_header"
-        Evidence = "Empty, MainCoreV1, and MainCorePowerV1 advertise Replay v2 and State V6"
+        TestName = "every_current_initial_world_advertises_state_v7_in_a_v2_header"
+        Evidence = "Empty, MainCoreV1, and MainCorePowerV1 advertise Replay v2 and State V7"
     },
     @{
         Gates = @(13)
         Package = "aon-sim"
         TargetArguments = @("--test", "s1m2_state_replay")
-        TestName = "retained_state_v3_v4_and_v5_headers_are_typed_but_execution_rejected"
+        TestName = "retained_state_v3_through_v6_headers_are_typed_but_execution_rejected"
         Evidence = "retained State headers decode but current mismatch rejects before Tick 0"
     },
     @{
@@ -581,8 +581,8 @@ $requiredTests = @(
         Gates = @(11, 12, 13, 15)
         Package = "aon-app"
         TargetArguments = @("--test", "s1m2_replay_hosts")
-        TestName = "retained_c07_and_c08_reports_and_v6_hashes_match_headless_and_bevy"
-        Evidence = "Headless and native Bevy match every retained C-07/C-08 report and V6 hash"
+        TestName = "retained_c07_and_c08_reports_and_v7_hashes_match_headless_and_bevy"
+        Evidence = "Headless and native Bevy match every retained C-07/C-08 report and V7 hash"
     },
     @{
         Gates = @(2, 13)
@@ -596,7 +596,7 @@ $requiredTests = @(
         Package = "aon-fuzz-harness"
         TargetArguments = @("--test", "regression_corpus")
         TestName = "replay_regression_corpus_never_panics_and_preserves_acceptance_class"
-        Evidence = "Replay corpus covers retained v2/V6 streams and bounded migration inputs"
+        Evidence = "Replay corpus covers retained v2/V7 streams and bounded migration inputs"
     },
     @{
         Gates = @(5, 13)

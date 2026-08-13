@@ -31,15 +31,15 @@ const C08_SENSED_WIRE: WireId = WireId(EntityId(8));
 
 const BALANCE_HASH: &str = "96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63";
 const C07_SCENARIO_HASH: &str = "5770222301e36fd352a859b4adce2907eac167ed233155ecfafa227f5cc59fef";
-const C07_FINAL_HASH: &str = "f7e3c45129336c4f018e63ad942500701efd98c2963c903fdd0c4e6df6b70d47";
+const C07_FINAL_HASH: &str = "e6fb6b7d3f738f87aa3e3af11f8dcececcbe19e5620ed8814404e65729df1fa0";
 const C08_FULL_SCENARIO_HASH: &str =
     "98f73f4e267f1c1ddd706a1aafff2f075192592c5ce30dba1cbe17eb3f7af4d2";
 const C08_FULL_FINAL_HASH: &str =
-    "516070270ef1ef46bf312d2c2e906a0597974b6e3afa4546c7642a5e6224b3f3";
+    "fb34a679a37826071f026a8e79216ec8c62a22c33cbc7396e17bab4f48199712";
 const C08_HALF_SCENARIO_HASH: &str =
     "d28c5a918675bd4e00d0b8c62c4cd12cff145f4e09bf1415a8002c508cc066a1";
 const C08_HALF_FINAL_HASH: &str =
-    "8565e47f3a2a9d652956a9ca692b7cc3c3baaaf5f2dbb07b334acfd25ee7cace";
+    "b6ef123bc6c999ef77276b69dfe7e67db15b54a8b54c76395470437a44ed39a8";
 
 fn package(scenario: &[u8]) -> aon_sim::SimulationPackage {
     decode_package(ArtifactBytes {
@@ -63,7 +63,7 @@ fn artifact(bytes: &[u8]) -> ReplayArtifact {
     );
     let header = artifact.replay().header();
     assert_eq!(header.format_version, ReplayFormatVersion::V2);
-    assert_eq!(header.state_hash_version, StateHashVersion::V6);
+    assert_eq!(header.state_hash_version, StateHashVersion::V7);
     assert_eq!(
         header.world_generator_version,
         WorldGeneratorVersion::MainCorePowerV1

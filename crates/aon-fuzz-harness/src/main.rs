@@ -2,12 +2,14 @@ use aon_fuzz_harness::{
     CapacitySupportExecutionObservation, CommandExecutionObservation,
     MAX_CAPACITY_SUPPORT_INPUT_BYTES, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
     MAX_EXPERIMENT_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES,
-    MAX_MODULE_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
-    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, MobilityRuntimeExecutionObservation,
-    SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
-    TopologyRuntimeExecutionObservation, exercise_capacity_support, exercise_commands,
-    exercise_decoder, exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
-    exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
+    MAX_MODULE_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_S1M4_KERNEL_INPUT_BYTES,
+    MAX_S1M4_RUNTIME_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
+    MobilityRuntimeExecutionObservation, S1m4KernelExecutionObservation,
+    S1m4RuntimeExecutionObservation, SignalRuntimeExecutionObservation,
+    StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation,
+    exercise_capacity_support, exercise_commands, exercise_decoder, exercise_experiment_decoder,
+    exercise_geometry, exercise_mobility_runtime, exercise_module_decoder, exercise_replay_decoder,
+    exercise_s1m4_kernels, exercise_s1m4_runtime, exercise_signal_runtime,
     exercise_stateful_commands, exercise_topology_runtime,
 };
 use std::io::Read;
@@ -25,7 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
         .max(MAX_MOBILITY_RUNTIME_INPUT_BYTES)
         .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES)
-        .max(MAX_CAPACITY_SUPPORT_INPUT_BYTES);
+        .max(MAX_CAPACITY_SUPPORT_INPUT_BYTES)
+        .max(MAX_S1M4_KERNEL_INPUT_BYTES)
+        .max(MAX_S1M4_RUNTIME_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
         .take(u64::try_from(input_limit)?)
@@ -42,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "topology" => print_topology_runtime(&input)?,
         "mobility" => print_mobility_runtime(&input)?,
         "capacity" => print_capacity_support(&input)?,
+        "s1m4" => print_s1m4(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -58,13 +63,77 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_topology_runtime(&input)?;
             print_mobility_runtime(&input)?;
             print_capacity_support(&input)?;
+            print_s1m4(&input)?;
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, capacity, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, capacity, s1m4, both, or all"
             )
             .into());
         }
+    }
+    Ok(())
+}
+
+fn print_s1m4(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let kernels = exercise_s1m4_kernels(input);
+    let coverage = kernels.coverage;
+    println!(
+        "s1m4-kernels input_bytes={} cases={} result={} work={}/{}/{}/{} redundant={} growth={} progress={} live={} ceil={} contact={} remainder={} permutations={} conservation={} heat={} damage={} ties={} order_errors={} boundaries={} tag8={}",
+        kernels.consumed_len,
+        kernels.generated_cases,
+        s1m4_kernel_result(kernels.execution),
+        coverage.gate_work_cases,
+        coverage.junction_work_cases,
+        coverage.wire_work_cases,
+        coverage.substrate_work_cases,
+        coverage.redundant_vertex_checks,
+        coverage.strict_wire_growth_checks,
+        coverage.construction_progress_checks,
+        coverage.live_demand_cases,
+        coverage.live_final_ceil_cases,
+        coverage.contact_allocation_cases,
+        coverage.contact_remainder_cases,
+        coverage.contact_permutation_checks,
+        coverage.contact_conservation_checks,
+        coverage.heat_integration_cases,
+        coverage.damage_cases,
+        coverage.thermal_tie_checks,
+        coverage.order_rejection_checks,
+        coverage.numeric_boundary_checks,
+        coverage.command_tag8_checks,
+    );
+    if let Some(failure) = kernels.invariant_failure() {
+        return Err(format!("S1-M4 kernel harness invariant failed: {failure}").into());
+    }
+
+    let runtime = exercise_s1m4_runtime(input);
+    let coverage = runtime.coverage;
+    println!(
+        "s1m4-runtime input_bytes={} scenarios={} steps={} hashes={} result={} construction={}/{}/{} c09={}/{}/{} terminal={}/{}/{} mutual_lethal={}/{} hostile_sensing_only={} thermal_two_tick={}/{} reproducible={}",
+        runtime.consumed_len,
+        runtime.generated_scenarios,
+        runtime.generated_steps,
+        runtime.state_hashes.len(),
+        s1m4_runtime_result(runtime.execution),
+        coverage.construction_progress,
+        coverage.construction_next_phase0_activation,
+        coverage.construction_fresh_identity,
+        coverage.c09_pending_wire_current_tick,
+        coverage.c09_next_phase0_removal,
+        coverage.c09_stale_arrival,
+        coverage.terminal_tick_commits,
+        coverage.terminal_later_step_rejections,
+        coverage.terminal_read_only_checks,
+        coverage.mutual_lethal_current_tick_completions,
+        coverage.mutual_lethal_next_phase0_removals,
+        coverage.hostile_frame_sensing_only_checks,
+        coverage.thermal_heat_tick_checks,
+        coverage.thermal_next_tick_damage_checks,
+        coverage.reproducibility_checks,
+    );
+    if let Some(failure) = runtime.invariant_failure() {
+        return Err(format!("S1-M4 runtime harness invariant failed: {failure}").into());
     }
     Ok(())
 }
@@ -362,5 +431,20 @@ const fn capacity_support_result(execution: CapacitySupportExecutionObservation)
         CapacitySupportExecutionObservation::KernelError { .. } => "kernel-error",
         CapacitySupportExecutionObservation::InvariantViolation { .. } => "invariant-violation",
         CapacitySupportExecutionObservation::Completed => "completed",
+    }
+}
+
+const fn s1m4_kernel_result(execution: S1m4KernelExecutionObservation) -> &'static str {
+    match execution {
+        S1m4KernelExecutionObservation::KernelError { .. } => "kernel-error",
+        S1m4KernelExecutionObservation::InvariantViolation { .. } => "invariant-violation",
+        S1m4KernelExecutionObservation::Completed => "completed",
+    }
+}
+
+const fn s1m4_runtime_result(execution: S1m4RuntimeExecutionObservation) -> &'static str {
+    match execution {
+        S1m4RuntimeExecutionObservation::Failure { .. } => "failure",
+        S1m4RuntimeExecutionObservation::Completed => "completed",
     }
 }

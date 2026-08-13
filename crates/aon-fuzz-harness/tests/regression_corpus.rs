@@ -1,9 +1,11 @@
 use aon_fuzz_harness::{
     CapacitySupportExecutionObservation, DecoderTarget, MobilityRuntimeExecutionObservation,
+    S1m4KernelExecutionObservation, S1m4RuntimeExecutionObservation,
     SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation,
     exercise_capacity_support, exercise_commands, exercise_decoder, exercise_experiment_decoder,
     exercise_geometry, exercise_mobility_runtime, exercise_module_decoder, exercise_replay_decoder,
-    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
+    exercise_s1m4_kernels, exercise_s1m4_runtime, exercise_signal_runtime,
+    exercise_stateful_commands, exercise_topology_runtime,
 };
 use aon_sim::decode_balance_profile;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -137,6 +139,22 @@ const COMMAND_CORPUS: &[(&str, &[u8])] = &[
         include_bytes!("../corpus/command/stateful-references.case"),
     ),
     ("stateful-effective-paths", STATEFUL_EFFECTIVE_PATHS),
+    (
+        "s1m4-tag8-gate",
+        include_bytes!("../corpus/command/s1m4-tag8-gate.case"),
+    ),
+    (
+        "s1m4-tag8-wire",
+        include_bytes!("../corpus/command/s1m4-tag8-wire.case"),
+    ),
+    (
+        "s1m4-tag8-junction",
+        include_bytes!("../corpus/command/s1m4-tag8-junction.case"),
+    ),
+    (
+        "s1m4-tag8-fixed-substrate",
+        include_bytes!("../corpus/command/s1m4-tag8-fixed-substrate.case"),
+    ),
 ];
 
 const SIGNAL_RUNTIME_COVERAGE: &[u8] = include_bytes!("../corpus/signal-runtime/coverage.case");
@@ -164,6 +182,33 @@ const MOBILITY_RUNTIME_COVERAGE: &[u8] =
 const MOBILITY_RUNTIME_CORPUS: &[(&str, &[u8])] = &[("s0-m7-coverage", MOBILITY_RUNTIME_COVERAGE)];
 
 const CAPACITY_SUPPORT_COVERAGE: &[u8] = include_bytes!("../corpus/capacity-support/coverage.case");
+
+const S1M4_KERNEL_COVERAGE: &[u8] = include_bytes!("../corpus/s1m4/kernel-coverage.case");
+const S1M4_RUNTIME_COVERAGE: &[u8] = include_bytes!("../corpus/s1m4/runtime-coverage.case");
+const S1M4_THERMAL_TWO_TICK_COVERAGE: &[u8] =
+    include_bytes!("../corpus/s1m4/thermal-two-tick.case");
+const S1M4_REPLAY_ARTIFACTS: &[(&str, &[u8])] = &[
+    (
+        "construction-partial-multibuilder-v1",
+        include_bytes!("../../../fixtures/replays/s1-m4/construction-partial-multibuilder-v1.json"),
+    ),
+    (
+        "construction-four-targets-v1",
+        include_bytes!("../../../fixtures/replays/s1-m4/construction-four-targets-v1.json"),
+    ),
+    (
+        "c10-contact-v1",
+        include_bytes!("../../../fixtures/replays/s1-m4/c10-contact-v1.json"),
+    ),
+    (
+        "c09-wire-break-v1",
+        include_bytes!("../../../fixtures/replays/s1-m4/c09-wire-break-v1.json"),
+    ),
+    (
+        "terminal-v1",
+        include_bytes!("../../../fixtures/replays/s1-m4/terminal-v1.json"),
+    ),
+];
 
 #[test]
 fn decoder_regression_corpus_never_panics() {
@@ -241,6 +286,61 @@ fn s1m3_scenario_balance_and_replay_artifacts_reach_bounded_strict_decoders() {
 }
 
 #[test]
+fn s1m4_scenario_balance_and_all_replays_reach_bounded_strict_decoders() {
+    let scenario_bytes =
+        include_bytes!("../../../fixtures/scenarios/s1-m4-construction-contact-damage-v1.json");
+    let mut scenario_input = Vec::with_capacity(scenario_bytes.len() + 1);
+    scenario_input.push(0);
+    scenario_input.extend_from_slice(scenario_bytes);
+    let scenario = catch_unwind(AssertUnwindSafe(|| exercise_decoder(&scenario_input)))
+        .expect("S1-M4 Scenario v4 decoder input must not panic");
+    assert_eq!(scenario.target, DecoderTarget::Scenario);
+    assert_eq!(scenario.payload_len, scenario_bytes.len());
+    assert!(
+        scenario.result.is_ok(),
+        "S1-M4 Scenario v4 must remain strictly accepted: {:?}",
+        scenario.result
+    );
+    assert_eq!(exercise_decoder(&scenario_input), scenario);
+
+    let balance_bytes =
+        include_bytes!("../../../profiles/balance/s1-m4-construction-contact-damage-alpha.json");
+    let mut balance_input = Vec::with_capacity(balance_bytes.len() + 1);
+    balance_input.push(3);
+    balance_input.extend_from_slice(balance_bytes);
+    let balance = catch_unwind(AssertUnwindSafe(|| exercise_decoder(&balance_input)))
+        .expect("S1-M4 Balance v5 decoder input must not panic");
+    assert_eq!(balance.target, DecoderTarget::BalanceProfile);
+    assert_eq!(balance.payload_len, balance_bytes.len());
+    assert!(
+        balance.result.is_ok(),
+        "S1-M4 Balance v5 must remain strictly accepted: {:?}",
+        balance.result
+    );
+    assert!(
+        decode_balance_profile(balance_bytes).is_ok(),
+        "S1-M4 Balance v5 must remain accepted by the strict standalone decoder"
+    );
+    assert_eq!(exercise_decoder(&balance_input), balance);
+
+    for &(name, replay_bytes) in S1M4_REPLAY_ARTIFACTS {
+        let replay = catch_unwind(AssertUnwindSafe(|| exercise_replay_decoder(replay_bytes)))
+            .unwrap_or_else(|_| panic!("S1-M4 Replay v2 `{name}` decoder input must not panic"));
+        assert_eq!(replay.payload_len, replay_bytes.len());
+        assert!(
+            replay.result.is_ok(),
+            "S1-M4 Replay v2 `{name}` must remain strictly accepted: {:?}",
+            replay.result
+        );
+        assert_eq!(
+            exercise_replay_decoder(replay_bytes),
+            replay,
+            "S1-M4 Replay v2 `{name}` must have a deterministic strict decode outcome"
+        );
+    }
+}
+
+#[test]
 fn s1m3_capacity_support_corpus_is_bounded_exact_and_property_complete() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         exercise_capacity_support(CAPACITY_SUPPORT_COVERAGE)
@@ -279,6 +379,164 @@ fn s1m3_capacity_support_corpus_is_bounded_exact_and_property_complete() {
     assert_eq!(truncated.consumed_len, 128);
     assert_eq!(truncated.generated_cases, 128);
     assert_eq!(truncated.invariant_failure(), None);
+}
+
+#[test]
+fn s1m4_kernel_corpus_is_bounded_exact_and_property_complete() {
+    let observation = catch_unwind(AssertUnwindSafe(|| {
+        exercise_s1m4_kernels(S1M4_KERNEL_COVERAGE)
+    }))
+    .expect("S1-M4 kernel corpus must not panic");
+    assert_eq!(
+        observation.execution,
+        S1m4KernelExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, S1M4_KERNEL_COVERAGE.len());
+    assert_eq!(observation.generated_cases, S1M4_KERNEL_COVERAGE.len());
+    assert_eq!(
+        exercise_s1m4_kernels(S1M4_KERNEL_COVERAGE),
+        observation,
+        "identical S1-M4 bytes must reproduce all exact observations"
+    );
+    let coverage = observation.coverage;
+    assert!(coverage.gate_work_cases > 0);
+    assert!(coverage.junction_work_cases > 0);
+    assert!(coverage.wire_work_cases > 0);
+    assert!(coverage.substrate_work_cases > 0);
+    assert!(coverage.redundant_vertex_checks > 0);
+    assert!(coverage.strict_wire_growth_checks > 0);
+    assert!(coverage.construction_progress_checks > 0);
+    assert!(coverage.live_demand_cases > 0);
+    assert!(coverage.live_final_ceil_cases > 0);
+    assert!(coverage.contact_allocation_cases > 0);
+    assert!(coverage.contact_remainder_cases > 0);
+    assert!(coverage.contact_permutation_checks > 0);
+    assert!(coverage.contact_conservation_checks > 0);
+    assert!(coverage.heat_integration_cases > 0);
+    assert!(coverage.damage_cases > 0);
+    assert!(coverage.thermal_tie_checks > 0);
+    assert_eq!(coverage.order_rejection_checks, 4);
+    assert_eq!(coverage.numeric_boundary_checks, 4);
+    assert_eq!(coverage.command_tag8_checks, 4);
+
+    let oversized = vec![0xff; 256];
+    let truncated = exercise_s1m4_kernels(&oversized);
+    assert_eq!(truncated.consumed_len, 128);
+    assert_eq!(truncated.generated_cases, 128);
+    assert_eq!(truncated.invariant_failure(), None);
+}
+
+#[test]
+fn s1m4_stateful_runtime_corpus_reaches_construction_c09_and_run_end() {
+    let observation = catch_unwind(AssertUnwindSafe(|| {
+        exercise_s1m4_runtime(S1M4_RUNTIME_COVERAGE)
+    }))
+    .expect("S1-M4 runtime corpus must not panic");
+    assert_eq!(
+        observation.execution,
+        S1m4RuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, S1M4_RUNTIME_COVERAGE.len());
+    assert_eq!(observation.generated_scenarios, S1M4_RUNTIME_COVERAGE.len());
+    assert_eq!(
+        exercise_s1m4_runtime(S1M4_RUNTIME_COVERAGE),
+        observation,
+        "identical S1-M4 runtime bytes must reproduce every State-hash trace"
+    );
+    let coverage = observation.coverage;
+    assert!(coverage.construction_progress > 0);
+    assert!(coverage.construction_next_phase0_activation > 0);
+    assert!(coverage.construction_fresh_identity > 0);
+    assert!(coverage.c09_pending_wire_current_tick > 0);
+    assert!(coverage.c09_next_phase0_removal > 0);
+    assert!(coverage.c09_stale_arrival > 0);
+    assert!(coverage.terminal_tick_commits > 0);
+    assert!(coverage.terminal_later_step_rejections > 0);
+    assert!(coverage.terminal_read_only_checks > 0);
+    assert!(coverage.mutual_lethal_current_tick_completions > 0);
+    assert!(coverage.mutual_lethal_next_phase0_removals > 0);
+    assert!(coverage.hostile_frame_sensing_only_checks > 0);
+    assert_eq!(
+        coverage.reproducibility_checks,
+        u64::try_from(observation.generated_scenarios).unwrap()
+    );
+
+    let oversized = vec![0xff; 32];
+    let truncated = exercise_s1m4_runtime(&oversized);
+    assert_eq!(truncated.consumed_len, 12);
+    assert_eq!(truncated.generated_scenarios, 12);
+    assert_eq!(truncated.invariant_failure(), None);
+}
+
+#[test]
+fn s1m4_mutual_lethal_runtime_completes_both_then_sorts_next_phase0_destruction() {
+    let observation = catch_unwind(AssertUnwindSafe(|| exercise_s1m4_runtime(&[3])))
+        .expect("S1-M4 mutual-lethal public-runtime case must not panic");
+    assert_eq!(
+        observation.execution,
+        S1m4RuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, 1);
+    assert_eq!(observation.generated_scenarios, 1);
+    assert_eq!(
+        observation.coverage.mutual_lethal_current_tick_completions,
+        1
+    );
+    assert_eq!(observation.coverage.mutual_lethal_next_phase0_removals, 1);
+    assert_eq!(observation.coverage.hostile_frame_sensing_only_checks, 0);
+    assert_eq!(
+        exercise_s1m4_runtime(&[3]),
+        observation,
+        "the isolated mutual-lethal case must reproduce its State-hash trace"
+    );
+}
+
+#[test]
+fn s1m4_hostile_frame_overlap_changes_only_sense_on_an_armed_live_wire() {
+    let observation = catch_unwind(AssertUnwindSafe(|| exercise_s1m4_runtime(&[4])))
+        .expect("S1-M4 HostileFrame sensing-only public-runtime case must not panic");
+    assert_eq!(
+        observation.execution,
+        S1m4RuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, 1);
+    assert_eq!(observation.generated_scenarios, 1);
+    assert_eq!(observation.coverage.hostile_frame_sensing_only_checks, 1);
+    assert_eq!(
+        observation.coverage.mutual_lethal_current_tick_completions,
+        0
+    );
+    assert_eq!(observation.coverage.mutual_lethal_next_phase0_removals, 0);
+    assert_eq!(
+        exercise_s1m4_runtime(&[4]),
+        observation,
+        "the isolated HostileFrame case must reproduce its State-hash trace"
+    );
+}
+
+#[test]
+fn s1m4_heat_integrates_before_exact_next_tick_thermal_damage_and_pending() {
+    let input = &S1M4_THERMAL_TWO_TICK_COVERAGE[..1];
+    let observation = catch_unwind(AssertUnwindSafe(|| exercise_s1m4_runtime(input)))
+        .expect("S1-M4 two-Tick thermal public-runtime case must not panic");
+    assert_eq!(
+        observation.execution,
+        S1m4RuntimeExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, 1);
+    assert_eq!(observation.generated_scenarios, 1);
+    assert_eq!(observation.coverage.thermal_heat_tick_checks, 1);
+    assert_eq!(observation.coverage.thermal_next_tick_damage_checks, 1);
+    assert_eq!(
+        exercise_s1m4_runtime(input),
+        observation,
+        "the isolated two-Tick thermal case must reproduce its State-hash trace"
+    );
 }
 
 #[test]
@@ -351,6 +609,49 @@ fn command_regression_corpus_replays_stateless_and_stateful_targets_without_pani
             stateful.invariant_failure(),
             None,
             "stateful command regression case `{name}` violated a harness invariant"
+        );
+    }
+}
+
+#[test]
+fn s1m4_command_tag8_corpus_reaches_all_target_kinds_and_both_encoders() {
+    use aon_fuzz_harness::CommandExecutionObservation;
+    use aon_sim::{Command, CommandRejectionReason, ConstructionTarget};
+
+    let cases = &COMMAND_CORPUS[COMMAND_CORPUS.len() - 4..];
+    for (expected_kind, &(name, bytes)) in cases.iter().enumerate() {
+        let observation = catch_unwind(AssertUnwindSafe(|| exercise_commands(bytes)))
+            .unwrap_or_else(|_| panic!("S1-M4 Command tag-8 corpus `{name}` panicked"));
+        assert_eq!(observation.envelopes.len(), 1);
+        assert_eq!(observation.variant_mask, 1 << 8);
+        assert_eq!(observation.invariant_failure(), None);
+        assert_eq!(observation.encodings.len(), 1);
+        assert!(observation.encodings[0].bytes_match);
+        assert!(observation.encodings[0].allocated_result.is_ok());
+        assert!(observation.encodings[0].streamed_result.is_ok());
+        let CommandExecutionObservation::Stepped(Ok(report)) = &observation.execution else {
+            panic!("S1-M4 Command corpus `{name}` did not reach public Simulation")
+        };
+        assert!(report.command_acceptances.is_empty());
+        assert_eq!(report.command_rejections.len(), 1);
+        assert_eq!(
+            report.command_rejections[0].reason,
+            CommandRejectionReason::UnsupportedPlacement
+        );
+        let Command::PlaceConstructionSite(command) = &observation.envelopes[0].command else {
+            panic!("S1-M4 Command corpus `{name}` did not select tag 8")
+        };
+        let actual_kind = match command.target {
+            ConstructionTarget::Gate { .. } => 0,
+            ConstructionTarget::Wire { .. } => 1,
+            ConstructionTarget::Junction { .. } => 2,
+            ConstructionTarget::FixedSubstrate { .. } => 3,
+        };
+        assert_eq!(actual_kind, expected_kind, "wrong target kind in `{name}`");
+        assert_eq!(
+            exercise_commands(bytes),
+            observation,
+            "S1-M4 Command tag-8 corpus `{name}` must be deterministic"
         );
     }
 }

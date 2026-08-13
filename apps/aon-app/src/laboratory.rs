@@ -7,7 +7,7 @@ use crate::presenter::{PickTarget, ViewMode};
 use crate::probe::{ProbeError, ProbeId, ProbeRack, ProbeTarget};
 use aon_sim::{
     Command, CommandEnvelope, DriveStrength, EntityId, RenderSnapshot, Replay, ReplayError,
-    Simulation, SimulationError, SimulationPackage, StateHash, StepReport, Tick,
+    RunStatus, Simulation, SimulationError, SimulationPackage, StateHash, StepReport, Tick,
 };
 use std::time::Duration;
 use thiserror::Error;
@@ -358,8 +358,37 @@ impl LaboratorySession {
             Some(replay) => replay.commands_for_tick(tick).cloned().collect::<Vec<_>>(),
             None => self.pending_commands.commands_for_tick(tick),
         };
-        let report = match self.simulation.step(&commands) {
+        let world_inputs = self
+            .replay
+            .as_ref()
+            .map(|replay| {
+                replay
+                    .world_inputs_for_tick(tick)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let step = if self.replay.is_some() {
+            self.simulation
+                .step_with_world_inputs(&commands, &world_inputs)
+        } else {
+            self.simulation.step(&commands)
+        };
+        let report = match step {
             Ok(report) => report,
+            Err(SimulationError::RunEnded) if self.replay.is_some() => {
+                let boundary_error = self.replay.as_ref().and_then(|replay| {
+                    replay
+                        .validate_terminal_boundary(self.simulation.next_tick())
+                        .err()
+                });
+                if let Some(error) = boundary_error {
+                    return Err(self.enter_fault(LaboratoryFault::Replay(error)));
+                }
+                return Err(
+                    self.enter_fault(LaboratoryFault::Simulation(SimulationError::RunEnded))
+                );
+            }
             Err(error) => {
                 return Err(self.enter_fault(LaboratoryFault::Simulation(error)));
             }
@@ -385,6 +414,16 @@ impl LaboratorySession {
                     actual: report.state_hash,
                 },
             )));
+        }
+
+        if matches!(report.run_status, RunStatus::Ended { .. }) {
+            let boundary_error = self
+                .replay
+                .as_ref()
+                .and_then(|replay| replay.validate_terminal_boundary(report.next_tick).err());
+            if let Some(error) = boundary_error {
+                return Err(self.enter_fault(LaboratoryFault::Replay(error)));
+            }
         }
 
         if self.replay_complete() {

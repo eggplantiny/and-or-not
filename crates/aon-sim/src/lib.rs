@@ -5,7 +5,11 @@ mod canonical;
 mod capacity;
 mod capacity_support;
 mod command;
+mod construction;
+mod contact;
 mod contract;
+mod damage_state;
+mod enemy;
 mod error;
 mod event;
 mod experiment;
@@ -32,15 +36,16 @@ mod simulation;
 mod snapshot;
 mod structural;
 mod structural_geometry;
+mod thermal_damage;
 mod topology;
 
 pub use artifact::{
-    ArtifactBytes, ArtifactKind, InitialWorld, PhysicalScaleProfileArtifactError,
-    PowerSourceInitialState, ProfileKind, ProfileReference, ProfileReferences,
-    SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2, SCENARIO_SCHEMA_VERSION_V3,
-    ScenarioHashError, ScenarioManifest, StageFeatureSet, decode_balance_profile,
-    decode_numeric_profile, decode_package, decode_physical_scale_profile,
-    decode_scenario_manifest, encode_physical_scale_profile,
+    ArtifactBytes, ArtifactKind, EnemyInitialState, InitialWorld,
+    PhysicalScaleProfileArtifactError, PowerSourceInitialState, ProfileKind, ProfileReference,
+    ProfileReferences, SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2,
+    SCENARIO_SCHEMA_VERSION_V3, SCENARIO_SCHEMA_VERSION_V4, ScenarioHashError, ScenarioManifest,
+    StageFeatureSet, decode_balance_profile, decode_numeric_profile, decode_package,
+    decode_physical_scale_profile, decode_scenario_manifest, encode_physical_scale_profile,
 };
 pub use capacity::{
     MainCoreCapacityContribution, NetworkAccounting, NetworkAnalyzerSnapshot, WireCapacityUsage,
@@ -51,14 +56,27 @@ pub use capacity_support::{
 };
 pub use command::{
     BindPortCommand, Command, CommandAcceptance, CommandEncodingError, CommandEnvelope,
-    CommandRejection, CommandRejectionReason, LogicLevel, PlaceFixedSubstrateCommand,
-    PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
-    RemoveEntityCommand, SetExternalDriverCommand,
+    CommandRejection, CommandRejectionReason, LogicLevel, PlaceConstructionSiteCommand,
+    PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand,
+};
+pub use construction::{
+    ConstructionError, ConstructionProgressResult, ConstructionSite, ConstructionSiteStore,
+    ConstructionTarget, ConstructionWorkContribution, apply_construction_work,
+    construction_nominal_demand, construction_nominal_demand_for_work, grant_construction_work,
+    required_construction_work,
+};
+pub use contact::{
+    ContactAbsorption, ContactAllocation, ContactCandidate, ContactError, LiveWireInput,
+    allocate_contact_energy, calculate_live_wire_demand, swept_circle_intersects_point,
+    swept_circle_intersects_wire_body,
 };
 pub use contract::{
     ContractValidationError, HASH_ALGORITHM_ID_BLAKE3_V1, HashAlgorithmId, SEMANTICS_VERSION_V1,
     SemanticsVersion, SimulationContract,
 };
+pub use damage_state::DamageState;
+pub use enemy::{EnemyState, EnemyStore, EnemyStoreError};
 pub use error::{JsonErrorCategory, PackageError, SimulationError};
 pub use event::{
     CanonicalEvent, DRIVER_TRANSITION_KIND_ORDER, DriverSample, DriverTransition,
@@ -84,11 +102,11 @@ pub use geometry::{
 };
 pub use hash::{HashParseError, ProfileHash, StateHash};
 pub use identity::{
-    ConnectionGeneration, ConnectionGenerationError, ConstructionSiteIndex, DepositIndex, DriverId,
-    EnemyIndex, EntityLocation, EntityRegistry, EntityRegistryError, FIRST_ENTITY_ID,
-    FixedSubstrateIndex, GateId, GateIndex, JunctionId, JunctionIndex, MainCoreId, MobileId,
-    MobileSubstrateIndex, PowerSourceId, PowerSourceIndex, QuartzIndex, RESERVED_ENTITY_ID,
-    RelaySiteId, RelaySiteIndex, SinkId, WireId, WireIndex,
+    ConnectionGeneration, ConnectionGenerationError, ConstructionSiteId, ConstructionSiteIndex,
+    DepositIndex, DriverId, EnemyId, EnemyIndex, EntityLocation, EntityRegistry,
+    EntityRegistryError, FIRST_ENTITY_ID, FixedSubstrateIndex, GateId, GateIndex, JunctionId,
+    JunctionIndex, MainCoreId, MobileId, MobileSubstrateIndex, PowerSourceId, PowerSourceIndex,
+    QuartzIndex, RESERVED_ENTITY_ID, RelaySiteId, RelaySiteIndex, SinkId, WireId, WireIndex,
 };
 pub use main_core::{MainCoreState, TopologyNodeId};
 pub use mobility::{
@@ -131,12 +149,14 @@ pub use power_topology::{
     PowerTopologyInput,
 };
 pub use profile::{
-    BALANCE_SCHEMA_VERSION_V4, BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile,
-    CapacitySupportProbeProfile, DivisionProfile, GateFootprint, GateFootprintTable, GatePortTable,
-    GeometryLengthProfile, MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile,
-    OrientationBoundaryMultipliers, OrientationWeightTable, OverflowPolicy,
-    PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2, PROFILE_SCHEMA_VERSION_V3,
-    PhysicalScaleProfile, PortAnchor, PowerProbeProfile, ProfileBundle, ProfileHashes,
+    BALANCE_SCHEMA_VERSION_V4, BALANCE_SCHEMA_VERSION_V5, BalanceProfile, BinaryGatePortAnchors,
+    CapacityProbeProfile, CapacitySupportProbeProfile, ConstructionProbeProfile,
+    ContactDamageProbeProfile, DivisionProfile, ElectricalToleranceProfile, GateFootprint,
+    GateFootprintTable, GatePortTable, GeometryLengthProfile,
+    MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile, OrientationBoundaryMultipliers,
+    OrientationWeightTable, OverflowPolicy, PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2,
+    PROFILE_SCHEMA_VERSION_V3, PhysicalScaleProfile, PortAnchor, PowerProbeProfile,
+    PrimitiveIntegrityProfile, PrimitiveThermalCapacityProfile, ProfileBundle, ProfileHashes,
     ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH, REFERENCE_GATE_MINIMUM_EXTENT,
     REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH,
     RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
@@ -144,8 +164,9 @@ pub use profile::{
 pub use replay::{
     HashCheckpoint, REPLAY_FORMAT_VERSION_V1, REPLAY_FORMAT_VERSION_V2, Replay, ReplayArtifact,
     ReplayContractField, ReplayError, ReplayFormatVersion, ReplayHeader, STATE_HASH_VERSION_V3,
-    STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5, STATE_HASH_VERSION_V6, Seed, SeedParseError,
-    StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1, WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1,
+    STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5, STATE_HASH_VERSION_V6, STATE_HASH_VERSION_V7,
+    Seed, SeedParseError, StateHashVersion, WORLD_GENERATOR_VERSION_EMPTY_V1,
+    WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_ENEMY_V1, WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1,
     WORLD_GENERATOR_VERSION_MAIN_CORE_V1, WorldGeneratorVersion, WorldInputEvent,
     decode_replay_artifact, encode_replay_artifact,
 };
@@ -158,11 +179,21 @@ pub use signal::{
     GateSignalSnapshot, SignalChangeRecord, SignalStepCounters, SinkRole, WireSensePorts,
     WireSenseSnapshot, WireSignalSnapshot,
 };
-pub use simulation::{SignalArrivalObservation, Simulation, SimulationPackage, StepReport};
+pub use simulation::{
+    ArmedWireAnalyzerRecord, ConstructionContactDamageAnalyzerSnapshot, ConstructionWorkReport,
+    ContactEnergyReport, DamageAnalyzerRecord, DamageReport, DestructionKind, DestructionReport,
+    InteractionHeatReport, RunEndCause, RunStatus, SignalArrivalObservation, Simulation,
+    SimulationPackage, StepReport,
+};
 pub use snapshot::{
-    FixedSubstrateRenderRecord, GateRenderRecord, JunctionRenderRecord, MainCoreRenderRecord,
-    MobileRenderRecord, RenderSnapshot, SignalProbeSample, SignalProbeTarget, SignalProbeValue,
-    WireRenderRecord,
+    ConstructionSiteRenderRecord, EnemyRenderRecord, FixedSubstrateRenderRecord, GateRenderRecord,
+    JunctionRenderRecord, MainCoreRenderRecord, MobileRenderRecord, RenderSnapshot,
+    SignalProbeSample, SignalProbeTarget, SignalProbeValue, WireRenderRecord,
+};
+pub use thermal_damage::{
+    DamageKind, DamageResolution, DamageSnapshot, ElectricalExposure, HeatContributionInput,
+    HeatContributionKey, InteractionHeatKind, ThermalDamageError, ThermalObjectKind,
+    electrical_tolerance_for, integrate_heat, resolve_damage, thermal_capacity_for,
 };
 pub use topology::{
     EndpointTarget, FixedAabb, GatePort, GatePortRef, GateType, RoutingDomain, WireEnd,

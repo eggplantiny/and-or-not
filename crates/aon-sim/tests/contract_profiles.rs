@@ -59,7 +59,7 @@ fn reference_contract_and_profiles_create_a_simulation() {
 }
 
 #[test]
-fn balance_schema_v4_is_latest_and_v2_still_requires_switch_energy() {
+fn balance_schema_v5_is_latest_and_v2_still_requires_switch_energy() {
     let mut old_schema: serde_json::Value =
         serde_json::from_slice(BALANCE).expect("reference balance JSON");
     old_schema["schemaVersion"] = 1.into();
@@ -75,7 +75,7 @@ fn balance_schema_v4_is_latest_and_v2_still_requires_switch_energy() {
         error,
         PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Profile(ProfileKind::Balance),
-            expected: 4,
+            expected: 5,
             actual: 1,
         }
     );
@@ -293,14 +293,14 @@ fn unknown_scenario_field_is_rejected() {
 #[test]
 fn unsupported_schema_semantics_and_hash_algorithm_are_rejected() {
     let mut scenario: serde_json::Value = serde_json::from_slice(SCENARIO).expect("fixture JSON");
-    scenario["schemaVersion"] = 4.into();
+    scenario["schemaVersion"] = 5.into();
     let bytes = serde_json::to_vec(&scenario).expect("test JSON serializes");
     assert_eq!(
         decode_scenario_manifest(&bytes),
         Err(PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Scenario,
-            expected: 3,
-            actual: 4,
+            expected: 4,
+            actual: 5,
         })
     );
 

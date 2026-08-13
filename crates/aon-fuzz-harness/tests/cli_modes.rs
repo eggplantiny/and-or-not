@@ -30,6 +30,8 @@ fn all_mode_invokes_every_decoder_target_including_replay() {
         "experiment ",
         "module ",
         "capacity-support ",
+        "s1m4-kernels ",
+        "s1m4-runtime ",
     ] {
         assert!(
             stdout.lines().any(|line| line.starts_with(prefix)),

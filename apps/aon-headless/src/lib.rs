@@ -9,8 +9,8 @@ pub use experiment::{
 
 use aon_sim::{
     ArtifactBytes, ExperimentArtifactError, PackageError, PhysicalScaleProfileArtifactError,
-    Replay, ReplayArtifact, ReplayError, Simulation, SimulationError, SimulationPackage, StateHash,
-    StepReport, decode_package, decode_replay_artifact, decode_scenario_manifest,
+    Replay, ReplayArtifact, ReplayError, RunStatus, Simulation, SimulationError, SimulationPackage,
+    StateHash, StepReport, decode_package, decode_replay_artifact, decode_scenario_manifest,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -213,10 +213,22 @@ pub fn run_replay(package: SimulationPackage, replay: &Replay) -> Result<RunTrac
             .world_inputs_for_tick(next_tick)
             .cloned()
             .collect::<Vec<_>>();
-        let report = simulation.step_with_world_inputs(&commands, &world_inputs)?;
+        let report = match simulation.step_with_world_inputs(&commands, &world_inputs) {
+            Ok(report) => report,
+            Err(SimulationError::RunEnded) => {
+                replay.validate_terminal_boundary(simulation.next_tick())?;
+                return Err(SimulationError::RunEnded.into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let terminal_next_tick =
+            matches!(report.run_status, RunStatus::Ended { .. }).then_some(report.next_tick);
         trace.push(report.state_hash);
         reports.push(report);
         verify_current_checkpoint(replay, &simulation, &mut checkpoint_index)?;
+        if let Some(terminal_next_tick) = terminal_next_tick {
+            replay.validate_terminal_boundary(terminal_next_tick)?;
+        }
     }
 
     replay.verify_trace(&trace)?;

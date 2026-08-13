@@ -221,6 +221,9 @@ fn vertex_boundary_uses_next_segment_forward_and_previous_segment_reverse() {
 #[test]
 fn mobile_circuit_view_exposes_three_bindable_intrinsic_ports() {
     let (physical, _, snapshot) = fixture();
+    assert_eq!(snapshot.mobiles()[0].build, None);
+    assert_eq!(snapshot.mobiles()[0].ports.build, None);
+    assert_eq!(snapshot.mobiles()[0].damage_state, None);
     let presentation = project_snapshot(
         &snapshot,
         &physical,

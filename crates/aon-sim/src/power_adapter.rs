@@ -215,6 +215,7 @@ mod tests {
             endpoint_a,
             endpoint_b,
             connection_generation: crate::ConnectionGeneration::INITIAL,
+            damage_state: None,
         }
     }
 

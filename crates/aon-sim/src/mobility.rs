@@ -1,7 +1,8 @@
 use crate::topology::{EndpointTarget, JunctionStore, RoutingDomain, WireEnd, WireStore};
 use crate::{
-    Fixed, FixedAabb, FixedVec2, JunctionId, LogicLevel, MobileId, MobileSubstrateIndex,
-    NumericError, SinkId, WireId, polyline_length, round_div_nearest_even, segment_length,
+    DamageState, Fixed, FixedAabb, FixedVec2, JunctionId, LogicLevel, MobileId,
+    MobileSubstrateIndex, NumericError, SinkId, WireId, polyline_length, round_div_nearest_even,
+    segment_length,
 };
 use crate::{
     geometry::canonical_polyline_points,
@@ -37,6 +38,7 @@ pub enum MobilePort {
     Stop,
     Left,
     Right,
+    Build,
 }
 
 impl MobilePort {
@@ -45,6 +47,7 @@ impl MobilePort {
             Self::Stop => 0,
             Self::Left => 1,
             Self::Right => 2,
+            Self::Build => 3,
         }
     }
 }
@@ -60,6 +63,7 @@ pub struct MobileControlPorts {
     pub stop: SinkId,
     pub left: SinkId,
     pub right: SinkId,
+    pub build: Option<SinkId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +115,7 @@ pub(crate) struct MobileSubstrateRecord {
     pub track_position: TrackPosition,
     pub routing_area: FixedAabb,
     pub footprint: FixedAabb,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -120,15 +125,17 @@ pub(crate) struct MobileSubstrateStore {
     track_positions: Vec<TrackPosition>,
     routing_areas: Vec<FixedAabb>,
     footprints: Vec<FixedAabb>,
+    damage_states: Vec<Option<DamageState>>,
 }
 
 impl MobileSubstrateStore {
-    pub fn push(
+    pub fn push_with_damage(
         &mut self,
         id: MobileId,
         track_position: TrackPosition,
         routing_area: FixedAabb,
         footprint: FixedAabb,
+        damage_state: Option<DamageState>,
     ) -> Result<MobileSubstrateIndex, TrackGraphError> {
         let raw = u32::try_from(self.ids.len()).map_err(|_| TrackGraphError::NumericOverflow)?;
         self.ids.push(id);
@@ -136,6 +143,7 @@ impl MobileSubstrateStore {
         self.track_positions.push(track_position);
         self.routing_areas.push(routing_area);
         self.footprints.push(footprint);
+        self.damage_states.push(damage_state);
         Ok(MobileSubstrateIndex(raw))
     }
 
@@ -147,6 +155,7 @@ impl MobileSubstrateStore {
             track_position: *self.track_positions.get(index)?,
             routing_area: *self.routing_areas.get(index)?,
             footprint: *self.footprints.get(index)?,
+            damage_state: *self.damage_states.get(index)?,
         })
     }
 
@@ -177,6 +186,17 @@ impl MobileSubstrateStore {
         Ok(())
     }
 
+    pub fn set_damage_state(
+        &mut self,
+        index: MobileSubstrateIndex,
+        damage_state: DamageState,
+    ) -> Result<(), TrackGraphError> {
+        self.get(index)
+            .ok_or(TrackGraphError::InvalidCanonicalState)?;
+        self.damage_states[index.0 as usize] = Some(damage_state);
+        Ok(())
+    }
+
     pub fn iter_alive(
         &self,
     ) -> impl Iterator<Item = (MobileSubstrateIndex, MobileSubstrateRecord)> + '_ {
@@ -198,6 +218,7 @@ impl MobileSubstrateStore {
         self.track_positions.reserve(additional);
         self.routing_areas.reserve(additional);
         self.footprints.reserve(additional);
+        self.damage_states.reserve(additional);
     }
 
     #[cfg(test)]
@@ -217,6 +238,7 @@ impl MobileSubstrateStore {
         self.track_positions.swap(first, second);
         self.routing_areas.swap(first, second);
         self.footprints.swap(first, second);
+        self.damage_states.swap(first, second);
         Ok(())
     }
 }

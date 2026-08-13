@@ -1,0 +1,191 @@
+{
+  "scenarioPath": "../../scenarios/s1-m4-construction-contact-damage-v1.json",
+  "header": {
+    "formatVersion": 2,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a",
+    "stateHashVersion": "aon-state-v7",
+    "worldGeneratorVersion": "aon-main-core-power-enemy-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "51ace8554724d927c81c68716d15cc58a4115959076d031688ef85915e960111",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -2097152,
+            "y": -2097152
+          },
+          "max": {
+            "x": 2097152,
+            "y": 2097152
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -2097152,
+            "y": -2097152
+          },
+          "max": {
+            "x": 2097152,
+            "y": 2097152
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-gate",
+        "gateType": "not",
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 8
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 8
+        },
+        "points": [
+          {
+            "x": -65536,
+            "y": 327680
+          },
+          {
+            "x": -65536,
+            "y": -65536
+          },
+          {
+            "x": 0,
+            "y": -65536
+          },
+          {
+            "x": 0,
+            "y": -16384
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 9,
+          "port": "power"
+        }
+      }
+    },
+    {
+      "targetTick": 8,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 8
+        },
+        "points": [
+          {
+            "x": -65536,
+            "y": 327680
+          },
+          {
+            "x": -65536,
+            "y": 622592
+          },
+          {
+            "x": 0,
+            "y": 622592
+          },
+          {
+            "x": 0,
+            "y": 327680
+          },
+          {
+            "x": 212992,
+            "y": 327680
+          },
+          {
+            "x": 16384,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        },
+        "endpointB": {
+          "kind": "gate-port",
+          "gate": 9,
+          "port": "output"
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "51ace8554724d927c81c68716d15cc58a4115959076d031688ef85915e960111"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "ad31beeb7e485b2fa04791cea4cadced46d0b15f160a8429c58a54633e436e11"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "4817a91b6f936dd270b75822f0df20c3253fe397fbdc6459daa8e7535d9c4590"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "19b2432732688c813246efcff6071e5f5ddc0c456ebdfe658e3a657f48b7d845"
+    },
+    {
+      "nextTick": 4,
+      "stateHash": "0e044ff71bf8926b90804e4b34583a294f92cfce79112cf64a4b38d1da24ec8d"
+    },
+    {
+      "nextTick": 5,
+      "stateHash": "00a2914b48c1c0375f1eafd0373009e3ad6a1acfa31cf5f64364cfb8216ae728"
+    },
+    {
+      "nextTick": 6,
+      "stateHash": "49bde1420903c2381c5f78f3a6ba1e65cd7516a647f5662a89f0cae065492a5b"
+    },
+    {
+      "nextTick": 7,
+      "stateHash": "49e60f169464ad31e6922c825875ab5869dbee90bdd678cd35764dac412eb707"
+    },
+    {
+      "nextTick": 8,
+      "stateHash": "67b7315159cfc9cd85d058fd9549de8c17c74a096c64bcf417416cddcce60407"
+    },
+    {
+      "nextTick": 9,
+      "stateHash": "5ba4d9a856a765cd59a98592b82b9de256a389ece2aecfe6cd34ef0e26c4b420"
+    }
+  ]
+}

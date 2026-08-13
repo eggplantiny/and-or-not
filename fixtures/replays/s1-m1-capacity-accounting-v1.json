@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "3fb2f3470804e9e95bde625ff615fc74ecff39fe0e8654371cd461178e1f3d8c",
-    "stateHashVersion": "aon-state-v6",
+    "stateHashVersion": "aon-state-v7",
     "worldGeneratorVersion": "aon-main-core-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "39b3c5e4d9f0855c46c7b2e80d91d623f641675516fe0770416dc4e52402a230",
+    "initialStateHash": "10848af61611215af9f07707f2e06c4987a020a36e8adf7ae4902bb629c8609e",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -275,19 +275,19 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "39b3c5e4d9f0855c46c7b2e80d91d623f641675516fe0770416dc4e52402a230"
+      "stateHash": "10848af61611215af9f07707f2e06c4987a020a36e8adf7ae4902bb629c8609e"
     },
     {
       "nextTick": 1,
-      "stateHash": "61984461a1270f40b24fb0261f52ade15088b6887113f85004ddd598bafdd14c"
+      "stateHash": "11a7921ab9bfdaa93431de3bbfbbfa1c9a32e8ce2b19a144ad064376c6ac62fb"
     },
     {
       "nextTick": 2,
-      "stateHash": "a2c8f0e8b70e61133e187455905ec3b5fb2ad17eb3e5ec301bdda1434145764b"
+      "stateHash": "ed342ee34f30044e8a7e6eb390238023ab1748ea76238805da32e37997982a5c"
     },
     {
       "nextTick": 3,
-      "stateHash": "ffa752a27489371a0b30d61b47dba49af275e7298ad9259548feec67fa238114"
+      "stateHash": "bc387ac3e2a80bf2fa68a16c7385b3afaf506797e02255badc53284dd7a5b24b"
     }
   ]
 }

@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63",
-    "stateHashVersion": "aon-state-v6",
+    "stateHashVersion": "aon-state-v7",
     "worldGeneratorVersion": "aon-main-core-power-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "72a6eb1f246d18b7059e4a4d9efc6394890edd8360582d7f6b12beac3a13a5ed",
+    "initialStateHash": "11db66a260744bad45c1df2331e2c48eb929ecc85f5dffa3ec1a6abc291e3444",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -181,27 +181,27 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "72a6eb1f246d18b7059e4a4d9efc6394890edd8360582d7f6b12beac3a13a5ed"
+      "stateHash": "11db66a260744bad45c1df2331e2c48eb929ecc85f5dffa3ec1a6abc291e3444"
     },
     {
       "nextTick": 1,
-      "stateHash": "56378b4d250adbed7a61dc42cdcaf0ccb2c33f75d98b05a4b9e66eda1fed71a5"
+      "stateHash": "996c799a3106e45678ea4b9bb496e8bef47ae2675307c8eb1d7993e07f617592"
     },
     {
       "nextTick": 2,
-      "stateHash": "cb9d92cfc7011c2dfdf2225ae44b7456d90be048a518aea0a60a12a8c12e5b37"
+      "stateHash": "61c113be16ac242209336eda2c2fca16b1b4a489388071b65e6ceb81440eaba0"
     },
     {
       "nextTick": 3,
-      "stateHash": "a855654337a37fe3ecd6985c04fbcfde17384cc93ed8880e0e0bd08b2add24a8"
+      "stateHash": "a4cdc2721ba7fb6c3924bc5988d62f1022ac6afd8ce9ae33431b0d3663fbdc16"
     },
     {
       "nextTick": 4,
-      "stateHash": "c46642a10b77b14824896ee7d260e07ba110544d31e01c5cc8cd170fe7815222"
+      "stateHash": "748afffb7da9e9d634ca85bfd21477ed206e41ffbde85f33bbcab014c45b0fd7"
     },
     {
       "nextTick": 5,
-      "stateHash": "8565e47f3a2a9d652956a9ca692b7cc3c3baaaf5f2dbb07b334acfd25ee7cace"
+      "stateHash": "b6ef123bc6c999ef77276b69dfe7e67db15b54a8b54c76395470437a44ed39a8"
     }
   ]
 }

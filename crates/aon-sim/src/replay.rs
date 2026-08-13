@@ -1,10 +1,12 @@
 use crate::{
-    BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength, DriverId,
-    EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId, GatePort, GatePortRef, GateType,
-    HashAlgorithmId, HashParseError, HostileCollider, JsonErrorCategory, LogicLevel, MobileId,
-    MobilePort, MobilePortRef, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
-    PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileHash, RemoveEntityCommand, RoutingDomain,
-    SemanticsVersion, SetExternalDriverCommand, Simulation, StateHash, Tick, WireEnd, WireId,
+    BindPortCommand, Command, CommandEncodingError, CommandEnvelope, ConstructionTarget,
+    DriveStrength, DriverId, EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId,
+    GatePort, GatePortRef, GateType, HashAlgorithmId, HashParseError, HostileCollider,
+    JsonErrorCategory, LogicLevel, MobileId, MobilePort, MobilePortRef,
+    PlaceConstructionSiteCommand, PlaceFixedSubstrateCommand, PlaceGateCommand,
+    PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileHash,
+    RemoveEntityCommand, RoutingDomain, SemanticsVersion, SetExternalDriverCommand, Simulation,
+    StateHash, Tick, WireEnd, WireId,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -16,9 +18,11 @@ pub const STATE_HASH_VERSION_V3: &str = "aon-state-v3";
 pub const STATE_HASH_VERSION_V4: &str = "aon-state-v4";
 pub const STATE_HASH_VERSION_V5: &str = "aon-state-v5";
 pub const STATE_HASH_VERSION_V6: &str = "aon-state-v6";
+pub const STATE_HASH_VERSION_V7: &str = "aon-state-v7";
 pub const WORLD_GENERATOR_VERSION_EMPTY_V1: &str = "aon-empty-v1";
 pub const WORLD_GENERATOR_VERSION_MAIN_CORE_V1: &str = "aon-main-core-v1";
 pub const WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1: &str = "aon-main-core-power-v1";
+pub const WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_ENEMY_V1: &str = "aon-main-core-power-enemy-v1";
 
 const SEED_BYTE_LENGTH: usize = 32;
 const SEED_HEX_LENGTH: usize = SEED_BYTE_LENGTH * 2;
@@ -55,8 +59,9 @@ pub enum StateHashVersion {
     V3,
     V4,
     V5,
-    #[default]
     V6,
+    #[default]
+    V7,
 }
 
 impl StateHashVersion {
@@ -66,6 +71,7 @@ impl StateHashVersion {
             Self::V4 => STATE_HASH_VERSION_V4,
             Self::V5 => STATE_HASH_VERSION_V5,
             Self::V6 => STATE_HASH_VERSION_V6,
+            Self::V7 => STATE_HASH_VERSION_V7,
         }
     }
 
@@ -75,15 +81,16 @@ impl StateHashVersion {
             STATE_HASH_VERSION_V4 => Ok(Self::V4),
             STATE_HASH_VERSION_V5 => Ok(Self::V5),
             STATE_HASH_VERSION_V6 => Ok(Self::V6),
+            STATE_HASH_VERSION_V7 => Ok(Self::V7),
             actual => Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V6,
+                expected: STATE_HASH_VERSION_V7,
                 actual: actual.to_owned(),
             }),
         }
     }
 
     pub(crate) const fn current() -> Self {
-        Self::V6
+        Self::V7
     }
 }
 
@@ -99,6 +106,7 @@ pub enum WorldGeneratorVersion {
     EmptyV1,
     MainCoreV1,
     MainCorePowerV1,
+    MainCorePowerEnemyV1,
 }
 
 impl WorldGeneratorVersion {
@@ -107,6 +115,7 @@ impl WorldGeneratorVersion {
             Self::EmptyV1 => WORLD_GENERATOR_VERSION_EMPTY_V1,
             Self::MainCoreV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_V1,
             Self::MainCorePowerV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1,
+            Self::MainCorePowerEnemyV1 => WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_ENEMY_V1,
         }
     }
 
@@ -115,8 +124,9 @@ impl WorldGeneratorVersion {
             WORLD_GENERATOR_VERSION_EMPTY_V1 => Ok(Self::EmptyV1),
             WORLD_GENERATOR_VERSION_MAIN_CORE_V1 => Ok(Self::MainCoreV1),
             WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_V1 => Ok(Self::MainCorePowerV1),
+            WORLD_GENERATOR_VERSION_MAIN_CORE_POWER_ENEMY_V1 => Ok(Self::MainCorePowerEnemyV1),
             actual => Err(ReplayError::UnsupportedWorldGeneratorVersion {
-                expected: "aon-empty-v1, aon-main-core-v1, or aon-main-core-power-v1",
+                expected: "aon-empty-v1, aon-main-core-v1, aon-main-core-power-v1, or aon-main-core-power-enemy-v1",
                 actual: actual.to_owned(),
             }),
         }
@@ -312,6 +322,22 @@ impl Replay {
             .next_tick
     }
 
+    /// Verifies that this Replay does not request execution beyond a terminal run boundary.
+    ///
+    /// Hosts call this only after preserving the fatal Tick's report, State Hash, and any
+    /// checkpoint at `terminal_next_tick`. Equality is a complete, valid Replay; only a later
+    /// requested final boundary is a mismatch.
+    pub fn validate_terminal_boundary(&self, terminal_next_tick: Tick) -> Result<(), ReplayError> {
+        let requested_next_tick = self.final_next_tick();
+        if requested_next_tick > terminal_next_tick {
+            return Err(ReplayError::RunEndedBeforeReplayBoundary {
+                terminal_next_tick,
+                requested_next_tick,
+            });
+        }
+        Ok(())
+    }
+
     pub fn validate_against(&self, simulation: &Simulation) -> Result<(), ReplayError> {
         self.validate_shape()?;
         let actual = simulation.replay_header();
@@ -408,6 +434,17 @@ impl Replay {
     }
 
     fn validate_shape(&self) -> Result<(), ReplayError> {
+        if self.header.format_version == ReplayFormatVersion::V1
+            && self
+                .commands
+                .iter()
+                .any(|envelope| matches!(envelope.command, Command::PlaceConstructionSite(_)))
+        {
+            return Err(ReplayError::UnsupportedCommandForFormat {
+                format_version: REPLAY_FORMAT_VERSION_V1,
+                command_tag: 8,
+            });
+        }
         if self.header.world_generator_version == WorldGeneratorVersion::EmptyV1
             && self.header.seed != Seed::ZERO
         {
@@ -422,6 +459,11 @@ impl Replay {
             && self.header.seed != Seed::ZERO
         {
             return Err(ReplayError::NonzeroMainCorePowerWorldSeed);
+        }
+        if self.header.world_generator_version == WorldGeneratorVersion::MainCorePowerEnemyV1
+            && self.header.seed != Seed::ZERO
+        {
+            return Err(ReplayError::NonzeroMainCorePowerEnemyWorldSeed);
         }
         if self.header.format_version == ReplayFormatVersion::V1 && !self.world_inputs.is_empty() {
             return Err(ReplayError::UnsupportedWorldInputs {
@@ -703,8 +745,17 @@ pub enum ReplayError {
     #[error("aon-main-core-power-v1 requires the all-zero Seed")]
     NonzeroMainCorePowerWorldSeed,
 
+    #[error("aon-main-core-power-enemy-v1 requires the all-zero Seed")]
+    NonzeroMainCorePowerEnemyWorldSeed,
+
     #[error("Replay v1 does not support WorldInput events (got {count})")]
     UnsupportedWorldInputs { count: usize },
+
+    #[error("Replay format v{format_version} does not support Command tag {command_tag}")]
+    UnsupportedCommandForFormat {
+        format_version: u32,
+        command_tag: u8,
+    },
 
     #[error("Replay v2 contains more than one WorldInput frame for Tick {target_tick}")]
     DuplicateWorldInputTick { target_tick: Tick },
@@ -773,6 +824,14 @@ pub enum ReplayError {
     CurrentStateMismatch {
         expected: StateHash,
         actual: StateHash,
+    },
+
+    #[error(
+        "run ended at nextTick {terminal_next_tick} before Replay boundary {requested_next_tick}"
+    )]
+    RunEndedBeforeReplayBoundary {
+        terminal_next_tick: Tick,
+        requested_next_tick: Tick,
     },
 
     #[error(
@@ -1188,6 +1247,9 @@ enum CommandWire {
         level: LogicLevelWire,
         strength: u64,
     },
+    PlaceConstructionSite {
+        target: ConstructionTargetWire,
+    },
 }
 
 impl From<CommandWire> for Command {
@@ -1255,6 +1317,11 @@ impl From<CommandWire> for Command {
                 level: level.into(),
                 strength: DriveStrength(strength),
             }),
+            CommandWire::PlaceConstructionSite { target } => {
+                Self::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                    target: target.into(),
+                })
+            }
         }
     }
 }
@@ -1304,6 +1371,125 @@ impl From<&Command> for CommandWire {
                 driver: command.driver.entity_id().0,
                 level: LogicLevelWire::from(command.level),
                 strength: command.strength.0,
+            },
+            Command::PlaceConstructionSite(command) => Self::PlaceConstructionSite {
+                target: ConstructionTargetWire::from(&command.target),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum ConstructionTargetWire {
+    Gate {
+        gate_type: GateTypeWire,
+        origin: PointWire,
+        routing_domain: RoutingDomainWire,
+    },
+    Wire {
+        routing_domain: RoutingDomainWire,
+        points: Vec<PointWire>,
+        endpoint_a: EndpointTargetWire,
+        endpoint_b: EndpointTargetWire,
+    },
+    Junction {
+        routing_domain: RoutingDomainWire,
+        position: PointWire,
+    },
+    FixedSubstrate {
+        origin: PointWire,
+        routing_area: AabbWire,
+        footprint: AabbWire,
+    },
+}
+
+impl From<ConstructionTargetWire> for ConstructionTarget {
+    fn from(value: ConstructionTargetWire) -> Self {
+        match value {
+            ConstructionTargetWire::Gate {
+                gate_type,
+                origin,
+                routing_domain,
+            } => Self::Gate {
+                gate_type: gate_type.into(),
+                origin: origin.into(),
+                routing_domain: routing_domain.into(),
+            },
+            ConstructionTargetWire::Wire {
+                routing_domain,
+                points,
+                endpoint_a,
+                endpoint_b,
+            } => Self::Wire {
+                routing_domain: routing_domain.into(),
+                points: points.into_iter().map(FixedVec2::from).collect(),
+                endpoint_a: endpoint_a.into(),
+                endpoint_b: endpoint_b.into(),
+            },
+            ConstructionTargetWire::Junction {
+                routing_domain,
+                position,
+            } => Self::Junction {
+                routing_domain: routing_domain.into(),
+                position: position.into(),
+            },
+            ConstructionTargetWire::FixedSubstrate {
+                origin,
+                routing_area,
+                footprint,
+            } => Self::FixedSubstrate {
+                origin: origin.into(),
+                routing_area: routing_area.into(),
+                footprint: footprint.into(),
+            },
+        }
+    }
+}
+
+impl From<&ConstructionTarget> for ConstructionTargetWire {
+    fn from(value: &ConstructionTarget) -> Self {
+        match value {
+            ConstructionTarget::Gate {
+                gate_type,
+                origin,
+                routing_domain,
+            } => Self::Gate {
+                gate_type: (*gate_type).into(),
+                origin: (*origin).into(),
+                routing_domain: (*routing_domain).into(),
+            },
+            ConstructionTarget::Wire {
+                routing_domain,
+                points,
+                endpoint_a,
+                endpoint_b,
+            } => Self::Wire {
+                routing_domain: (*routing_domain).into(),
+                points: points.iter().copied().map(PointWire::from).collect(),
+                endpoint_a: (*endpoint_a).into(),
+                endpoint_b: (*endpoint_b).into(),
+            },
+            ConstructionTarget::Junction {
+                routing_domain,
+                position,
+            } => Self::Junction {
+                routing_domain: (*routing_domain).into(),
+                position: (*position).into(),
+            },
+            ConstructionTarget::FixedSubstrate {
+                origin,
+                routing_area,
+                footprint,
+            } => Self::FixedSubstrate {
+                origin: (*origin).into(),
+                routing_area: (*routing_area).into(),
+                footprint: (*footprint).into(),
             },
         }
     }
@@ -1374,6 +1560,7 @@ enum MobilePortWire {
     Stop,
     Left,
     Right,
+    Build,
 }
 
 impl From<MobilePortWire> for MobilePort {
@@ -1382,6 +1569,7 @@ impl From<MobilePortWire> for MobilePort {
             MobilePortWire::Stop => Self::Stop,
             MobilePortWire::Left => Self::Left,
             MobilePortWire::Right => Self::Right,
+            MobilePortWire::Build => Self::Build,
         }
     }
 }
@@ -1392,6 +1580,7 @@ impl From<MobilePort> for MobilePortWire {
             MobilePort::Stop => Self::Stop,
             MobilePort::Left => Self::Left,
             MobilePort::Right => Self::Right,
+            MobilePort::Build => Self::Build,
         }
     }
 }
@@ -1729,6 +1918,34 @@ mod tests {
         assert_eq!(
             Seed::from_hex(&uppercase),
             Err(SeedParseError::InvalidCharacter { index: 0 })
+        );
+    }
+
+    #[test]
+    fn current_state_and_enemy_world_generator_identifiers_are_exact() {
+        assert_eq!(StateHashVersion::current(), StateHashVersion::V7);
+        assert_eq!(StateHashVersion::V7.as_str(), "aon-state-v7");
+        assert_eq!(
+            WorldGeneratorVersion::MainCorePowerEnemyV1.as_str(),
+            "aon-main-core-power-enemy-v1"
+        );
+        assert_eq!(
+            WorldGeneratorVersion::parse("aon-main-core-power-enemy-v1"),
+            Ok(WorldGeneratorVersion::MainCorePowerEnemyV1)
+        );
+    }
+
+    #[test]
+    fn enemy_world_generator_requires_the_zero_seed() {
+        let simulation = simulation();
+        let header = ReplayHeader {
+            world_generator_version: WorldGeneratorVersion::MainCorePowerEnemyV1,
+            seed: Seed::from_hex(&format!("{}1", "0".repeat(63))).expect("test Seed is canonical"),
+            ..simulation.replay_header()
+        };
+        assert_eq!(
+            Replay::new_v2(header, Vec::new(), Vec::new(), checkpoints(&simulation, 1)),
+            Err(ReplayError::NonzeroMainCorePowerEnemyWorldSeed)
         );
     }
 
@@ -2071,7 +2288,7 @@ mod tests {
                 "stateHashVersion",
                 serde_json::json!("aon-state-unsupported"),
                 ReplayError::UnsupportedStateHashVersion {
-                    expected: STATE_HASH_VERSION_V6,
+                    expected: STATE_HASH_VERSION_V7,
                     actual: "aon-state-unsupported".to_owned(),
                 },
             ),
@@ -2080,7 +2297,7 @@ mod tests {
                 "worldGeneratorVersion",
                 serde_json::json!("aon-generator-unsupported"),
                 ReplayError::UnsupportedWorldGeneratorVersion {
-                    expected: "aon-empty-v1, aon-main-core-v1, or aon-main-core-power-v1",
+                    expected: "aon-empty-v1, aon-main-core-v1, aon-main-core-power-v1, or aon-main-core-power-enemy-v1",
                     actual: "aon-generator-unsupported".to_owned(),
                 },
             ),
@@ -2154,12 +2371,13 @@ mod tests {
     }
 
     #[test]
-    fn retained_v3_v4_v5_state_versions_decode_and_reject_only_against_current_v6() {
+    fn retained_v3_through_v6_state_versions_decode_and_reject_only_against_current_v7() {
         let simulation = simulation();
         for (version_text, version) in [
             (STATE_HASH_VERSION_V3, StateHashVersion::V3),
             (STATE_HASH_VERSION_V4, StateHashVersion::V4),
             (STATE_HASH_VERSION_V5, StateHashVersion::V5),
+            (STATE_HASH_VERSION_V6, StateHashVersion::V6),
         ] {
             let mut retained = empty_replay_json(&simulation);
             retained["header"]["stateHashVersion"] = serde_json::json!(version_text);
@@ -2170,7 +2388,7 @@ mod tests {
             assert_eq!(
                 decoded.replay().validate_against(&simulation),
                 Err(ReplayError::UnsupportedStateHashVersion {
-                    expected: STATE_HASH_VERSION_V6,
+                    expected: STATE_HASH_VERSION_V7,
                     actual: version_text.to_owned(),
                 })
             );
@@ -2281,6 +2499,71 @@ mod tests {
                     }),
                 }),
             },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 9,
+                command: Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                    target: ConstructionTarget::Gate {
+                        gate_type: GateType::And,
+                        origin: FixedVec2::new(Fixed(-9), Fixed(9)),
+                        routing_domain: RoutingDomain::OpenWorld,
+                    },
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 10,
+                command: Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                    target: ConstructionTarget::Wire {
+                        routing_domain: RoutingDomain::FixedSubstrate(EntityId(4)),
+                        points: vec![
+                            FixedVec2::new(Fixed(-10), Fixed(0)),
+                            FixedVec2::new(Fixed(10), Fixed(0)),
+                        ],
+                        endpoint_a: EndpointTarget::Junction(crate::JunctionId(EntityId(2))),
+                        endpoint_b: EndpointTarget::Free,
+                    },
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 11,
+                command: Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                    target: ConstructionTarget::Junction {
+                        routing_domain: RoutingDomain::MobileSubstrate(EntityId(5)),
+                        position: FixedVec2::new(Fixed(11), Fixed(-11)),
+                    },
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 12,
+                command: Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                    target: ConstructionTarget::FixedSubstrate {
+                        origin: FixedVec2::new(Fixed(12), Fixed(-12)),
+                        routing_area: FixedAabb::new(
+                            FixedVec2::new(Fixed(-4), Fixed(-3)),
+                            FixedVec2::new(Fixed(4), Fixed(3)),
+                        ),
+                        footprint: FixedAabb::new(
+                            FixedVec2::new(Fixed(-2), Fixed(-1)),
+                            FixedVec2::new(Fixed(2), Fixed(1)),
+                        ),
+                    },
+                }),
+            },
+            CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 13,
+                command: Command::BindPort(BindPortCommand {
+                    wire: WireId(EntityId(u64::MAX - 2)),
+                    end: WireEnd::B,
+                    target: EndpointTarget::MobilePort(MobilePortRef {
+                        mobile: MobileId(EntityId(u64::MAX - 1)),
+                        port: MobilePort::Build,
+                    }),
+                }),
+            },
         ];
         let mut reversed = commands.clone();
         reversed.reverse();
@@ -2310,6 +2593,56 @@ mod tests {
             EndpointTarget::MobilePort(MobilePortRef {
                 mobile: MobileId(EntityId(u64::MAX)),
                 port: MobilePort::Right,
+            })
+        );
+        assert!(matches!(
+            decoded.replay().commands()[9].command,
+            Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                target: ConstructionTarget::Gate { .. }
+            })
+        ));
+        assert!(matches!(
+            decoded.replay().commands()[12].command,
+            Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                target: ConstructionTarget::FixedSubstrate { .. }
+            })
+        ));
+        assert_eq!(
+            decoded.replay().commands()[13].command,
+            Command::BindPort(BindPortCommand {
+                wire: WireId(EntityId(u64::MAX - 2)),
+                end: WireEnd::B,
+                target: EndpointTarget::MobilePort(MobilePortRef {
+                    mobile: MobileId(EntityId(u64::MAX - 1)),
+                    port: MobilePort::Build,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn replay_v1_rejects_append_only_construction_command_tag_before_execution() {
+        let simulation = simulation();
+        let command = CommandEnvelope {
+            target_tick: Tick(0),
+            ordinal: 0,
+            command: Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                target: ConstructionTarget::Junction {
+                    routing_domain: RoutingDomain::OpenWorld,
+                    position: FixedVec2::new(Fixed(0), Fixed(0)),
+                },
+            }),
+        };
+        let header = ReplayHeader {
+            format_version: ReplayFormatVersion::V1,
+            ..simulation.replay_header()
+        };
+
+        assert_eq!(
+            Replay::new(header, vec![command], checkpoints(&simulation, 1)),
+            Err(ReplayError::UnsupportedCommandForFormat {
+                format_version: REPLAY_FORMAT_VERSION_V1,
+                command_tag: 8,
             })
         );
     }
@@ -2972,9 +3305,9 @@ mod tests {
     }
 
     #[test]
-    fn replay_state_hash_version_tracks_canonical_v6() {
-        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 6);
-        assert_eq!(StateHashVersion::current(), StateHashVersion::V6);
-        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V6);
+    fn replay_state_hash_version_tracks_canonical_v7() {
+        assert_eq!(crate::canonical::STATE_ENCODER_VERSION, 7);
+        assert_eq!(StateHashVersion::current(), StateHashVersion::V7);
+        assert_eq!(StateHashVersion::current().as_str(), STATE_HASH_VERSION_V7);
     }
 }

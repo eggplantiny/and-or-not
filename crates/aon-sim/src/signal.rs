@@ -16,6 +16,7 @@ pub enum DriverRole {
     GateOutput,
     WireSenseA,
     WireSenseB,
+    ExternalMobileBuild,
 }
 
 impl DriverRole {
@@ -26,11 +27,15 @@ impl DriverRole {
             Self::GateOutput => 2,
             Self::WireSenseA => 3,
             Self::WireSenseB => 4,
+            Self::ExternalMobileBuild => 5,
         }
     }
 
     pub const fn is_external(self) -> bool {
-        matches!(self, Self::ExternalInputA | Self::ExternalInputB)
+        matches!(
+            self,
+            Self::ExternalInputA | Self::ExternalInputB | Self::ExternalMobileBuild
+        )
     }
 }
 
@@ -55,6 +60,7 @@ pub enum SinkRole {
     MobileStop,
     MobileLeft,
     MobileRight,
+    MobileBuild,
 }
 
 impl SinkRole {
@@ -65,6 +71,7 @@ impl SinkRole {
             Self::MobileStop => 2,
             Self::MobileLeft => 3,
             Self::MobileRight => 4,
+            Self::MobileBuild => 5,
         }
     }
 }
@@ -530,14 +537,42 @@ impl SignalWorld {
     }
 
     pub fn activate_mobile(&mut self, mobile: MobileId) -> Result<MobileControlPorts, SignalError> {
+        self.activate_mobile_internal(mobile, None)
+    }
+
+    /// Activates a Balance-v5 Mobile and appends the BUILD identities after retained ports.
+    pub fn activate_mobile_with_build(
+        &mut self,
+        mobile: MobileId,
+        tick: Tick,
+    ) -> Result<MobileControlPorts, SignalError> {
+        self.activate_mobile_internal(mobile, Some(tick))
+    }
+
+    fn activate_mobile_internal(
+        &mut self,
+        mobile: MobileId,
+        build_tick: Option<Tick>,
+    ) -> Result<MobileControlPorts, SignalError> {
         if self.mobiles.contains_key(&mobile) {
             return Err(SignalError::InvalidCanonicalState);
         }
         let owner = mobile.entity_id();
+        let stop = self.sinks.allocate(owner, SinkRole::MobileStop)?;
+        let left = self.sinks.allocate(owner, SinkRole::MobileLeft)?;
+        let right = self.sinks.allocate(owner, SinkRole::MobileRight)?;
+        let build = if let Some(tick) = build_tick {
+            self.drivers
+                .allocate(owner, DriverRole::ExternalMobileBuild, tick)?;
+            Some(self.sinks.allocate(owner, SinkRole::MobileBuild)?)
+        } else {
+            None
+        };
         let ports = MobileControlPorts {
-            stop: self.sinks.allocate(owner, SinkRole::MobileStop)?,
-            left: self.sinks.allocate(owner, SinkRole::MobileLeft)?,
-            right: self.sinks.allocate(owner, SinkRole::MobileRight)?,
+            stop,
+            left,
+            right,
+            build,
         };
         if self.mobiles.insert(mobile, ports).is_some() {
             return Err(SignalError::InvalidCanonicalState);
@@ -550,12 +585,32 @@ impl SignalWorld {
             .mobiles
             .remove(&mobile)
             .ok_or(SignalError::InvalidCanonicalState)?;
-        let removed_sinks = BTreeSet::from([ports.stop, ports.left, ports.right]);
+        let mut removed_sinks = BTreeSet::from([ports.stop, ports.left, ports.right]);
+        if let Some(build) = ports.build {
+            removed_sinks.insert(build);
+        }
         for sink in &removed_sinks {
             self.sinks.remove(*sink)?;
         }
-        self.slots
-            .retain(|(sink, _), _| !removed_sinks.contains(sink));
+        let build_driver = self
+            .drivers
+            .canonical_slots()
+            .find_map(|(_, record)| {
+                record.filter(|record| {
+                    record.owner == mobile.entity_id()
+                        && record.role == DriverRole::ExternalMobileBuild
+                })
+            })
+            .map(|record| record.id);
+        if ports.build.is_some() != build_driver.is_some() {
+            return Err(SignalError::InvalidCanonicalState);
+        }
+        if let Some(driver) = build_driver {
+            self.drivers.remove(driver)?;
+        }
+        self.slots.retain(|(sink, driver), _| {
+            !removed_sinks.contains(sink) && Some(*driver) != build_driver
+        });
         Ok(())
     }
 
@@ -1019,6 +1074,17 @@ impl SignalWorld {
         record.pending_level = None;
         record.pending_switch_energy = None;
         Ok(())
+    }
+
+    /// Consumes retained cancelled-switching Heat exactly once at the Phase-9 boundary.
+    pub(crate) fn take_cancelled_heat(&mut self, gate: GateId) -> Result<HeatEnergy, SignalError> {
+        let record = self
+            .gates
+            .get_mut(&gate)
+            .ok_or(SignalError::InvalidCanonicalState)?;
+        let heat = record.cancelled_switching_heat;
+        record.cancelled_switching_heat = HeatEnergy(0);
+        Ok(heat)
     }
 
     pub fn set_pending(
@@ -1647,5 +1713,34 @@ mod tests {
                 previous: first
             })
         );
+    }
+
+    #[test]
+    fn build_identity_is_v5_only_and_cancelled_heat_is_consumed_once() {
+        let mobile = MobileId(EntityId(41));
+        let mut retained = SignalWorld::new();
+        let retained_ports = retained.activate_mobile(mobile).unwrap();
+        assert_eq!(retained_ports.build, None);
+        assert_eq!(retained.allocated_driver_count(), 0);
+        assert_eq!(retained.allocated_sink_count(), 3);
+
+        let mut v5 = SignalWorld::new();
+        let ports = v5.activate_mobile_with_build(mobile, Tick(7)).unwrap();
+        assert!(ports.build.is_some());
+        assert_eq!(v5.allocated_driver_count(), 1);
+        assert_eq!(v5.allocated_sink_count(), 4);
+        let build_driver = v5
+            .canonical_driver_slots()
+            .find_map(|(_, record)| record)
+            .unwrap();
+        assert_eq!(build_driver.role, DriverRole::ExternalMobileBuild);
+        v5.remove_mobile(mobile).unwrap();
+        assert_eq!(v5.mobile_ports(mobile), None);
+
+        let gate = GateId(EntityId(9));
+        v5.activate_gate(gate, GateType::Not, Tick(0)).unwrap();
+        v5.add_cancelled_heat(gate, Energy(5)).unwrap();
+        assert_eq!(v5.take_cancelled_heat(gate), Ok(HeatEnergy(5)));
+        assert_eq!(v5.take_cancelled_heat(gate), Ok(HeatEnergy(0)));
     }
 }

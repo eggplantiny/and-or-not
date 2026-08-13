@@ -1,3 +1,4 @@
+use crate::ConstructionTarget;
 use crate::geometry::FixedVec2;
 use crate::identity::{DriverId, WireId};
 use crate::numeric::{DriveStrength, EntityId, Tick};
@@ -43,6 +44,7 @@ pub enum Command {
     RemoveEntity(RemoveEntityCommand),
     BindPort(BindPortCommand),
     SetExternalDriver(SetExternalDriverCommand),
+    PlaceConstructionSite(PlaceConstructionSiteCommand),
 }
 
 impl Command {
@@ -85,6 +87,9 @@ impl Command {
                 encode_logic_level(command.level, write);
                 write_u64(command.strength.0, write);
             }
+            Self::PlaceConstructionSite(command) => {
+                encode_construction_target(&command.target, write)?;
+            }
         }
         Ok(())
     }
@@ -99,6 +104,7 @@ impl Command {
             Self::RemoveEntity(_) => 5,
             Self::BindPort(_) => 6,
             Self::SetExternalDriver(_) => 7,
+            Self::PlaceConstructionSite(_) => 8,
         }
     }
 }
@@ -157,6 +163,11 @@ pub struct SetExternalDriverCommand {
     pub strength: DriveStrength,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaceConstructionSiteCommand {
+    pub target: ConstructionTarget,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogicLevel {
     Low,
@@ -202,6 +213,7 @@ pub enum CommandRejectionReason {
     RemovedDriver,
     InvalidDriverKind,
     TrackOccupied,
+    ConstructionDependencyInUse,
 }
 
 impl CommandRejectionReason {
@@ -229,6 +241,7 @@ impl CommandRejectionReason {
             Self::RemovedDriver => 19,
             Self::InvalidDriverKind => 20,
             Self::TrackOccupied => 21,
+            Self::ConstructionDependencyInUse => 22,
         }
     }
 }
@@ -247,6 +260,55 @@ fn encode_points(
     write_u32(count, write);
     for &point in points {
         encode_point(point, write);
+    }
+    Ok(())
+}
+
+pub(crate) fn encode_construction_target(
+    target: &ConstructionTarget,
+    write: &mut dyn FnMut(&[u8]),
+) -> Result<(), CommandEncodingError> {
+    match target {
+        ConstructionTarget::Gate {
+            gate_type,
+            origin,
+            routing_domain,
+        } => {
+            write_u8(0, write);
+            encode_gate_type(*gate_type, write);
+            encode_point(*origin, write);
+            encode_routing_domain(*routing_domain, write);
+        }
+        ConstructionTarget::Wire {
+            routing_domain,
+            points,
+            endpoint_a,
+            endpoint_b,
+        } => {
+            write_u8(1, write);
+            encode_routing_domain(*routing_domain, write);
+            encode_points(points, write)?;
+            encode_endpoint_target(*endpoint_a, write);
+            encode_endpoint_target(*endpoint_b, write);
+        }
+        ConstructionTarget::Junction {
+            routing_domain,
+            position,
+        } => {
+            write_u8(2, write);
+            encode_routing_domain(*routing_domain, write);
+            encode_point(*position, write);
+        }
+        ConstructionTarget::FixedSubstrate {
+            origin,
+            routing_area,
+            footprint,
+        } => {
+            write_u8(3, write);
+            encode_point(*origin, write);
+            encode_aabb(*routing_area, write);
+            encode_aabb(*footprint, write);
+        }
     }
     Ok(())
 }
@@ -528,10 +590,16 @@ mod tests {
                 level: LogicLevel::X,
                 strength: DriveStrength(2),
             }),
+            Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                target: ConstructionTarget::Junction {
+                    routing_domain: RoutingDomain::OpenWorld,
+                    position: point(0, 0),
+                },
+            }),
         ];
 
         let tags: Vec<_> = commands.iter().map(Command::canonical_tag).collect();
-        assert_eq!(tags, (0_u8..=7).collect::<Vec<_>>());
+        assert_eq!(tags, (0_u8..=8).collect::<Vec<_>>());
     }
 
     #[test]
@@ -559,13 +627,14 @@ mod tests {
             CommandRejectionReason::RemovedDriver,
             CommandRejectionReason::InvalidDriverKind,
             CommandRejectionReason::TrackOccupied,
+            CommandRejectionReason::ConstructionDependencyInUse,
         ];
 
         let tags: Vec<_> = reasons
             .into_iter()
             .map(CommandRejectionReason::canonical_tag)
             .collect();
-        assert_eq!(tags, (0_u8..=21).collect::<Vec<_>>());
+        assert_eq!(tags, (0_u8..=22).collect::<Vec<_>>());
     }
 
     #[test]

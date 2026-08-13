@@ -1,5 +1,14 @@
 use crate::capacity::{account_network_with_support, analyzer_snapshot};
+use crate::construction::{
+    ConstructionSiteStore, ConstructionWorkContribution, apply_construction_work,
+    construction_nominal_demand_for_work, grant_construction_work,
+};
+use crate::contact::{
+    ContactCandidate, LiveWireInput, allocate_contact_energy, calculate_live_wire_demand,
+    swept_circle_intersects_point, swept_circle_intersects_wire_body,
+};
 use crate::contract::{ContractValidationError, SimulationContract};
+use crate::enemy::{EnemyState, EnemyStore};
 use crate::event::{
     DRIVER_TRANSITION_KIND_ORDER, DriverTransition, DriverTransitionCause, EventCalendar,
     EventCalendarError, EventPayloadAllocator, SIGNAL_ARRIVAL_KIND_ORDER, SignalArrival,
@@ -40,14 +49,19 @@ use crate::signal_topology::{
 };
 use crate::snapshot::{RenderSnapshotSource, SignalProbeSample, SignalProbeTarget, sample_signal};
 use crate::structural::{
-    PowerSourceAnchorView, StructuralCommandContext, StructuralError, StructuralPhaseReport,
-    StructuralWorld,
+    PowerSourceAnchorView, StructuralCommandContext, StructuralDestructionKind, StructuralError,
+    StructuralPhaseReport, StructuralWorld,
+};
+use crate::thermal_damage::{
+    DamageSnapshot, ElectricalExposure, HeatContributionInput, HeatContributionKey,
+    InteractionHeatKind, ThermalObjectKind, integrate_heat, resolve_damage, thermal_capacity_for,
 };
 use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
-    Energy, Fixed, FixedVec2, GateId, GateType, InitialWorld, LogicLevel, MobileId,
-    MobileSubstrateIndex, RenderSnapshot, Revision, ScenarioManifest, SimulationError, SinkId,
-    StageFeatureSet, StateHash, Tick, WireEnd, WireId, canonical,
+    Energy, EntityId, Fixed, FixedVec2, GateId, GateType, HeatEnergy, InitialWorld, Integrity,
+    LogicLevel, MobileId, MobileSubstrateIndex, RenderSnapshot, Revision, ScenarioManifest,
+    SimulationError, SinkId, StageFeatureSet, StateHash, Tick, WireEnd, WireId, canonical,
+    polyline_length,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -123,6 +137,99 @@ pub struct SignalArrivalObservation {
     pub kind: SignalArrivalKind,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RunStatus {
+    #[default]
+    Running,
+    Ended {
+        completed_tick: Tick,
+        cause: RunEndCause,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RunEndCause {
+    MainCoreDestroyed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConstructionWorkReport {
+    pub site: crate::ConstructionSiteId,
+    pub builder: MobileId,
+    pub requested: Energy,
+    pub nominal_power: Energy,
+    pub granted_work: Energy,
+    pub applied_work: Energy,
+    pub completed_work: Energy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContactEnergyReport {
+    pub wire: WireId,
+    pub target: crate::EnemyId,
+    pub weight: u128,
+    pub absorbed: Energy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InteractionHeatReport {
+    pub owner: EntityId,
+    pub kind: crate::InteractionHeatKind,
+    pub demand: Option<DemandId>,
+    pub energy: HeatEnergy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageReport {
+    pub target: EntityId,
+    pub electrical_exposure: Energy,
+    pub electrical_damage: Integrity,
+    pub thermal_damage: Integrity,
+    pub integrity_before: Integrity,
+    pub integrity_after: Integrity,
+    pub pending_destruction: bool,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DestructionKind {
+    Damage = 0,
+    TrackSupportLost = 1,
+    SubstrateSupportLost = 2,
+    ConstructionDependencyLost = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DestructionReport {
+    pub target: EntityId,
+    pub kind: DestructionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DamageAnalyzerRecord {
+    pub target: EntityId,
+    pub kind: ThermalObjectKind,
+    pub integrity: Integrity,
+    pub heat_energy: HeatEnergy,
+    pub temperature: Fixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArmedWireAnalyzerRecord {
+    pub wire: WireId,
+    pub nominal_live_energy: Energy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstructionContactDamageAnalyzerSnapshot {
+    pub next_tick: Tick,
+    pub construction_sites: Vec<crate::ConstructionSite>,
+    pub enemies: Vec<EnemyState>,
+    pub damage: Vec<DamageAnalyzerRecord>,
+    pub armed_wires: Vec<ArmedWireAnalyzerRecord>,
+    pub run_status: RunStatus,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StepReport {
     pub completed_tick: Tick,
@@ -138,6 +245,12 @@ pub struct StepReport {
     pub mobile_movements: Vec<MobileMovementObservation>,
     pub network_accounting: Option<crate::NetworkAccounting>,
     pub power: Option<PowerStepReport>,
+    pub construction_work: Vec<ConstructionWorkReport>,
+    pub contacts: Vec<ContactEnergyReport>,
+    pub interaction_heat: Vec<InteractionHeatReport>,
+    pub damage: Vec<DamageReport>,
+    pub destructions: Vec<DestructionReport>,
+    pub run_status: RunStatus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +262,16 @@ struct MobileIntent {
     controls: MobileControlSample,
     granted_budget: Fixed,
     power_attachment: Option<(WireId, Fixed)>,
+    construction: Option<ConstructionIntent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConstructionIntent {
+    site: crate::ConstructionSiteId,
+    builder: MobileId,
+    requested: Energy,
+    nominal_power: Energy,
+    granted_work: Energy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,14 +283,56 @@ struct MobilePhase1Snapshot {
     power_attachment: Option<(WireId, Fixed)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EnemyPhase1Snapshot {
+    enemy: crate::EnemyId,
+    position: FixedVec2,
+    velocity_per_tick: FixedVec2,
+    radius: Fixed,
+    integrity: Integrity,
+    heat_energy: HeatEnergy,
+    temperature: Fixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CoreDamagePhase1Snapshot {
+    target: EntityId,
+    integrity: Integrity,
+    temperature: Fixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StagedEnemyTrajectory {
+    enemy: crate::EnemyId,
+    start: FixedVec2,
+    end: FixedVec2,
+    radius: Fixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LiveWireIntent {
+    wire: WireId,
+    nominal: Energy,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Phase3Output {
+    mobile_intents: Vec<MobileIntent>,
+    live_wires: Vec<LiveWireIntent>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Phase1Snapshot {
     mobiles: Vec<MobilePhase1Snapshot>,
     wire_sensing: Vec<WireSensingOutput>,
+    enemies: Vec<EnemyPhase1Snapshot>,
+    core: Option<CoreDamagePhase1Snapshot>,
+    structural_damage: Vec<DamageSnapshot>,
 }
 
 struct Phase0Output {
     structural_report: StructuralPhaseReport,
+    destructions: Vec<DestructionReport>,
     topology: CompiledSignalTopology,
     track_graph: TrackGraph,
     signal_counters: SignalStepCounters,
@@ -188,6 +353,21 @@ struct Phase5Output {
     private_heat: Vec<PowerHeatReport>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Phase8Output {
+    contacts: Vec<ContactEnergyReport>,
+    interaction_heat: Vec<InteractionHeatReport>,
+    exposures: Vec<ElectricalExposure>,
+    construction: Vec<ConstructionIntent>,
+    construction_contributions: Vec<ConstructionWorkContribution>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Phase10Output {
+    damage: Vec<DamageReport>,
+    core_destroyed: bool,
+}
+
 struct Phase6Inputs<'a> {
     topology: &'a CompiledSignalTopology,
     tick: Tick,
@@ -197,9 +377,31 @@ struct Phase6Inputs<'a> {
     power_report: Option<&'a mut PowerStepReport>,
 }
 
+struct Phase8Inputs<'a> {
+    staged_mobiles: &'a [StagedMobileMovement],
+    mobile_intents: &'a [MobileIntent],
+    staged_enemies: &'a [StagedEnemyTrajectory],
+    live_wires: &'a [LiveWireIntent],
+    track_graph: &'a TrackGraph,
+    physical: &'a PhysicalScaleProfile,
+    balance: &'a BalanceProfile,
+}
+
+struct Phase11Inputs<'a> {
+    completed_tick: Tick,
+    next_tick: Tick,
+    staged_mobiles: Vec<StagedMobileMovement>,
+    staged_enemies: Vec<StagedEnemyTrajectory>,
+    construction: &'a [ConstructionIntent],
+    construction_contributions: &'a [ConstructionWorkContribution],
+    core_destroyed: bool,
+}
+
 struct Phase11Output {
     state_hash: StateHash,
     mobile_movements: Vec<MobileMovementObservation>,
+    run_status: RunStatus,
+    construction_work: Vec<ConstructionWorkReport>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -275,6 +477,10 @@ struct CanonicalWorld {
     contract: SimulationContract,
     main_core: Option<MainCoreState>,
     power_sources: PowerSourceStore,
+    enemies: EnemyStore,
+    construction_sites: ConstructionSiteStore,
+    pending_destructions: BTreeSet<EntityId>,
+    run_status: RunStatus,
     structural: StructuralWorld,
     signal: SignalWorld,
     event_payloads: EventPayloadAllocator,
@@ -291,6 +497,10 @@ impl CanonicalWorld {
             topology_revision: self.topology_revision,
             main_core: self.main_core.as_ref(),
             power_sources: &self.power_sources,
+            enemies: &self.enemies,
+            construction_sites: &self.construction_sites,
+            pending_destructions: &self.pending_destructions,
+            run_status: self.run_status,
             structural: &self.structural,
             signal: &self.signal,
             event_payloads: &self.event_payloads,
@@ -310,11 +520,96 @@ pub struct Simulation {
     world_generator_version: WorldGeneratorVersion,
 }
 
+fn validate_s1m4_initial_world_precedence(
+    initial_world: &InitialWorld,
+    physical_scale: &PhysicalScaleProfile,
+) -> Result<(), SimulationError> {
+    let InitialWorld::MainCorePowerEnemyV1 {
+        main_core_position,
+        main_core_integrity,
+        power_sources,
+        enemies,
+        ..
+    } = initial_world
+    else {
+        return Ok(());
+    };
+
+    if main_core_integrity.0 == 0 {
+        return Err(SimulationError::InvalidMainCoreIntegrity);
+    }
+
+    if power_sources
+        .iter()
+        .any(|source| source.generation_per_tick().0 == 0)
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let source_positions = power_sources
+        .iter()
+        .map(|source| (source.position().x.0, source.position().y.0))
+        .collect::<BTreeSet<_>>();
+    if source_positions.len() != power_sources.len() {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
+    if enemies.is_empty() {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    for enemy in enemies {
+        if enemy.radius().0 <= 0 || enemy.integrity().0 == 0 {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        enemy.checked_next_position()?;
+    }
+    let enemy_keys = enemies
+        .iter()
+        .map(crate::artifact::enemy_semantic_key)
+        .collect::<BTreeSet<_>>();
+    if enemy_keys.len() != enemies.len() {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
+    // Profile validation owns a non-positive quantum. With a usable quantum, however, Scenario-v4
+    // World alignment is an earlier package fault than any later Profile body/hash fault.
+    let quantum = physical_scale.wire_geometry_quantum;
+    if quantum.0 <= 0 {
+        return Ok(());
+    }
+    if crate::validate_quantized(*main_core_position, quantum).is_err() {
+        return Err(SimulationError::InvalidMainCoreGeometryQuantum);
+    }
+    if power_sources
+        .iter()
+        .any(|source| crate::validate_quantized(source.position(), quantum).is_err())
+    {
+        return Err(SimulationError::InvalidPowerSourceGeometryQuantum);
+    }
+    if enemies.iter().any(|enemy| {
+        let Ok(next_position) = enemy.checked_next_position() else {
+            return true;
+        };
+        crate::validate_quantized(enemy.position(), quantum).is_err()
+            || crate::validate_quantized(enemy.velocity_per_tick(), quantum).is_err()
+            || enemy.radius().0.rem_euclid(quantum.0) != 0
+            || crate::validate_quantized(next_position, quantum).is_err()
+    }) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+
+    Ok(())
+}
+
 impl Simulation {
     pub fn new(package: SimulationPackage) -> Result<Self, SimulationError> {
         if let Some(feature) = package.required_features.first_unsupported() {
             return Err(SimulationError::UnsupportedStageFeature { feature });
         }
+
+        validate_s1m4_initial_world_precedence(
+            &package.initial_world,
+            &package.profiles.physical_scale,
+        )?;
 
         package.profiles.validate().map_err(SimulationError::from)?;
         package
@@ -322,10 +617,16 @@ impl Simulation {
             .validate_profiles(&package.profiles)
             .map_err(SimulationError::from)?;
 
-        let (structural, main_core, power_sources, world_generator_version) = match package
+        let (structural, main_core, power_sources, enemies, world_generator_version) = match package
             .initial_world
         {
             InitialWorld::Empty => {
+                if package.required_features.construction
+                    || package.required_features.contact
+                    || package.required_features.damage
+                {
+                    return Err(SimulationError::PowerFeaturesRequireMainCorePowerWorld);
+                }
                 if package.required_features.capacity {
                     return Err(SimulationError::CapacityRequiresMainCore);
                 }
@@ -339,6 +640,7 @@ impl Simulation {
                     StructuralWorld::new(),
                     None,
                     PowerSourceStore::default(),
+                    EnemyStore::default(),
                     WorldGeneratorVersion::EmptyV1,
                 )
             }
@@ -347,6 +649,12 @@ impl Simulation {
                 integrity,
                 heat_energy,
             } => {
+                if package.required_features.construction
+                    || package.required_features.contact
+                    || package.required_features.damage
+                {
+                    return Err(SimulationError::PowerFeaturesRequireMainCorePowerWorld);
+                }
                 if !package.required_features.capacity {
                     return Err(SimulationError::MainCoreRequiresCapacity);
                 }
@@ -385,6 +693,7 @@ impl Simulation {
                         heat_energy,
                     )),
                     PowerSourceStore::default(),
+                    EnemyStore::default(),
                     WorldGeneratorVersion::MainCoreV1,
                 )
             }
@@ -394,6 +703,12 @@ impl Simulation {
                 main_core_heat_energy,
                 power_sources,
             } => {
+                if package.required_features.construction
+                    || package.required_features.contact
+                    || package.required_features.damage
+                {
+                    return Err(SimulationError::PowerFeaturesRequireMainCorePowerWorld);
+                }
                 if !package.required_features.capacity
                     || !package.required_features.sensing
                     || !package.required_features.power
@@ -448,7 +763,160 @@ impl Simulation {
                         main_core_heat_energy,
                     )),
                     power_sources,
+                    EnemyStore::default(),
                     WorldGeneratorVersion::MainCorePowerV1,
+                )
+            }
+            InitialWorld::MainCorePowerEnemyV1 {
+                main_core_position,
+                main_core_integrity,
+                main_core_heat_energy,
+                mut power_sources,
+                mut enemies,
+            } => {
+                if !package.required_features.signal
+                    || !package.required_features.mobility
+                    || !package.required_features.capacity
+                    || !package.required_features.sensing
+                    || !package.required_features.power
+                    || !package.required_features.construction
+                    || !package.required_features.contact
+                    || !package.required_features.damage
+                {
+                    return Err(SimulationError::MainCorePowerRequiresFeatures);
+                }
+                let capacity_profile = package
+                    .profiles
+                    .balance
+                    .capacity_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                package
+                    .profiles
+                    .balance
+                    .power_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                package
+                    .profiles
+                    .balance
+                    .construction_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                let contact_damage_probe = package
+                    .profiles
+                    .balance
+                    .contact_damage_probe
+                    .ok_or(SimulationError::MainCorePowerRequiresProfiles)?;
+                if main_core_integrity.0 == 0 {
+                    return Err(SimulationError::InvalidMainCoreIntegrity);
+                }
+                power_sources.sort_unstable_by_key(crate::artifact::power_source_semantic_key);
+                if power_sources
+                    .iter()
+                    .any(|source| source.generation_per_tick().0 == 0)
+                    || power_sources
+                        .windows(2)
+                        .any(|pair| pair[0].position() == pair[1].position())
+                {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                if enemies.is_empty() {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                for enemy in &enemies {
+                    if enemy.radius().0 <= 0 || enemy.integrity().0 == 0 {
+                        return Err(SimulationError::InvalidCanonicalState);
+                    }
+                    enemy.checked_next_position()?;
+                }
+                enemies.sort_unstable_by_key(crate::artifact::enemy_semantic_key);
+                if enemies.windows(2).any(|pair| pair[0] == pair[1]) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                let quantum = package.profiles.physical_scale.wire_geometry_quantum;
+                if crate::validate_quantized(main_core_position, quantum).is_err() {
+                    return Err(SimulationError::InvalidMainCoreGeometryQuantum);
+                }
+                if power_sources
+                    .iter()
+                    .any(|source| crate::validate_quantized(source.position(), quantum).is_err())
+                {
+                    return Err(SimulationError::InvalidPowerSourceGeometryQuantum);
+                }
+                if enemies.iter().any(|enemy| {
+                    let Ok(next_position) = enemy.checked_next_position() else {
+                        return true;
+                    };
+                    crate::validate_quantized(enemy.position(), quantum).is_err()
+                        || crate::validate_quantized(enemy.velocity_per_tick(), quantum).is_err()
+                        || enemy.radius().0.rem_euclid(quantum.0) != 0
+                        || crate::validate_quantized(next_position, quantum).is_err()
+                }) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                let expected_core_integrity =
+                    Integrity(contact_damage_probe.initial_integrity.main_core);
+                let expected_enemy_integrity =
+                    Integrity(contact_damage_probe.initial_integrity.enemy);
+                if main_core_integrity != expected_core_integrity {
+                    return Err(SimulationError::InitialIntegrityProfileMismatch {
+                        entity_kind: "mainCore",
+                        expected: expected_core_integrity,
+                        actual: main_core_integrity,
+                    });
+                }
+                if let Some(enemy) = enemies
+                    .iter()
+                    .find(|enemy| enemy.integrity() != expected_enemy_integrity)
+                {
+                    return Err(SimulationError::InitialIntegrityProfileMismatch {
+                        entity_kind: "enemy",
+                        expected: expected_enemy_integrity,
+                        actual: enemy.integrity(),
+                    });
+                }
+                let capacity =
+                    crate::Capacity::from_whole_ncu(capacity_profile.main_core_capacity)?;
+                let (structural, core_id, source_ids, enemy_ids) =
+                    StructuralWorld::new_with_main_core_power_source_and_enemy_registry_entries(
+                        power_sources.len(),
+                        enemies.len(),
+                    )?;
+                let source_states = source_ids
+                    .into_iter()
+                    .zip(power_sources)
+                    .map(|(id, source)| {
+                        PowerSourceState::new(id, source.position(), source.generation_per_tick())
+                    })
+                    .collect();
+                let power_sources = PowerSourceStore::new(source_states)
+                    .map_err(|_| SimulationError::InvalidCanonicalState)?;
+                let enemy_states = enemy_ids
+                    .into_iter()
+                    .zip(enemies)
+                    .map(|(id, enemy)| {
+                        EnemyState::new(
+                            id,
+                            enemy.position(),
+                            enemy.velocity_per_tick(),
+                            enemy.radius(),
+                            enemy.integrity(),
+                            enemy.heat_energy(),
+                        )
+                    })
+                    .collect();
+                let enemies = EnemyStore::new(enemy_states)
+                    .map_err(|_| SimulationError::InvalidCanonicalState)?;
+                (
+                    structural,
+                    Some(MainCoreState::new(
+                        core_id,
+                        main_core_position,
+                        capacity,
+                        main_core_integrity,
+                        main_core_heat_energy,
+                    )),
+                    power_sources,
+                    enemies,
+                    WorldGeneratorVersion::MainCorePowerEnemyV1,
                 )
             }
         };
@@ -459,6 +927,10 @@ impl Simulation {
             contract: package.contract,
             main_core,
             power_sources,
+            enemies,
+            construction_sites: ConstructionSiteStore::default(),
+            pending_destructions: BTreeSet::new(),
+            run_status: RunStatus::Running,
             structural,
             signal: SignalWorld::new(),
             event_payloads: EventPayloadAllocator::new(),
@@ -487,6 +959,9 @@ impl Simulation {
         commands: &[CommandEnvelope],
         world_inputs: &[WorldInputEvent],
     ) -> Result<StepReport, SimulationError> {
+        if matches!(self.canonical.run_status, RunStatus::Ended { .. }) {
+            return Err(SimulationError::RunEnded);
+        }
         let hostiles = validate_world_inputs(world_inputs, self.canonical.next_tick)?;
         let mut candidate = self.canonical.clone();
         let completed_tick = candidate.next_tick;
@@ -510,6 +985,7 @@ impl Simulation {
             self.required_features.sensing,
             self.profiles.balance.sense_radius,
             self.profiles.physical_scale.world_routing_pitch,
+            self.profiles.balance.contact_damage_probe.as_ref(),
         )?;
 
         phases.enter(TickPhase::DriverAndSignalArrival)?;
@@ -522,13 +998,20 @@ impl Simulation {
         )?;
 
         phases.enter(TickPhase::IntentEvaluation)?;
-        let mut mobile_intents = run_phase3(&mut candidate, &phase1)?;
+        let mut phase3 = run_phase3(
+            &mut candidate,
+            &phase1,
+            &phase0.track_graph,
+            &self.profiles.physical_scale,
+            &self.profiles.balance,
+        )?;
 
         phases.enter(TickPhase::GlobalAccountingAndNominalDemand)?;
         let phase4 = run_phase4_global_accounting_and_nominal_demand(
             &candidate,
             &phase0.topology,
-            &mobile_intents,
+            &phase3.mobile_intents,
+            &phase3.live_wires,
             &self.profiles.balance,
             self.profiles.physical_scale.world_routing_pitch,
         )?;
@@ -543,7 +1026,7 @@ impl Simulation {
         phases.enter(TickPhase::SchedulingAndGrantedWork)?;
         run_phase6(
             &mut candidate,
-            &mut mobile_intents,
+            &mut phase3.mobile_intents,
             Phase6Inputs {
                 topology: &phase0.topology,
                 tick: completed_tick,
@@ -555,20 +1038,61 @@ impl Simulation {
         )?;
 
         phases.enter(TickPhase::Trajectory)?;
-        let staged_mobiles =
-            run_phase7(&phase0.track_graph, &mobile_intents, phase5.report.as_ref())?;
+        let (staged_mobiles, staged_enemies) = run_phase7(
+            &phase0.track_graph,
+            &phase3.mobile_intents,
+            &phase1.enemies,
+            phase5.report.as_ref(),
+        )?;
 
         phases.enter(TickPhase::Interaction)?;
-        run_phase8_interaction(&staged_mobiles, &mut phase5)?;
+        let phase8 = run_phase8_interaction(
+            &candidate,
+            &mut phase5,
+            Phase8Inputs {
+                staged_mobiles: &staged_mobiles,
+                mobile_intents: &phase3.mobile_intents,
+                staged_enemies: &staged_enemies,
+                live_wires: &phase3.live_wires,
+                track_graph: &phase0.track_graph,
+                physical: &self.profiles.physical_scale,
+                balance: &self.profiles.balance,
+            },
+        )?;
 
         phases.enter(TickPhase::ThermalIntegration)?;
-        run_phase9_thermal_integration();
+        run_phase9_thermal_integration(
+            &mut candidate,
+            &phase8.interaction_heat,
+            phase5
+                .report
+                .as_ref()
+                .map(|report| report.heat_contributions.as_slice())
+                .unwrap_or(&[]),
+            &self.profiles.balance,
+        )?;
 
         phases.enter(TickPhase::DamageResolution)?;
-        run_phase10_damage_resolution();
+        let phase10 = run_phase10_damage_resolution(
+            &mut candidate,
+            &phase1,
+            &phase8.exposures,
+            &self.profiles.balance,
+        )?;
 
         phases.enter(TickPhase::ProgressCommit)?;
-        let phase11 = run_phase11_progress_commit(&mut candidate, next_tick, staged_mobiles)?;
+        let phase11 = run_phase11_progress_commit(
+            &mut candidate,
+            Phase11Inputs {
+                completed_tick,
+                next_tick,
+                staged_mobiles,
+                staged_enemies,
+                construction: &phase8.construction,
+                construction_contributions: &phase8.construction_contributions,
+                core_destroyed: phase10.core_destroyed,
+            },
+        )?;
         phases.finish()?;
 
         self.canonical = candidate;
@@ -587,6 +1111,12 @@ impl Simulation {
             mobile_movements: phase11.mobile_movements,
             network_accounting: phase4.network_accounting,
             power: phase5.report,
+            construction_work: phase11.construction_work,
+            contacts: phase8.contacts,
+            interaction_heat: phase8.interaction_heat,
+            damage: phase10.damage,
+            destructions: phase0.destructions,
+            run_status: phase11.run_status,
         })
     }
 
@@ -598,6 +1128,9 @@ impl Simulation {
             contract: self.canonical.contract,
             state_hash: self.state_hash(),
             main_core: self.canonical.main_core.as_ref(),
+            enemies: &self.canonical.enemies,
+            construction_sites: &self.canonical.construction_sites,
+            run_status: self.canonical.run_status,
             structural: &self.canonical.structural,
             signal: &self.canonical.signal,
             logic_threshold: self.profiles.balance.logic_threshold,
@@ -623,6 +1156,18 @@ impl Simulation {
 
     pub const fn topology_revision(&self) -> Revision {
         self.canonical.topology_revision
+    }
+
+    pub const fn run_status(&self) -> RunStatus {
+        self.canonical.run_status
+    }
+
+    pub const fn construction_sites(&self) -> &ConstructionSiteStore {
+        &self.canonical.construction_sites
+    }
+
+    pub const fn enemies(&self) -> &EnemyStore {
+        &self.canonical.enemies
     }
 
     pub const fn contract(&self) -> &SimulationContract {
@@ -746,6 +1291,103 @@ impl Simulation {
         }))
     }
 
+    pub fn construction_contact_damage_analyzer_snapshot(
+        &self,
+    ) -> Result<Option<ConstructionContactDamageAnalyzerSnapshot>, SimulationError> {
+        let Some(probe) = self.profiles.balance.contact_damage_probe.as_ref() else {
+            return Ok(None);
+        };
+        let mut damage = Vec::new();
+        if let Some(core) = self.canonical.main_core {
+            damage.push(DamageAnalyzerRecord {
+                target: core.id().entity_id(),
+                kind: ThermalObjectKind::MainCore,
+                integrity: core.integrity(),
+                heat_energy: core.heat_energy(),
+                temperature: phase1_temperature(
+                    core.heat_energy(),
+                    thermal_capacity_for(ThermalObjectKind::MainCore, probe),
+                )?,
+            });
+        }
+        damage.extend(
+            self.canonical
+                .structural
+                .damageable_structural_states()
+                .map(|(target, kind, state)| {
+                    Ok(DamageAnalyzerRecord {
+                        target,
+                        kind,
+                        integrity: state.integrity,
+                        heat_energy: state.heat_energy,
+                        temperature: phase1_temperature(
+                            state.heat_energy,
+                            thermal_capacity_for(kind, probe),
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, SimulationError>>()?,
+        );
+        damage.extend(
+            self.canonical
+                .enemies
+                .iter()
+                .map(|enemy| {
+                    Ok(DamageAnalyzerRecord {
+                        target: enemy.id().entity_id(),
+                        kind: ThermalObjectKind::Enemy,
+                        integrity: enemy.integrity(),
+                        heat_energy: enemy.heat_energy(),
+                        temperature: phase1_temperature(
+                            enemy.heat_energy(),
+                            thermal_capacity_for(ThermalObjectKind::Enemy, probe),
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, SimulationError>>()?,
+        );
+        damage.sort_unstable_by_key(|row| row.target);
+
+        let mut armed_wires = self
+            .canonical
+            .structural
+            .wires()
+            .iter_alive()
+            .filter_map(|(_, wire)| {
+                let state = self.canonical.signal.wire_snapshot(wire.id)?;
+                let resolved = crate::signal::resolve_drive(
+                    state.active,
+                    self.profiles.balance.logic_threshold,
+                );
+                (resolved == LogicLevel::High && state.active.high > 0)
+                    .then_some((wire, state.active.high))
+            })
+            .map(|(wire, strength)| {
+                Ok(ArmedWireAnalyzerRecord {
+                    wire: wire.id,
+                    nominal_live_energy: calculate_live_wire_demand(
+                        LiveWireInput {
+                            wire: wire.id,
+                            length: polyline_length(wire.points)?,
+                            high_drive_strength: strength,
+                        },
+                        probe,
+                    )
+                    .map_err(|_| SimulationError::InvalidCanonicalState)?,
+                })
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?;
+        armed_wires.sort_unstable_by_key(|row| row.wire);
+        Ok(Some(ConstructionContactDamageAnalyzerSnapshot {
+            next_tick: self.canonical.next_tick,
+            construction_sites: self.canonical.construction_sites.iter().cloned().collect(),
+            enemies: self.canonical.enemies.iter().copied().collect(),
+            damage,
+            armed_wires,
+            run_status: self.canonical.run_status,
+        }))
+    }
+
     pub fn gate_signal_ports(&self, gate: GateId) -> Option<GateSignalPorts> {
         self.canonical.signal.gate_ports(gate)
     }
@@ -780,7 +1422,10 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
         &world.structural,
         world.main_core.as_ref(),
         &world.power_sources,
+        &world.enemies,
+        &world.construction_sites,
     )?;
+    validate_damage_lifecycle(world)?;
     let signal = &world.signal;
     let driver_frontier = signal.driver_frontier().entity_id().0;
     let sink_frontier = signal.sink_frontier().entity_id().0;
@@ -955,6 +1600,38 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
             SinkRole::MobileRight,
             &mut referenced_sinks,
         )?;
+        let build_drivers: Vec<_> = driver_slots
+            .iter()
+            .filter_map(|(driver, record)| {
+                record
+                    .as_ref()
+                    .filter(|record| {
+                        record.owner == mobile.entity_id()
+                            && record.role == DriverRole::ExternalMobileBuild
+                    })
+                    .map(|_| *driver)
+            })
+            .collect();
+        match (ports.build, build_drivers.as_slice()) {
+            (None, []) => {}
+            (Some(build), [driver]) => {
+                validate_mobile_sink(
+                    signal,
+                    mobile,
+                    build,
+                    SinkRole::MobileBuild,
+                    &mut referenced_sinks,
+                )?;
+                validate_mobile_driver(
+                    signal,
+                    mobile,
+                    *driver,
+                    DriverRole::ExternalMobileBuild,
+                    &mut referenced_drivers,
+                )?;
+            }
+            _ => return Err(SimulationError::InvalidCanonicalState),
+        }
     }
 
     for (wire, sense) in signal.iter_wire_sensing() {
@@ -1054,10 +1731,51 @@ fn validate_canonical_world(world: &CanonicalWorld) -> Result<(), SimulationErro
     validate_event_state(world, driver_frontier, sink_frontier, &live_drivers)
 }
 
+fn validate_damage_lifecycle(world: &CanonicalWorld) -> Result<(), SimulationError> {
+    let mut expected_pending = BTreeSet::new();
+    for enemy in world.enemies.iter() {
+        if enemy.integrity().0 == 0 {
+            expected_pending.insert(enemy.id().entity_id());
+        }
+    }
+    for (target, _, state) in world.structural.damageable_structural_states() {
+        if state.integrity.0 == 0 {
+            expected_pending.insert(target);
+        }
+    }
+    if expected_pending != world.pending_destructions {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let core = world.main_core.as_ref();
+    if core.is_some_and(|core| world.pending_destructions.contains(&core.id().entity_id())) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    match world.run_status {
+        RunStatus::Running => {
+            if core.is_some_and(|core| core.integrity().0 == 0) {
+                return Err(SimulationError::InvalidCanonicalState);
+            }
+        }
+        RunStatus::Ended {
+            completed_tick,
+            cause: RunEndCause::MainCoreDestroyed,
+        } => {
+            if !core.is_some_and(|core| core.integrity().0 == 0)
+                || completed_tick.checked_add(Tick(1))? != world.next_tick
+            {
+                return Err(SimulationError::InvalidCanonicalState);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_structural_registry_links(
     structural: &StructuralWorld,
     main_core: Option<&MainCoreState>,
     power_sources: &PowerSourceStore,
+    enemies: &EnemyStore,
+    construction_sites: &ConstructionSiteStore,
 ) -> Result<(), SimulationError> {
     let registry = structural.entities();
     let frontier = registry.next_id().0;
@@ -1081,6 +1799,8 @@ fn validate_structural_registry_links(
     let mut registry_substrates = BTreeSet::new();
     let mut registry_mobiles = BTreeSet::new();
     let mut registry_power_sources = BTreeMap::new();
+    let mut registry_enemies = BTreeMap::new();
+    let mut registry_construction_sites = BTreeSet::new();
     let mut registry_main_core = None;
     for (id, location) in slots {
         if id.0 == 0 || id.0 >= frontier {
@@ -1145,6 +1865,16 @@ fn validate_structural_registry_links(
                     return Err(SimulationError::InvalidCanonicalState);
                 }
             }
+            crate::EntityLocation::Enemy(index) => {
+                if registry_enemies.insert(id, index).is_some() {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
+            crate::EntityLocation::ConstructionSite(_) => {
+                if !registry_construction_sites.insert(id) {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+            }
             _ => return Err(SimulationError::InvalidCanonicalState),
         }
     }
@@ -1164,6 +1894,20 @@ fn validate_structural_registry_links(
         })
         .collect::<Result<_, SimulationError>>()?;
     if registry_power_sources != store_power_sources {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let store_enemies: BTreeMap<_, _> = enemies
+        .iter_alive()
+        .map(|(index, enemy)| (enemy.id().entity_id(), index))
+        .collect();
+    if registry_enemies != store_enemies {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let store_construction_sites = construction_sites
+        .iter()
+        .map(|site| site.id.entity_id())
+        .collect::<BTreeSet<_>>();
+    if registry_construction_sites != store_construction_sites {
         return Err(SimulationError::InvalidCanonicalState);
     }
     for (index, source) in power_sources.iter().enumerate() {
@@ -1305,6 +2049,22 @@ fn validate_mobile_sink(
         .sink_record(sink)
         .ok_or(SimulationError::InvalidCanonicalState)?;
     if record.owner != owner.entity_id() || record.role != role || !referenced.insert(sink) {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    Ok(())
+}
+
+fn validate_mobile_driver(
+    signal: &SignalWorld,
+    owner: crate::MobileId,
+    driver: DriverId,
+    role: DriverRole,
+    referenced: &mut BTreeSet<DriverId>,
+) -> Result<(), SimulationError> {
+    let record = signal
+        .driver_record(driver)
+        .ok_or(SimulationError::InvalidCanonicalState)?;
+    if record.owner != owner.entity_id() || record.role != role || !referenced.insert(driver) {
         return Err(SimulationError::InvalidCanonicalState);
     }
     Ok(())
@@ -1542,6 +2302,8 @@ fn run_phase0_structural_commit(
     balance: &BalanceProfile,
 ) -> Result<Phase0Output, SimulationError> {
     let old_topology = CompiledSignalTopology::compile(&world.structural, &world.signal, balance)?;
+    let (mut destructions, destruction_topology_changed) =
+        apply_pending_structural_and_enemy_destructions(world)?;
     let main_core = world.main_core.map(MainCoreState::anchor_view);
     let power_sources = world
         .power_sources
@@ -1551,8 +2313,9 @@ fn run_phase0_structural_commit(
             position: source.position(),
         })
         .collect::<Vec<_>>();
-    let structural_report = world.structural.apply_phase0_with_signal_and_core(
+    let mut structural_report = world.structural.apply_phase0_s1m4(
         &mut world.signal,
+        &mut world.construction_sites,
         tick,
         commands,
         StructuralCommandContext {
@@ -1560,8 +2323,14 @@ fn run_phase0_structural_commit(
             main_core,
             power_sources: &power_sources,
             sensing_enabled: balance.power_probe.is_some(),
+            construction_probe: balance.construction_probe.as_ref(),
+            initial_integrity: balance
+                .contact_damage_probe
+                .as_ref()
+                .map(|probe| &probe.initial_integrity),
         },
     )?;
+    structural_report.topology_changed |= destruction_topology_changed;
     world.topology_revision = if structural_report.topology_changed {
         world.topology_revision.checked_add(Revision(1))?
     } else {
@@ -1577,12 +2346,69 @@ fn run_phase0_structural_commit(
     };
     stage_external_driver_updates(world, &structural_report.external_driver_updates, tick)?;
 
+    destructions.sort_unstable_by_key(|row| row.target);
     Ok(Phase0Output {
         structural_report,
+        destructions,
         topology,
         track_graph,
         signal_counters,
     })
+}
+
+fn apply_pending_structural_and_enemy_destructions(
+    world: &mut CanonicalWorld,
+) -> Result<(Vec<DestructionReport>, bool), SimulationError> {
+    let structural_batch = world.structural.apply_pending_structural_destructions(
+        &mut world.signal,
+        &mut world.construction_sites,
+        &mut world.pending_destructions,
+    )?;
+    let mut reports = structural_batch
+        .records
+        .into_iter()
+        .map(|row| DestructionReport {
+            target: row.target,
+            kind: match row.kind {
+                StructuralDestructionKind::Damage => DestructionKind::Damage,
+                StructuralDestructionKind::TrackSupportLost => DestructionKind::TrackSupportLost,
+                StructuralDestructionKind::SubstrateSupportLost => {
+                    DestructionKind::SubstrateSupportLost
+                }
+                StructuralDestructionKind::ConstructionDependencyLost => {
+                    DestructionKind::ConstructionDependencyLost
+                }
+            },
+        })
+        .collect::<Vec<_>>();
+    let pending_enemies = world
+        .pending_destructions
+        .iter()
+        .filter_map(|&target| {
+            let crate::EntityLocation::Enemy(index) =
+                world.structural.entities().location(target).copied()?
+            else {
+                return None;
+            };
+            Some((target, index))
+        })
+        .collect::<Vec<_>>();
+    for (target, index) in pending_enemies {
+        let enemy = crate::EnemyId(target);
+        world
+            .enemies
+            .remove_by_index(index)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        world.structural.remove_enemy_registry_entry(enemy, index)?;
+        if !world.pending_destructions.remove(&target) {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        reports.push(DestructionReport {
+            target,
+            kind: DestructionKind::Damage,
+        });
+    }
+    Ok((reports, structural_batch.topology_changed))
 }
 
 fn run_phase1_snapshot_and_world_sample(
@@ -1592,6 +2418,7 @@ fn run_phase1_snapshot_and_world_sample(
     sensing_enabled: bool,
     sense_radius: Fixed,
     chunk_size: Fixed,
+    damage_probe: Option<&crate::ContactDamageProbeProfile>,
 ) -> Result<Phase1Snapshot, SimulationError> {
     let mut mobiles = Vec::new();
     for (index, record) in world.structural.mobile_substrates().iter_alive() {
@@ -1614,24 +2441,120 @@ fn run_phase1_snapshot_and_world_sample(
         return Err(SimulationError::InvalidCanonicalState);
     }
     let wire_sensing = if sensing_enabled {
-        let wires = world
+        let wire_world_points = world
             .structural
             .wires()
             .iter_alive()
-            .map(|(_, wire)| WireSensingInput {
-                id: wire.id,
-                points: wire.points,
+            .map(|(_, wire)| {
+                Ok((
+                    wire.id,
+                    world.structural.routing_domain_points_world(
+                        wire.routing_domain,
+                        wire.points,
+                        track_graph,
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?;
+        let wires = wire_world_points
+            .iter()
+            .map(|(id, points)| WireSensingInput { id: *id, points })
+            .collect::<Vec<_>>();
+        let input_presence = sample_wire_sensing(&wires, hostiles, sense_radius, chunk_size)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        let enemies = world
+            .enemies
+            .iter()
+            .map(|enemy| HostileCollider {
+                id: enemy.id().entity_id().0,
+                center: enemy.position(),
+                radius: enemy.radius(),
             })
             .collect::<Vec<_>>();
-        sample_wire_sensing(&wires, hostiles, sense_radius, chunk_size)
-            .map_err(|_| SimulationError::InvalidCanonicalState)?
+        let enemy_presence = sample_wire_sensing(&wires, &enemies, sense_radius, chunk_size)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        if input_presence.len() != enemy_presence.len() {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        input_presence
+            .into_iter()
+            .zip(enemy_presence)
+            .map(|(input, enemy)| {
+                if input.id != enemy.id {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                Ok(crate::WireSensingOutput {
+                    id: input.id,
+                    occupied: input.occupied || enemy.occupied,
+                })
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?
     } else {
         Vec::new()
+    };
+    let temperature = |heat: HeatEnergy, kind: ThermalObjectKind| {
+        damage_probe
+            .map(|probe| phase1_temperature(heat, thermal_capacity_for(kind, probe)))
+            .transpose()
+            .map(|value| value.unwrap_or(Fixed::ZERO))
     };
     Ok(Phase1Snapshot {
         mobiles,
         wire_sensing,
+        enemies: world
+            .enemies
+            .iter()
+            .map(|enemy| {
+                Ok(EnemyPhase1Snapshot {
+                    enemy: enemy.id(),
+                    position: enemy.position(),
+                    velocity_per_tick: enemy.velocity_per_tick(),
+                    radius: enemy.radius(),
+                    integrity: enemy.integrity(),
+                    heat_energy: enemy.heat_energy(),
+                    temperature: temperature(enemy.heat_energy(), ThermalObjectKind::Enemy)?,
+                })
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?,
+        core: world
+            .main_core
+            .map(
+                |core| -> Result<CoreDamagePhase1Snapshot, SimulationError> {
+                    Ok(CoreDamagePhase1Snapshot {
+                        target: core.id().entity_id(),
+                        integrity: core.integrity(),
+                        temperature: temperature(core.heat_energy(), ThermalObjectKind::MainCore)?,
+                    })
+                },
+            )
+            .transpose()?,
+        structural_damage: world
+            .structural
+            .damageable_structural_states()
+            .map(|(target, kind, damage)| {
+                Ok(DamageSnapshot {
+                    target,
+                    kind,
+                    integrity: damage.integrity,
+                    phase1_temperature: temperature(damage.heat_energy, kind)?,
+                })
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?,
     })
+}
+
+fn phase1_temperature(heat: HeatEnergy, thermal_capacity: u64) -> Result<Fixed, SimulationError> {
+    if thermal_capacity == 0 {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let raw = u128::from(heat.0)
+        .checked_mul(
+            u128::try_from(crate::FIXED_ONE).map_err(|_| SimulationError::NumericOverflow)?,
+        )
+        .ok_or(SimulationError::NumericOverflow)?
+        / u128::from(thermal_capacity);
+    let raw = i64::try_from(raw).map_err(|_| SimulationError::NumericOverflow)?;
+    Ok(Fixed(raw))
 }
 
 fn validate_world_inputs(
@@ -2015,7 +2938,10 @@ fn validate_driver_transition(
 fn run_phase3(
     world: &mut CanonicalWorld,
     snapshot: &Phase1Snapshot,
-) -> Result<Vec<MobileIntent>, SimulationError> {
+    track_graph: &TrackGraph,
+    physical: &PhysicalScaleProfile,
+    balance: &BalanceProfile,
+) -> Result<Phase3Output, SimulationError> {
     let gates: Vec<_> = world
         .signal
         .iter_gates()
@@ -2024,7 +2950,7 @@ fn run_phase3(
     for gate in gates {
         world.signal.set_gate_desired_from_inputs(gate)?;
     }
-    snapshot
+    let mut mobile_intents = snapshot
         .mobiles
         .iter()
         .copied()
@@ -2051,15 +2977,112 @@ fn run_phase3(
                 },
                 granted_budget: Fixed::ZERO,
                 power_attachment: mobile_snapshot.power_attachment,
+                construction: None,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, SimulationError>>()?;
+    if let Some(probe) = balance.construction_probe.as_ref() {
+        for intent in &mut mobile_intents {
+            let ports = world
+                .signal
+                .mobile_ports(intent.mobile)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let Some(build) = ports.build else {
+                return Err(SimulationError::InvalidCanonicalState);
+            };
+            if world.signal.sink_level(build) != Some(LogicLevel::High) {
+                continue;
+            }
+            let footprint = world
+                .structural
+                .mobile_substrates()
+                .get(intent.index)
+                .ok_or(SimulationError::InvalidCanonicalState)?
+                .footprint;
+            let Some(site) = world.structural.smallest_intersecting_site(
+                &world.construction_sites,
+                intent.start_world_point,
+                footprint,
+                track_graph,
+                physical,
+            )?
+            else {
+                continue;
+            };
+            let site_state = world
+                .construction_sites
+                .get(site)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let remaining = site_state
+                .required_work
+                .0
+                .checked_sub(site_state.completed_work.0)
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let requested = Energy(probe.builder_work_per_tick.min(remaining));
+            let (wire, offset) = intent
+                .power_attachment
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            let demand = construction_nominal_demand_for_work(
+                site,
+                intent.mobile,
+                crate::PowerNodeKey::WireOffset(wire, offset),
+                requested,
+                probe,
+            )
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+            intent.construction = Some(ConstructionIntent {
+                site,
+                builder: intent.mobile,
+                requested,
+                nominal_power: demand.nominal(),
+                granted_work: Energy(0),
+            });
+        }
+    }
+    let live_wires = if let Some(probe) = balance.contact_damage_probe.as_ref() {
+        world
+            .structural
+            .wires()
+            .iter_alive()
+            .filter_map(|(_, wire)| {
+                let signal = world.signal.wire_snapshot(wire.id)?;
+                let resolved = crate::signal::resolve_drive(signal.active, balance.logic_threshold);
+                (resolved == LogicLevel::High && signal.active.high > 0).then_some((wire, signal))
+            })
+            .map(|(wire, signal)| {
+                let length = polyline_length(wire.points)?;
+                let nominal = calculate_live_wire_demand(
+                    LiveWireInput {
+                        wire: wire.id,
+                        length,
+                        high_drive_strength: signal.active.high,
+                    },
+                    probe,
+                )
+                .map_err(|_| SimulationError::InvalidCanonicalState)?;
+                if physical.wire_body_radius.0 < 0 || nominal.0 == 0 {
+                    return Err(SimulationError::InvalidCanonicalState);
+                }
+                Ok(LiveWireIntent {
+                    wire: wire.id,
+                    nominal,
+                })
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?
+    } else {
+        Vec::new()
+    };
+    Ok(Phase3Output {
+        mobile_intents,
+        live_wires,
+    })
 }
 
 fn run_phase4_global_accounting_and_nominal_demand(
     world: &CanonicalWorld,
     topology: &CompiledSignalTopology,
     mobile_intents: &[MobileIntent],
+    live_wires: &[LiveWireIntent],
     balance: &BalanceProfile,
     movement_budget: Fixed,
 ) -> Result<Phase4Output, SimulationError> {
@@ -2112,6 +3135,26 @@ fn run_phase4_global_accounting_and_nominal_demand(
         &movements,
         accounted_network.support_shares(),
     )
+    .map_err(SimulationError::from)?
+    .with_additional(mobile_intents.iter().filter_map(|intent| {
+        let construction = intent.construction?;
+        let (wire, offset) = intent.power_attachment?;
+        Some(crate::NominalPowerDemand::new(
+            construction.builder.entity_id(),
+            DemandKind::Construction,
+            construction.nominal_power,
+            crate::PowerNodeKey::WireOffset(wire, offset),
+        ))
+    }))
+    .map_err(SimulationError::from)?
+    .with_additional(live_wires.iter().map(|live| {
+        crate::NominalPowerDemand::new(
+            live.wire.entity_id(),
+            DemandKind::LiveWire,
+            live.nominal,
+            crate::PowerNodeKey::WireBody(live.wire),
+        )
+    }))
     .map_err(SimulationError::from)?;
     Ok(Phase4Output {
         network_accounting,
@@ -2306,8 +3349,9 @@ fn collect_power_gate_reports(
 fn run_phase7(
     track_graph: &TrackGraph,
     intents: &[MobileIntent],
+    enemies: &[EnemyPhase1Snapshot],
     power_report: Option<&PowerStepReport>,
-) -> Result<Vec<StagedMobileMovement>, SimulationError> {
+) -> Result<(Vec<StagedMobileMovement>, Vec<StagedEnemyTrajectory>), SimulationError> {
     let powered_edges = power_report
         .map(|report| {
             track_graph
@@ -2324,7 +3368,7 @@ fn run_phase7(
                 .collect::<Result<BTreeSet<_>, SimulationError>>()
         })
         .transpose()?;
-    intents
+    let mobiles = intents
         .iter()
         .map(|intent| {
             if track_graph.world_position(intent.start)? != intent.start_world_point {
@@ -2350,7 +3394,23 @@ fn run_phase7(
                 observation,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, SimulationError>>()?;
+    let enemies = enemies
+        .iter()
+        .map(|enemy| {
+            let end = FixedVec2::new(
+                enemy.position.x.checked_add(enemy.velocity_per_tick.x)?,
+                enemy.position.y.checked_add(enemy.velocity_per_tick.y)?,
+            );
+            Ok(StagedEnemyTrajectory {
+                enemy: enemy.enemy,
+                start: enemy.position,
+                end,
+                radius: enemy.radius,
+            })
+        })
+        .collect::<Result<Vec<_>, SimulationError>>()?;
+    Ok((mobiles, enemies))
 }
 
 fn run_phase6(
@@ -2612,6 +3672,15 @@ fn run_phase6(
                 granted_budget,
                 ratio,
             });
+            if let Some(construction) = intent.construction.as_mut() {
+                let ratio = required_power_ratio(
+                    report,
+                    construction.builder.entity_id(),
+                    DemandKind::Construction,
+                )?;
+                construction.granted_work = grant_construction_work(construction.requested, ratio)
+                    .map_err(|_| SimulationError::InvalidCanonicalState)?;
+            }
         }
     } else {
         grant_stage0_mobile_budgets(mobile_intents, movement_budget);
@@ -2628,12 +3697,22 @@ fn run_phase6(
 }
 
 fn run_phase8_interaction(
-    staged_mobiles: &[StagedMobileMovement],
+    world: &CanonicalWorld,
     phase5: &mut Phase5Output,
-) -> Result<(), SimulationError> {
+    inputs: Phase8Inputs<'_>,
+) -> Result<Phase8Output, SimulationError> {
+    let Phase8Inputs {
+        staged_mobiles,
+        mobile_intents,
+        staged_enemies,
+        live_wires,
+        track_graph,
+        physical,
+        balance,
+    } = inputs;
     let Some(report) = phase5.report.as_mut() else {
         return if phase5.private_heat.is_empty() {
-            Ok(())
+            Ok(Phase8Output::default())
         } else {
             Err(SimulationError::InvalidCanonicalState)
         };
@@ -2656,22 +3735,544 @@ fn run_phase8_interaction(
         .private_heat
         .sort_unstable_by_key(|heat| (heat.owner, heat.kind, heat.demand));
     report.heat_contributions = std::mem::take(&mut phase5.private_heat);
+    let Some(probe) = balance.contact_damage_probe.as_ref() else {
+        return Ok(Phase8Output::default());
+    };
+
+    let mut wire_world_points = BTreeMap::<WireId, Vec<FixedVec2>>::new();
+    for (_, wire) in world.structural.wires().iter_alive() {
+        let points = world.structural.routing_domain_points_world(
+            wire.routing_domain,
+            wire.points,
+            track_graph,
+        )?;
+        if wire_world_points.insert(wire.id, points).is_some() {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+
+    let mut contacts = Vec::new();
+    let mut interaction_heat = Vec::new();
+    let mut exposures = Vec::new();
+    let mut construction = Vec::new();
+    let mut construction_contributions = Vec::new();
+    for load in &report.loads {
+        let kind = match load.demand.kind() {
+            DemandKind::GateIdle | DemandKind::GateSwitch | DemandKind::GateDrive => Some((
+                InteractionHeatKind::GatePowerDissipation,
+                probe.gate_power_heat_fraction,
+            )),
+            DemandKind::Movement => {
+                Some((InteractionHeatKind::Movement, probe.movement_heat_fraction))
+            }
+            _ => None,
+        };
+        if let Some((kind, fraction)) = kind {
+            let heat = fraction_heat(load.granted, fraction)?;
+            if heat.0 > 0 {
+                interaction_heat.push(InteractionHeatReport {
+                    owner: load.demand.owner(),
+                    kind,
+                    demand: Some(load.demand),
+                    energy: heat,
+                });
+            }
+        }
+    }
+    for gate in world.signal.iter_gates() {
+        if gate.cancelled_switching_heat.0 > 0 {
+            interaction_heat.push(InteractionHeatReport {
+                owner: gate.gate.entity_id(),
+                kind: InteractionHeatKind::CancelledGateSwitch,
+                demand: None,
+                energy: gate.cancelled_switching_heat,
+            });
+        }
+    }
+    if let Some(construction_probe) = balance.construction_probe.as_ref() {
+        for intent in mobile_intents {
+            let Some(build) = intent.construction else {
+                continue;
+            };
+            construction.push(build);
+            construction_contributions.push(ConstructionWorkContribution {
+                site: build.site,
+                builder: build.builder,
+                granted_work: build.granted_work,
+            });
+            let granted_power = report
+                .load(DemandId::new(
+                    build.builder.entity_id(),
+                    DemandKind::Construction,
+                ))
+                .ok_or(SimulationError::InvalidCanonicalState)?
+                .granted;
+            let heat = fraction_heat(granted_power, construction_probe.construction_heat_fraction)?;
+            if heat.0 > 0 {
+                interaction_heat.push(InteractionHeatReport {
+                    owner: build.builder.entity_id(),
+                    kind: InteractionHeatKind::Construction,
+                    demand: Some(DemandId::new(
+                        build.builder.entity_id(),
+                        DemandKind::Construction,
+                    )),
+                    energy: heat,
+                });
+            }
+        }
+    }
+    for live in live_wires {
+        let grant = report
+            .load(DemandId::new(live.wire.entity_id(), DemandKind::LiveWire))
+            .ok_or(SimulationError::InvalidCanonicalState)?
+            .granted;
+        let points = wire_world_points
+            .get(&live.wire)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let candidates = staged_enemies
+            .iter()
+            .filter_map(|enemy| {
+                match swept_circle_intersects_wire_body(
+                    enemy.start,
+                    enemy.end,
+                    enemy.radius,
+                    points,
+                    physical.wire_body_radius,
+                ) {
+                    Ok(true) => Some(Ok(ContactCandidate {
+                        target: enemy.enemy,
+                        weight: u128::from(probe.enemy_conductivity),
+                    })),
+                    Ok(false) => None,
+                    Err(_) => Some(Err(SimulationError::InvalidCanonicalState)),
+                }
+            })
+            .collect::<Result<Vec<_>, SimulationError>>()?;
+        let (allocations, heat) =
+            allocate_contact_energy(grant, &candidates, probe.world_leak_weight)
+                .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        for allocation in allocations {
+            contacts.push(ContactEnergyReport {
+                wire: live.wire,
+                target: allocation.target,
+                weight: allocation.weight,
+                absorbed: allocation.absorbed,
+            });
+            if allocation.absorbed.0 > 0 {
+                exposures.push(ElectricalExposure {
+                    target: allocation.target.entity_id(),
+                    source: live.wire.entity_id(),
+                    energy: allocation.absorbed,
+                });
+            }
+        }
+        if heat.0 > 0 {
+            interaction_heat.push(InteractionHeatReport {
+                owner: live.wire.entity_id(),
+                kind: InteractionHeatKind::LiveWireRemainder,
+                demand: Some(DemandId::new(live.wire.entity_id(), DemandKind::LiveWire)),
+                energy: heat,
+            });
+        }
+    }
+
+    for enemy in staged_enemies {
+        let mut targets = Vec::<EntityId>::new();
+        if let Some(core) = world.main_core
+            && swept_circle_intersects_point(enemy.start, enemy.end, enemy.radius, core.position())
+                .map_err(|_| SimulationError::InvalidCanonicalState)?
+        {
+            targets.push(core.id().entity_id());
+        }
+        for (wire, points) in &wire_world_points {
+            if swept_circle_intersects_wire_body(
+                enemy.start,
+                enemy.end,
+                enemy.radius,
+                points,
+                physical.wire_body_radius,
+            )
+            .map_err(|_| SimulationError::InvalidCanonicalState)?
+            {
+                targets.push(wire.entity_id());
+            }
+        }
+        if let Some(target) = targets.into_iter().min()
+            && probe.enemy_attack_energy_per_tick > 0
+        {
+            exposures.push(ElectricalExposure {
+                target,
+                source: enemy.enemy.entity_id(),
+                energy: Energy(probe.enemy_attack_energy_per_tick),
+            });
+        }
+    }
+    contacts.sort_unstable_by_key(|row| (row.wire, row.target));
+    interaction_heat.sort_unstable_by_key(|row| (row.owner, row.kind, row.demand));
+    interaction_heat = reduce_interaction_heat(interaction_heat)?;
+    exposures.sort_unstable_by_key(|row| (row.target, row.source));
+    exposures = reduce_electrical_exposures(exposures)?;
+    Ok(Phase8Output {
+        contacts,
+        interaction_heat,
+        exposures,
+        construction,
+        construction_contributions,
+    })
+}
+
+fn fraction_heat(energy: Energy, fraction: Rational) -> Result<HeatEnergy, SimulationError> {
+    if fraction.numerator() < 0 || fraction.denominator() <= 0 {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let numerator = i128::from(energy.0)
+        .checked_mul(i128::from(fraction.numerator()))
+        .ok_or(SimulationError::NumericOverflow)?;
+    let rounded = crate::round_div_nearest_even(numerator, i128::from(fraction.denominator()))?;
+    let rounded = u64::try_from(rounded).map_err(|_| SimulationError::NumericOverflow)?;
+    Ok(HeatEnergy(rounded))
+}
+
+fn reduce_interaction_heat(
+    rows: Vec<InteractionHeatReport>,
+) -> Result<Vec<InteractionHeatReport>, SimulationError> {
+    let mut reduced = Vec::<InteractionHeatReport>::new();
+    for row in rows {
+        if let Some(previous) = reduced.last_mut()
+            && (previous.owner, previous.kind, previous.demand) == (row.owner, row.kind, row.demand)
+        {
+            previous.energy = previous
+                .energy
+                .checked_add(row.energy)
+                .map_err(|_| SimulationError::NumericOverflow)?;
+        } else {
+            reduced.push(row);
+        }
+    }
+    Ok(reduced)
+}
+
+fn reduce_electrical_exposures(
+    rows: Vec<ElectricalExposure>,
+) -> Result<Vec<ElectricalExposure>, SimulationError> {
+    let mut reduced = Vec::<ElectricalExposure>::new();
+    for row in rows {
+        if let Some(previous) = reduced.last_mut()
+            && (previous.target, previous.source) == (row.target, row.source)
+        {
+            previous.energy = previous
+                .energy
+                .checked_add(row.energy)
+                .map_err(|_| SimulationError::NumericOverflow)?;
+        } else {
+            reduced.push(row);
+        }
+    }
+    Ok(reduced)
+}
+
+fn run_phase9_thermal_integration(
+    world: &mut CanonicalWorld,
+    interaction_heat: &[InteractionHeatReport],
+    power_heat: &[PowerHeatReport],
+    balance: &BalanceProfile,
+) -> Result<(), SimulationError> {
+    if balance.contact_damage_probe.is_none() {
+        return if interaction_heat.is_empty() {
+            Ok(())
+        } else {
+            Err(SimulationError::InvalidCanonicalState)
+        };
+    }
+    let mut grouped = BTreeMap::<EntityId, BTreeMap<HeatContributionKey, HeatEnergy>>::new();
+    for row in interaction_heat {
+        let key = HeatContributionKey {
+            kind: row.kind,
+            source: row.demand.map(DemandId::owner).unwrap_or(row.owner),
+            demand: row.demand,
+        };
+        let slot = grouped
+            .entry(row.owner)
+            .or_default()
+            .entry(key)
+            .or_default();
+        *slot = slot
+            .checked_add(row.energy)
+            .map_err(|_| SimulationError::NumericOverflow)?;
+    }
+    let gate_ids = world
+        .signal
+        .iter_gates()
+        .map(|gate| gate.gate)
+        .collect::<Vec<_>>();
+    for gate in gate_ids {
+        let heat = world.signal.take_cancelled_heat(gate)?;
+        if heat.0 == 0 {
+            continue;
+        }
+        let key = HeatContributionKey {
+            kind: InteractionHeatKind::CancelledGateSwitch,
+            source: gate.entity_id(),
+            demand: None,
+        };
+        if grouped
+            .get(&gate.entity_id())
+            .and_then(|rows| rows.get(&key))
+            != Some(&heat)
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    let mut power_by_owner = BTreeMap::<EntityId, HeatEnergy>::new();
+    for row in power_heat {
+        if row.energy.0 == 0
+            || !matches!(
+                world.structural.damage_state(row.owner.entity_id()),
+                Some((ThermalObjectKind::Wire, _))
+            )
+        {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+        let slot = power_by_owner.entry(row.owner.entity_id()).or_default();
+        *slot = slot
+            .checked_add(row.energy)
+            .map_err(|_| SimulationError::NumericOverflow)?;
+    }
+    let owners = grouped
+        .keys()
+        .chain(power_by_owner.keys())
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut integrated = BTreeMap::<EntityId, HeatEnergy>::new();
+    for owner in owners {
+        let current = thermal_heat_energy(world, owner)?;
+        let after_power = current
+            .checked_add(power_by_owner.get(&owner).copied().unwrap_or_default())
+            .map_err(|_| SimulationError::NumericOverflow)?;
+        let rows = grouped
+            .remove(&owner)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(key, energy)| HeatContributionInput { key, energy })
+            .collect::<Vec<_>>();
+        let heat = if rows.is_empty() {
+            after_power
+        } else {
+            integrate_heat(owner, after_power, &rows)
+                .map_err(|_| SimulationError::InvalidCanonicalState)?
+        };
+        integrated.insert(owner, heat);
+    }
+    for (owner, heat) in integrated {
+        set_thermal_heat_energy(world, owner, heat)?;
+    }
     Ok(())
 }
 
-fn run_phase9_thermal_integration() {
-    // Stage 0 has no thermal state.
+fn thermal_heat_energy(
+    world: &CanonicalWorld,
+    owner: EntityId,
+) -> Result<HeatEnergy, SimulationError> {
+    if let Some(core) = world
+        .main_core
+        .filter(|core| core.id().entity_id() == owner)
+    {
+        Ok(core.heat_energy())
+    } else if let Some(enemy) = world.enemies.get(crate::EnemyId(owner)) {
+        Ok(enemy.heat_energy())
+    } else if let Some((_, damage)) = world.structural.damage_state(owner) {
+        Ok(damage.heat_energy)
+    } else {
+        Err(SimulationError::InvalidCanonicalState)
+    }
 }
 
-fn run_phase10_damage_resolution() {
-    // Stage 0 has no Integrity, exposure, or pending-destruction state.
+fn set_thermal_heat_energy(
+    world: &mut CanonicalWorld,
+    owner: EntityId,
+    heat: HeatEnergy,
+) -> Result<(), SimulationError> {
+    if world
+        .main_core
+        .is_some_and(|core| core.id().entity_id() == owner)
+    {
+        let core = world
+            .main_core
+            .as_mut()
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        core.set_heat_energy(heat);
+    } else if let Some(enemy) = world.enemies.get_mut(crate::EnemyId(owner)) {
+        enemy.set_heat_energy(heat);
+    } else if let Some((_, damage)) = world.structural.damage_state(owner) {
+        world.structural.set_damage_state(
+            owner,
+            crate::DamageState {
+                heat_energy: heat,
+                ..damage
+            },
+        )?;
+    } else {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    Ok(())
+}
+
+fn run_phase10_damage_resolution(
+    world: &mut CanonicalWorld,
+    snapshot: &Phase1Snapshot,
+    exposures: &[ElectricalExposure],
+    balance: &BalanceProfile,
+) -> Result<Phase10Output, SimulationError> {
+    let Some(probe) = balance.contact_damage_probe.as_ref() else {
+        return if exposures.is_empty() {
+            Ok(Phase10Output::default())
+        } else {
+            Err(SimulationError::InvalidCanonicalState)
+        };
+    };
+    let mut damageable_targets = BTreeSet::new();
+    if let Some(core) = snapshot.core
+        && !damageable_targets.insert(core.target)
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    for enemy in &snapshot.enemies {
+        if !damageable_targets.insert(enemy.enemy.entity_id()) {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    for structural in &snapshot.structural_damage {
+        if !damageable_targets.insert(structural.target) {
+            return Err(SimulationError::InvalidCanonicalState);
+        }
+    }
+    if exposures
+        .iter()
+        .any(|exposure| !damageable_targets.contains(&exposure.target))
+    {
+        return Err(SimulationError::InvalidCanonicalState);
+    }
+    let mut damage = Vec::new();
+    let mut core_destroyed = false;
+
+    if let Some(core) = snapshot.core {
+        let rows = exposure_rows_for(exposures, core.target);
+        let resolution = resolve_damage(
+            DamageSnapshot {
+                target: core.target,
+                kind: ThermalObjectKind::MainCore,
+                integrity: core.integrity,
+                phase1_temperature: core.temperature,
+            },
+            rows,
+            probe,
+        )
+        .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        if resolution.electrical_exposure.0 > 0
+            || resolution.electrical_damage.0 > 0
+            || resolution.thermal_damage.0 > 0
+        {
+            damage.push(damage_report(resolution));
+        }
+        let state = world
+            .main_core
+            .as_mut()
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        state.set_integrity(resolution.integrity_after);
+        core_destroyed = resolution.pending_destruction;
+    }
+    for enemy in &snapshot.enemies {
+        let target = enemy.enemy.entity_id();
+        let rows = exposure_rows_for(exposures, target);
+        let resolution = resolve_damage(
+            DamageSnapshot {
+                target,
+                kind: ThermalObjectKind::Enemy,
+                integrity: enemy.integrity,
+                phase1_temperature: enemy.temperature,
+            },
+            rows,
+            probe,
+        )
+        .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        if resolution.electrical_exposure.0 > 0
+            || resolution.electrical_damage.0 > 0
+            || resolution.thermal_damage.0 > 0
+        {
+            damage.push(damage_report(resolution));
+        }
+        let state = world
+            .enemies
+            .get_mut(enemy.enemy)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        state.set_integrity(resolution.integrity_after);
+        if resolution.pending_destruction {
+            world.pending_destructions.insert(target);
+        }
+    }
+    for structural in &snapshot.structural_damage {
+        let rows = exposure_rows_for(exposures, structural.target);
+        let resolution = resolve_damage(*structural, rows, probe)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+        if resolution.electrical_exposure.0 > 0
+            || resolution.electrical_damage.0 > 0
+            || resolution.thermal_damage.0 > 0
+        {
+            damage.push(damage_report(resolution));
+        }
+        let (_, current) = world
+            .structural
+            .damage_state(structural.target)
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        world.structural.set_damage_state(
+            structural.target,
+            crate::DamageState {
+                integrity: resolution.integrity_after,
+                ..current
+            },
+        )?;
+        if resolution.pending_destruction {
+            world.pending_destructions.insert(structural.target);
+        }
+    }
+    damage.sort_unstable_by_key(|row| row.target);
+    Ok(Phase10Output {
+        damage,
+        core_destroyed,
+    })
+}
+
+fn exposure_rows_for(exposures: &[ElectricalExposure], target: EntityId) -> &[ElectricalExposure] {
+    let start = exposures.partition_point(|row| row.target < target);
+    let end = exposures.partition_point(|row| row.target <= target);
+    &exposures[start..end]
+}
+
+fn damage_report(resolution: crate::DamageResolution) -> DamageReport {
+    DamageReport {
+        target: resolution.target,
+        electrical_exposure: resolution.electrical_exposure,
+        electrical_damage: resolution.electrical_damage,
+        thermal_damage: resolution.thermal_damage,
+        integrity_before: resolution.integrity_before,
+        integrity_after: resolution.integrity_after,
+        pending_destruction: resolution.pending_destruction,
+    }
 }
 
 fn run_phase11_progress_commit(
     world: &mut CanonicalWorld,
-    next_tick: Tick,
-    staged_mobiles: Vec<StagedMobileMovement>,
+    inputs: Phase11Inputs<'_>,
 ) -> Result<Phase11Output, SimulationError> {
+    let Phase11Inputs {
+        completed_tick,
+        next_tick,
+        staged_mobiles,
+        staged_enemies,
+        construction,
+        construction_contributions,
+        core_destroyed,
+    } = inputs;
     let committed_positions = staged_mobiles
         .iter()
         .map(|staged| {
@@ -2685,7 +4286,44 @@ fn run_phase11_progress_commit(
     world
         .structural
         .commit_mobile_positions(&committed_positions)?;
+    for staged in staged_enemies {
+        world
+            .enemies
+            .get_mut(staged.enemy)
+            .ok_or(SimulationError::InvalidCanonicalState)?
+            .set_position(staged.end);
+    }
+    let construction_progress =
+        apply_construction_work(&mut world.construction_sites, construction_contributions)
+            .map_err(|_| SimulationError::InvalidCanonicalState)?;
+    let construction_by_key = construction
+        .iter()
+        .map(|row| ((row.site, row.builder), *row))
+        .collect::<BTreeMap<_, _>>();
+    let construction_work = construction_progress
+        .into_iter()
+        .map(|progress| {
+            let intent = construction_by_key
+                .get(&(progress.site, progress.builder))
+                .ok_or(SimulationError::InvalidCanonicalState)?;
+            Ok(ConstructionWorkReport {
+                site: progress.site,
+                builder: progress.builder,
+                requested: intent.requested,
+                nominal_power: intent.nominal_power,
+                granted_work: progress.granted_work,
+                applied_work: progress.applied_work,
+                completed_work: progress.completed_work,
+            })
+        })
+        .collect::<Result<Vec<_>, SimulationError>>()?;
     world.next_tick = next_tick;
+    if core_destroyed {
+        world.run_status = RunStatus::Ended {
+            completed_tick,
+            cause: RunEndCause::MainCoreDestroyed,
+        };
+    }
     validate_canonical_world(world)?;
     let state_hash = canonical::state_hash(world.state_view());
     let mobile_movements = staged_mobiles
@@ -2695,6 +4333,8 @@ fn run_phase11_progress_commit(
     Ok(Phase11Output {
         state_hash,
         mobile_movements,
+        run_status: world.run_status,
+        construction_work,
     })
 }
 
@@ -2960,6 +4600,7 @@ mod tests {
             false,
             simulation.profiles.balance.sense_radius,
             simulation.profiles.physical_scale.world_routing_pitch,
+            None,
         )
         .expect("Phase 1 samples canonical Mobile state");
         assert_eq!(snapshot.mobiles.len(), 1);
@@ -4292,6 +5933,1029 @@ mod tests {
         );
     }
 
+    #[test]
+    fn s1m4_feature_triad_is_rejected_by_retained_worlds_before_tick_zero() {
+        for feature in ["construction", "contact", "damage"] {
+            let mut package = package();
+            match feature {
+                "construction" => package.required_features.construction = true,
+                "contact" => package.required_features.contact = true,
+                "damage" => package.required_features.damage = true,
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                Simulation::new(package).err(),
+                Some(SimulationError::PowerFeaturesRequireMainCorePowerWorld),
+                "retained Empty world must reject S1-M4 feature {feature}"
+            );
+        }
+    }
+
+    fn s1m4_runtime_package(core_integrity: u64, enemy_position: FixedVec2) -> SimulationPackage {
+        let mut profiles = ProfileBundle {
+            numeric: NumericProfile::reference_v1("numeric-s1m4-runtime"),
+            physical_scale: PhysicalScaleProfile::stage0_alpha("physical-s1m4-runtime"),
+            balance: BalanceProfile::construction_contact_damage_alpha("balance-s1m4-runtime"),
+        };
+        profiles
+            .balance
+            .contact_damage_probe
+            .as_mut()
+            .expect("v5 probe exists")
+            .enemy_attack_energy_per_tick = 100;
+        let contract = SimulationContract::from_profiles(&profiles).expect("profiles are valid");
+        SimulationPackage::new(
+            "s1m4-runtime",
+            InitialWorld::MainCorePowerEnemyV1 {
+                main_core_position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                main_core_integrity: Integrity(core_integrity),
+                main_core_heat_energy: HeatEnergy(0),
+                power_sources: vec![],
+                enemies: vec![crate::EnemyInitialState::new(
+                    enemy_position,
+                    FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                    Fixed(crate::FIXED_ONE),
+                    Integrity(10),
+                    HeatEnergy(0),
+                )],
+            },
+            StageFeatureSet {
+                signal: true,
+                mobility: true,
+                capacity: true,
+                sensing: true,
+                power: true,
+                construction: true,
+                contact: true,
+                damage: true,
+                ..StageFeatureSet::none()
+            },
+            contract,
+            profiles,
+        )
+    }
+
+    fn direct_s1m4_package(
+        power_sources: Vec<crate::PowerSourceInitialState>,
+        enemies: Vec<crate::EnemyInitialState>,
+    ) -> SimulationPackage {
+        let mut package = s1m4_runtime_package(100, FixedVec2::new(Fixed::ZERO, Fixed::ZERO));
+        let InitialWorld::MainCorePowerEnemyV1 {
+            power_sources: package_sources,
+            enemies: package_enemies,
+            ..
+        } = &mut package.initial_world
+        else {
+            unreachable!("the S1-M4 test package selects the v1 Enemy world")
+        };
+        *package_sources = power_sources;
+        *package_enemies = enemies;
+        package
+    }
+
+    fn direct_enemy(
+        position: FixedVec2,
+        velocity_per_tick: FixedVec2,
+        radius: Fixed,
+        integrity: u64,
+        heat_energy: u64,
+    ) -> crate::EnemyInitialState {
+        crate::EnemyInitialState::new(
+            position,
+            velocity_per_tick,
+            radius,
+            Integrity(integrity),
+            HeatEnergy(heat_energy),
+        )
+    }
+
+    #[test]
+    fn direct_s1m4_package_rejects_empty_nonpositive_overflowing_and_duplicate_enemies() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let valid = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 0);
+        let duplicate = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 7);
+
+        for (name, enemies, expected) in [
+            ("empty", Vec::new(), SimulationError::InvalidCanonicalState),
+            (
+                "zero radius",
+                vec![direct_enemy(point(0, 0), point(0, 0), Fixed::ZERO, 10, 0)],
+                SimulationError::InvalidCanonicalState,
+            ),
+            (
+                "negative radius",
+                vec![direct_enemy(point(0, 0), point(0, 0), Fixed(-1), 10, 0)],
+                SimulationError::InvalidCanonicalState,
+            ),
+            (
+                "zero integrity",
+                vec![direct_enemy(point(0, 0), point(0, 0), quantum, 0, 0)],
+                SimulationError::InvalidCanonicalState,
+            ),
+            (
+                "trajectory overflow",
+                vec![direct_enemy(
+                    point(i64::MAX, 0),
+                    point(quantum.0, 0),
+                    quantum,
+                    10,
+                    0,
+                )],
+                SimulationError::NumericOverflow,
+            ),
+            (
+                "complete duplicate",
+                vec![duplicate, duplicate],
+                SimulationError::InvalidCanonicalState,
+            ),
+        ] {
+            assert_eq!(
+                Simulation::new(direct_s1m4_package(Vec::new(), enemies)).err(),
+                Some(expected),
+                "direct package case `{name}` returned the wrong typed error"
+            );
+        }
+
+        Simulation::new(direct_s1m4_package(
+            Vec::new(),
+            vec![
+                valid,
+                direct_enemy(point(0, 0), point(0, 0), quantum, 10, 1),
+            ],
+        ))
+        .expect("only a complete semantic-tuple duplicate is rejected");
+    }
+
+    #[test]
+    fn direct_s1m4_package_rejects_nonpositive_and_duplicate_power_sources() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let enemy = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 0);
+        let duplicate_position = point(2 * quantum.0, 0);
+        let cases = [
+            vec![crate::PowerSourceInitialState::new(
+                point(quantum.0, 0),
+                Energy(0),
+            )],
+            vec![
+                crate::PowerSourceInitialState::new(duplicate_position, Energy(2)),
+                crate::PowerSourceInitialState::new(duplicate_position, Energy(1)),
+            ],
+        ];
+
+        for sources in cases {
+            assert_eq!(
+                Simulation::new(direct_s1m4_package(sources, vec![enemy])).err(),
+                Some(SimulationError::InvalidCanonicalState)
+            );
+        }
+    }
+
+    #[test]
+    fn direct_s1m4_package_requires_the_complete_eight_feature_set() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let enemy = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 0);
+
+        for feature in [
+            "signal",
+            "mobility",
+            "capacity",
+            "sensing",
+            "power",
+            "construction",
+            "contact",
+            "damage",
+        ] {
+            let mut package = direct_s1m4_package(Vec::new(), vec![enemy]);
+            match feature {
+                "signal" => package.required_features.signal = false,
+                "mobility" => package.required_features.mobility = false,
+                "capacity" => package.required_features.capacity = false,
+                "sensing" => package.required_features.sensing = false,
+                "power" => package.required_features.power = false,
+                "construction" => package.required_features.construction = false,
+                "contact" => package.required_features.contact = false,
+                "damage" => package.required_features.damage = false,
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                Simulation::new(package).err(),
+                Some(SimulationError::MainCorePowerRequiresFeatures),
+                "missing direct S1-M4 feature `{feature}` was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_s1m4_package_rejects_every_off_quantum_enemy_coordinate() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let cases = [
+            ("position.x", point(1, 0), point(0, 0), quantum),
+            ("position.y", point(0, 1), point(0, 0), quantum),
+            ("velocity.x", point(0, 0), point(1, 0), quantum),
+            ("velocity.y", point(0, 0), point(0, 1), quantum),
+            ("radius", point(0, 0), point(0, 0), Fixed(quantum.0 + 1)),
+        ];
+
+        for (field, position, velocity, radius) in cases {
+            let enemy = direct_enemy(position, velocity, radius, 10, 0);
+            assert_eq!(
+                Simulation::new(direct_s1m4_package(Vec::new(), vec![enemy])).err(),
+                Some(SimulationError::InvalidCanonicalState),
+                "off-quantum direct Enemy field `{field}` was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_s1m4_enemy_permutations_allocate_the_same_sorted_ids() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let sorted_inputs = vec![
+            direct_enemy(point(-quantum.0, 0), point(0, 0), quantum, 10, 0),
+            direct_enemy(point(0, -quantum.0), point(0, 0), quantum, 10, 0),
+            direct_enemy(point(0, 0), point(-quantum.0, 0), quantum, 10, 0),
+            direct_enemy(point(0, 0), point(0, -quantum.0), quantum, 10, 0),
+            direct_enemy(point(0, 0), point(0, 0), quantum, 10, 3),
+            direct_enemy(point(0, 0), point(0, 0), quantum, 10, 7),
+            direct_enemy(point(0, 0), point(0, 0), Fixed(2 * quantum.0), 10, 0),
+        ];
+        let permuted_inputs = vec![
+            sorted_inputs[6],
+            sorted_inputs[4],
+            sorted_inputs[2],
+            sorted_inputs[0],
+            sorted_inputs[5],
+            sorted_inputs[1],
+            sorted_inputs[3],
+        ];
+        let sorted_sources = vec![
+            crate::PowerSourceInitialState::new(point(-2 * quantum.0, 0), Energy(1)),
+            crate::PowerSourceInitialState::new(point(2 * quantum.0, 0), Energy(2)),
+        ];
+        let permuted_sources = vec![sorted_sources[1], sorted_sources[0]];
+
+        let canonical = Simulation::new(direct_s1m4_package(permuted_sources, permuted_inputs))
+            .expect("permuted direct Source and Enemy input normalizes");
+        let ordered = Simulation::new(direct_s1m4_package(
+            sorted_sources.clone(),
+            sorted_inputs.clone(),
+        ))
+        .expect("already ordered direct Source and Enemy input remains valid");
+
+        let rows = |simulation: &Simulation| {
+            simulation
+                .canonical
+                .enemies
+                .iter()
+                .map(|enemy| {
+                    (
+                        enemy.id(),
+                        enemy.position(),
+                        enemy.velocity_per_tick(),
+                        enemy.radius(),
+                        enemy.integrity(),
+                        enemy.heat_energy(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let expected = sorted_inputs
+            .into_iter()
+            .enumerate()
+            .map(|(index, enemy)| {
+                (
+                    crate::EnemyId(EntityId(4 + index as u64)),
+                    enemy.position(),
+                    enemy.velocity_per_tick(),
+                    enemy.radius(),
+                    enemy.integrity(),
+                    enemy.heat_energy(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rows(&canonical), expected);
+        assert_eq!(rows(&ordered), expected);
+        assert_eq!(canonical.initial_state_hash, ordered.initial_state_hash);
+        let source_rows = |simulation: &Simulation| {
+            simulation
+                .canonical
+                .power_sources
+                .iter()
+                .map(|source| (source.id(), source.position(), source.generation_per_tick()))
+                .collect::<Vec<_>>()
+        };
+        let expected_sources = sorted_sources
+            .into_iter()
+            .enumerate()
+            .map(|(index, source)| {
+                (
+                    crate::PowerSourceId(EntityId(2 + index as u64)),
+                    source.position(),
+                    source.generation_per_tick(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            source_rows(&canonical),
+            expected_sources,
+            "Core and sorted Sources allocate before normalized Enemies"
+        );
+        assert_eq!(source_rows(&ordered), expected_sources);
+    }
+
+    #[test]
+    fn direct_s1m4_quantum_error_precedes_profile_integrity_mismatch() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let enemy = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 0);
+        let mut package = direct_s1m4_package(Vec::new(), vec![enemy]);
+        let InitialWorld::MainCorePowerEnemyV1 {
+            main_core_position,
+            main_core_integrity,
+            ..
+        } = &mut package.initial_world
+        else {
+            unreachable!("the S1-M4 test package selects the v1 Enemy world")
+        };
+        *main_core_position = point(1, 0);
+        *main_core_integrity = Integrity(99);
+
+        assert_eq!(
+            Simulation::new(package).err(),
+            Some(SimulationError::InvalidMainCoreGeometryQuantum)
+        );
+    }
+
+    #[test]
+    fn direct_s1m4_world_faults_precede_numeric_hash_and_profile_body_faults() {
+        let quantum = crate::REFERENCE_WIRE_GEOMETRY_QUANTUM;
+        let point = |x, y| FixedVec2::new(Fixed(x), Fixed(y));
+        let enemy = direct_enemy(point(0, 0), point(0, 0), quantum, 10, 0);
+        let valid = direct_s1m4_package(Vec::new(), vec![enemy]);
+
+        let mut nonpositive_core = valid.clone();
+        let InitialWorld::MainCorePowerEnemyV1 {
+            main_core_integrity,
+            ..
+        } = &mut nonpositive_core.initial_world
+        else {
+            unreachable!("the S1-M4 test package selects the v1 Enemy world")
+        };
+        *main_core_integrity = Integrity(0);
+
+        let empty_enemies = direct_s1m4_package(Vec::new(), Vec::new());
+        let duplicate_position = point(2 * quantum.0, 0);
+        let duplicate_sources = direct_s1m4_package(
+            vec![
+                crate::PowerSourceInitialState::new(duplicate_position, Energy(1)),
+                crate::PowerSourceInitialState::new(duplicate_position, Energy(2)),
+            ],
+            vec![enemy],
+        );
+
+        let mut off_quantum_core = valid.clone();
+        let InitialWorld::MainCorePowerEnemyV1 {
+            main_core_position, ..
+        } = &mut off_quantum_core.initial_world
+        else {
+            unreachable!("the S1-M4 test package selects the v1 Enemy world")
+        };
+        *main_core_position = point(1, 0);
+
+        for (name, package, expected) in [
+            (
+                "Main Core positivity",
+                nonpositive_core,
+                SimulationError::InvalidMainCoreIntegrity,
+            ),
+            (
+                "Enemy shape",
+                empty_enemies,
+                SimulationError::InvalidCanonicalState,
+            ),
+            (
+                "Source duplicates",
+                duplicate_sources,
+                SimulationError::InvalidCanonicalState,
+            ),
+            (
+                "World quantum",
+                off_quantum_core,
+                SimulationError::InvalidMainCoreGeometryQuantum,
+            ),
+        ] {
+            let mut hash_fault = package.clone();
+            hash_fault.contract.numeric_profile_hash = crate::ProfileHash::default();
+            assert_eq!(
+                Simulation::new(hash_fault).err(),
+                Some(expected.clone()),
+                "{name} must precede a Numeric contract hash mismatch"
+            );
+
+            let mut body_fault = package;
+            body_fault.profiles.numeric.fixed_one = crate::FIXED_ONE + 1;
+            assert_eq!(
+                Simulation::new(body_fault).err(),
+                Some(expected),
+                "{name} must precede an invalid Numeric Profile body"
+            );
+        }
+
+        let valid_numeric_hash = valid.contract.numeric_profile_hash;
+        let mut hash_only = valid.clone();
+        hash_only.contract.numeric_profile_hash = crate::ProfileHash::default();
+        assert_eq!(
+            Simulation::new(hash_only).err(),
+            Some(SimulationError::ProfileHashMismatch {
+                profile: ProfileKind::Numeric,
+                expected: crate::ProfileHash::default(),
+                actual: valid_numeric_hash,
+            })
+        );
+
+        let mut body_only = valid;
+        body_only.profiles.numeric.fixed_one = crate::FIXED_ONE + 1;
+        assert_eq!(
+            Simulation::new(body_only).err(),
+            Some(SimulationError::InvalidProfile {
+                error: ProfileValidationError::FixedOneMismatch {
+                    expected: crate::FIXED_ONE,
+                    actual: crate::FIXED_ONE + 1,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn core_terminal_tick_commits_then_later_steps_fail_before_input_validation() {
+        let mut simulation = Simulation::new(s1m4_runtime_package(
+            100,
+            FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+        ))
+        .expect("S1-M4 world starts");
+        let report = simulation.step(&[]).expect("fatal Tick completes");
+        assert_eq!(
+            report.run_status,
+            RunStatus::Ended {
+                completed_tick: Tick(0),
+                cause: RunEndCause::MainCoreDestroyed,
+            }
+        );
+        assert_eq!(report.state_hash, simulation.state_hash());
+        let next_tick = simulation.next_tick();
+        let hash = simulation.state_hash();
+        let invalid_input = WorldInputEvent::HostileFrame {
+            target_tick: Tick(u64::MAX),
+            hostiles: vec![],
+        };
+        assert_eq!(
+            simulation.step_with_world_inputs(&[], &[invalid_input]),
+            Err(SimulationError::RunEnded)
+        );
+        assert_eq!(simulation.next_tick(), next_tick);
+        assert_eq!(simulation.state_hash(), hash);
+    }
+
+    #[test]
+    fn construction_contact_damage_analyzer_is_sorted_and_read_only() {
+        let simulation = Simulation::new(s1m4_runtime_package(
+            100,
+            FixedVec2::new(Fixed(4 * crate::FIXED_ONE), Fixed::ZERO),
+        ))
+        .expect("S1-M4 world starts");
+        let tick = simulation.next_tick();
+        let hash = simulation.state_hash();
+        let first = simulation
+            .construction_contact_damage_analyzer_snapshot()
+            .expect("analyzer recomputation fits")
+            .expect("S1-M4 analyzer is enabled");
+        let second = simulation
+            .construction_contact_damage_analyzer_snapshot()
+            .expect("repeated analyzer recomputation fits")
+            .expect("S1-M4 analyzer remains enabled");
+        assert_eq!(first, second);
+        assert_eq!(first.next_tick, tick);
+        assert_eq!(first.run_status, RunStatus::Running);
+        assert!(first.damage.is_sorted_by_key(|row| row.target));
+        assert!(first.armed_wires.is_sorted_by_key(|row| row.wire));
+        assert_eq!(simulation.next_tick(), tick);
+        assert_eq!(simulation.state_hash(), hash);
+    }
+
+    fn s1m4_runtime_with_wire() -> (Simulation, WireId) {
+        let pitch = crate::REFERENCE_WORLD_ROUTING_PITCH.0;
+        let mut simulation = Simulation::new(s1m4_runtime_package(
+            100,
+            FixedVec2::new(Fixed(64 * pitch), Fixed::ZERO),
+        ))
+        .expect("S1-M4 world starts");
+        let placed = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![
+                        FixedVec2::new(Fixed(4 * pitch), Fixed::ZERO),
+                        FixedVec2::new(Fixed(12 * pitch), Fixed::ZERO),
+                    ],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("S1-M4 Wire placement commits");
+        assert!(placed.command_rejections.is_empty());
+        let wire = WireId(
+            placed.command_acceptances[0]
+                .created_entity
+                .expect("Wire placement allocates an identity"),
+        );
+        (simulation, wire)
+    }
+
+    fn s1m4_runtime_with_mobile_wire() -> (Simulation, MobileId, WireId) {
+        let (mut simulation, _) = s1m4_runtime_with_wire();
+        let pitch = simulation.profiles.physical_scale.world_routing_pitch.0;
+        let circuit = simulation.profiles.physical_scale.circuit_routing_pitch.0;
+        let routing_area = crate::FixedAabb::new(
+            FixedVec2::new(Fixed(-12 * circuit), Fixed(-12 * circuit)),
+            FixedVec2::new(Fixed(12 * circuit), Fixed(12 * circuit)),
+        );
+        let footprint = routing_area;
+        let placed_mobile = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: simulation.next_tick(),
+                ordinal: 0,
+                command: crate::Command::PlaceMobileSubstrate(crate::PlaceMobileSubstrateCommand {
+                    origin: FixedVec2::new(Fixed(5 * pitch), Fixed::ZERO),
+                    routing_area,
+                    footprint,
+                }),
+            }])
+            .expect("nonzero-origin Mobile placement commits");
+        assert!(
+            placed_mobile.command_rejections.is_empty(),
+            "Mobile placement rejected: {:?}",
+            placed_mobile.command_rejections,
+        );
+        let mobile = MobileId(
+            placed_mobile.command_acceptances[0]
+                .created_entity
+                .expect("Mobile placement allocates an identity"),
+        );
+
+        let placed_wire = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: simulation.next_tick(),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::MobileSubstrate(mobile.entity_id()),
+                    points: vec![
+                        FixedVec2::new(Fixed(-2 * circuit), Fixed(8 * circuit)),
+                        FixedVec2::new(Fixed(2 * circuit), Fixed(8 * circuit)),
+                    ],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("Mobile-local Wire placement commits");
+        assert!(
+            placed_wire.command_rejections.is_empty(),
+            "Mobile-local Wire placement rejected: {:?}",
+            placed_wire.command_rejections,
+        );
+        let wire = WireId(
+            placed_wire.command_acceptances[0]
+                .created_entity
+                .expect("Mobile-local Wire placement allocates an identity"),
+        );
+        (simulation, mobile, wire)
+    }
+
+    fn mobile_wire_test_track_graph(simulation: &Simulation) -> TrackGraph {
+        TrackGraph::compile(
+            simulation.canonical.structural.wires(),
+            simulation.canonical.structural.junctions(),
+        )
+        .expect("Mobile Wire Track graph compiles")
+    }
+
+    #[test]
+    fn mobile_wire_sensing_uses_world_geometry_for_enemy_and_hostile() {
+        let (mut simulation, _, wire) = s1m4_runtime_with_mobile_wire();
+        let graph = mobile_wire_test_track_graph(&simulation);
+        let pitch = simulation.profiles.physical_scale.world_routing_pitch.0;
+        let circuit = simulation.profiles.physical_scale.circuit_routing_pitch.0;
+        let world_point = FixedVec2::new(Fixed(5 * pitch), Fixed(8 * circuit));
+        let local_ghost = FixedVec2::new(Fixed::ZERO, Fixed(8 * circuit));
+        let far = FixedVec2::new(Fixed(64 * pitch), Fixed::ZERO);
+        let enemy = simulation
+            .canonical
+            .enemies
+            .iter()
+            .next()
+            .expect("test Enemy exists")
+            .id();
+        let occupied = |snapshot: &Phase1Snapshot| {
+            snapshot
+                .wire_sensing
+                .iter()
+                .find(|sample| sample.id == wire)
+                .expect("Mobile Wire has a sensing row")
+                .occupied
+        };
+        let sample = |simulation: &Simulation, hostiles: &[HostileCollider]| {
+            let before = simulation.state_hash();
+            let snapshot = run_phase1_snapshot_and_world_sample(
+                &simulation.canonical,
+                &graph,
+                hostiles,
+                true,
+                simulation.profiles.balance.sense_radius,
+                simulation.profiles.physical_scale.world_routing_pitch,
+                simulation.profiles.balance.contact_damage_probe.as_ref(),
+            )
+            .expect("Phase 1 world sensing succeeds");
+            assert_eq!(simulation.state_hash(), before, "Phase 1 remains read-only");
+            snapshot
+        };
+
+        simulation
+            .canonical
+            .enemies
+            .get_mut(enemy)
+            .expect("test Enemy remains alive")
+            .set_position(world_point);
+        assert!(occupied(&sample(&simulation, &[])));
+        simulation
+            .canonical
+            .enemies
+            .get_mut(enemy)
+            .expect("test Enemy remains alive")
+            .set_position(local_ghost);
+        assert!(!occupied(&sample(&simulation, &[])));
+
+        simulation
+            .canonical
+            .enemies
+            .get_mut(enemy)
+            .expect("test Enemy remains alive")
+            .set_position(far);
+        assert!(occupied(&sample(
+            &simulation,
+            &[HostileCollider {
+                id: 77,
+                center: world_point,
+                radius: Fixed::ZERO,
+            }],
+        )));
+        assert!(!occupied(&sample(
+            &simulation,
+            &[HostileCollider {
+                id: 77,
+                center: local_ghost,
+                radius: Fixed::ZERO,
+            }],
+        )));
+    }
+
+    #[test]
+    fn mobile_construction_targets_use_world_geometry_for_all_routed_kinds() {
+        let (simulation, mobile, _) = s1m4_runtime_with_mobile_wire();
+        let graph = mobile_wire_test_track_graph(&simulation);
+        let circuit = simulation.profiles.physical_scale.circuit_routing_pitch.0;
+        let mobile_record = simulation
+            .canonical
+            .structural
+            .mobile_substrates()
+            .iter_alive()
+            .find(|(_, record)| record.id == mobile)
+            .map(|(_, record)| record)
+            .expect("test Mobile remains alive");
+        let world_origin = graph
+            .world_position(mobile_record.track_position)
+            .expect("Mobile Track position resolves");
+        let domain = crate::RoutingDomain::MobileSubstrate(mobile.entity_id());
+        let targets = [
+            crate::ConstructionTarget::Gate {
+                gate_type: GateType::Not,
+                origin: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                routing_domain: domain,
+            },
+            crate::ConstructionTarget::Junction {
+                routing_domain: domain,
+                position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+            },
+            crate::ConstructionTarget::Wire {
+                routing_domain: domain,
+                points: vec![
+                    FixedVec2::new(Fixed(-circuit), Fixed::ZERO),
+                    FixedVec2::new(Fixed(circuit), Fixed::ZERO),
+                ],
+                endpoint_a: crate::EndpointTarget::Free,
+                endpoint_b: crate::EndpointTarget::Free,
+            },
+        ];
+        let before = simulation.state_hash();
+        for (index, target) in targets.into_iter().enumerate() {
+            let site = crate::ConstructionSiteId(EntityId(
+                100 + u64::try_from(index).expect("small test index fits"),
+            ));
+            let sites = ConstructionSiteStore::new(vec![crate::ConstructionSite {
+                id: site,
+                target,
+                required_work: Energy(1),
+                completed_work: Energy(0),
+                activation_ready: false,
+            }])
+            .expect("test Site is structurally valid");
+            assert_eq!(
+                simulation.canonical.structural.smallest_intersecting_site(
+                    &sites,
+                    world_origin,
+                    mobile_record.footprint,
+                    &graph,
+                    &simulation.profiles.physical_scale,
+                ),
+                Ok(Some(site)),
+                "world-transformed routed Site kind {index} is reachable",
+            );
+            assert_eq!(
+                simulation.canonical.structural.smallest_intersecting_site(
+                    &sites,
+                    FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                    mobile_record.footprint,
+                    &graph,
+                    &simulation.profiles.physical_scale,
+                ),
+                Ok(None),
+                "raw Mobile-local ghost for Site kind {index} is not world geometry",
+            );
+        }
+        assert_eq!(
+            simulation.state_hash(),
+            before,
+            "Site reach query is read-only"
+        );
+    }
+
+    #[test]
+    fn mobile_wire_contact_and_enemy_attack_use_world_geometry_not_local_ghost() {
+        let (simulation, _, wire) = s1m4_runtime_with_mobile_wire();
+        let graph = mobile_wire_test_track_graph(&simulation);
+        let pitch = simulation.profiles.physical_scale.world_routing_pitch.0;
+        let circuit = simulation.profiles.physical_scale.circuit_routing_pitch.0;
+        let world_point = FixedVec2::new(Fixed(5 * pitch), Fixed(8 * circuit));
+        let local_ghost = FixedVec2::new(Fixed::ZERO, Fixed(8 * circuit));
+        let enemy = simulation
+            .canonical
+            .enemies
+            .iter()
+            .next()
+            .expect("test Enemy exists")
+            .id();
+        let staged = |point| StagedEnemyTrajectory {
+            enemy,
+            start: point,
+            end: point,
+            radius: Fixed(crate::FIXED_ONE),
+        };
+        let phase5 = || Phase5Output {
+            report: Some(PowerStepReport {
+                loads: vec![crate::PowerLoadReport {
+                    demand: DemandId::new(wire.entity_id(), DemandKind::LiveWire),
+                    region: crate::PowerRegionId(1),
+                    nominal: Energy(30),
+                    granted: Energy(30),
+                    ratio: PowerRatio::ONE,
+                    source_route: None,
+                    transmission_loss: Energy(0),
+                    source_cost: Energy(0),
+                }],
+                ..PowerStepReport::default()
+            }),
+            private_heat: Vec::new(),
+        };
+        let run = |point| {
+            let mut phase5 = phase5();
+            run_phase8_interaction(
+                &simulation.canonical,
+                &mut phase5,
+                Phase8Inputs {
+                    staged_mobiles: &[],
+                    mobile_intents: &[],
+                    staged_enemies: &[staged(point)],
+                    live_wires: &[LiveWireIntent {
+                        wire,
+                        nominal: Energy(30),
+                    }],
+                    track_graph: &graph,
+                    physical: &simulation.profiles.physical_scale,
+                    balance: &simulation.profiles.balance,
+                },
+            )
+            .expect("Phase 8 interaction succeeds")
+        };
+        let before = simulation.state_hash();
+        let actual = run(world_point);
+        assert_eq!(actual.contacts.len(), 1);
+        assert_eq!(actual.contacts[0].wire, wire);
+        assert_eq!(actual.contacts[0].target, enemy);
+        assert!(actual.exposures.iter().any(|exposure| {
+            exposure.target == enemy.entity_id() && exposure.source == wire.entity_id()
+        }));
+        assert!(actual.exposures.iter().any(|exposure| {
+            exposure.target == wire.entity_id() && exposure.source == enemy.entity_id()
+        }));
+
+        let ghost = run(local_ghost);
+        assert!(ghost.contacts.is_empty());
+        assert!(ghost.exposures.is_empty());
+        assert_eq!(
+            simulation.state_hash(),
+            before,
+            "Phase 8 geometry is read-only"
+        );
+    }
+
+    #[test]
+    fn canonical_enemy_is_a_wire_sensing_collider_without_a_hostile_frame() {
+        let pitch = crate::REFERENCE_WORLD_ROUTING_PITCH.0;
+        let mut simulation = Simulation::new(s1m4_runtime_package(
+            100,
+            FixedVec2::new(Fixed(6 * pitch), Fixed::ZERO),
+        ))
+        .expect("S1-M4 world starts");
+        let placed = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(0),
+                ordinal: 0,
+                command: crate::Command::PlaceWire(crate::PlaceWireCommand {
+                    routing_domain: crate::RoutingDomain::OpenWorld,
+                    points: vec![
+                        FixedVec2::new(Fixed(4 * pitch), Fixed::ZERO),
+                        FixedVec2::new(Fixed(12 * pitch), Fixed::ZERO),
+                    ],
+                    endpoint_a: crate::EndpointTarget::Free,
+                    endpoint_b: crate::EndpointTarget::Free,
+                }),
+            }])
+            .expect("S1-M4 Wire placement commits");
+        let wire = WireId(
+            placed.command_acceptances[0]
+                .created_entity
+                .expect("Wire placement allocates an identity"),
+        );
+
+        let sense = simulation
+            .wire_sense_state(wire)
+            .expect("placed S1-M4 Wire has Sense state");
+        assert!(sense.sampled_presence);
+        assert_eq!(sense.intended_level, LogicLevel::High);
+    }
+
+    #[test]
+    fn v5_mobile_build_ports_validate_after_a_real_tick_commit() {
+        let (mut simulation, _) = s1m4_runtime_with_wire();
+        let pitch = simulation.profiles.physical_scale.world_routing_pitch.0;
+        let circuit_pitch = simulation.profiles.physical_scale.circuit_routing_pitch.0;
+        let local_bounds = crate::FixedAabb::new(
+            FixedVec2::new(Fixed(-4 * circuit_pitch), Fixed(-4 * circuit_pitch)),
+            FixedVec2::new(Fixed(4 * circuit_pitch), Fixed(4 * circuit_pitch)),
+        );
+        let placed = simulation
+            .step(&[crate::CommandEnvelope {
+                target_tick: Tick(1),
+                ordinal: 0,
+                command: crate::Command::PlaceMobileSubstrate(crate::PlaceMobileSubstrateCommand {
+                    origin: FixedVec2::new(Fixed(5 * pitch), Fixed::ZERO),
+                    routing_area: local_bounds,
+                    footprint: local_bounds,
+                }),
+            }])
+            .expect("v5 Mobile commit passes final canonical validation");
+        assert!(placed.command_rejections.is_empty());
+        let mobile = MobileId(
+            placed.command_acceptances[0]
+                .created_entity
+                .expect("Mobile placement allocates an identity"),
+        );
+        let ports = simulation
+            .canonical
+            .signal
+            .mobile_ports(mobile)
+            .expect("Mobile signal lifecycle exists");
+        assert!(ports.build.is_some());
+        assert_eq!(
+            simulation
+                .canonical
+                .signal
+                .canonical_driver_slots()
+                .filter_map(|(_, record)| record)
+                .filter(|record| {
+                    record.owner == mobile.entity_id()
+                        && record.role == DriverRole::ExternalMobileBuild
+                })
+                .count(),
+            1
+        );
+        validate_canonical_world(&simulation.canonical)
+            .expect("post-step BUILD sink/driver registry is coherent");
+    }
+
+    #[test]
+    fn phase9_keeps_retained_power_heat_separate_from_live_wire_remainder() {
+        let (mut simulation, wire) = s1m4_runtime_with_wire();
+        let live_demand = DemandId::new(wire.entity_id(), DemandKind::LiveWire);
+        let interaction = [InteractionHeatReport {
+            owner: wire.entity_id(),
+            kind: InteractionHeatKind::LiveWireRemainder,
+            demand: Some(live_demand),
+            energy: HeatEnergy(4),
+        }];
+        let retained = [
+            PowerHeatReport {
+                owner: wire,
+                kind: crate::PowerHeatKind::LeakageDissipation,
+                demand: DemandId::new(wire.entity_id(), DemandKind::WireLeakage),
+                energy: HeatEnergy(1),
+            },
+            PowerHeatReport {
+                owner: wire,
+                kind: crate::PowerHeatKind::TransmissionLoss,
+                demand: live_demand,
+                energy: HeatEnergy(2),
+            },
+            PowerHeatReport {
+                owner: wire,
+                kind: crate::PowerHeatKind::OvercapacitySupport,
+                demand: DemandId::new(wire.entity_id(), DemandKind::OvercapacitySupport),
+                energy: HeatEnergy(3),
+            },
+        ];
+        run_phase9_thermal_integration(
+            &mut simulation.canonical,
+            &interaction,
+            &retained,
+            &simulation.profiles.balance,
+        )
+        .expect("all four heat causes integrate exactly once");
+        assert_eq!(
+            simulation
+                .canonical
+                .structural
+                .damage_state(wire.entity_id())
+                .expect("Wire is damageable")
+                .1
+                .heat_energy,
+            HeatEnergy(10)
+        );
+    }
+
+    #[test]
+    fn phase10_rejects_orphan_exposure_before_mutating_canonical_state() {
+        let mut simulation = Simulation::new(s1m4_runtime_package(
+            100,
+            FixedVec2::new(
+                Fixed(64 * crate::REFERENCE_WORLD_ROUTING_PITCH.0),
+                Fixed::ZERO,
+            ),
+        ))
+        .expect("S1-M4 world starts");
+        let core = simulation.canonical.main_core.expect("S1-M4 Core exists");
+        let snapshot = Phase1Snapshot {
+            core: Some(CoreDamagePhase1Snapshot {
+                target: core.id().entity_id(),
+                integrity: core.integrity(),
+                temperature: Fixed::ZERO,
+            }),
+            ..Phase1Snapshot::default()
+        };
+        let before = canonical::state_hash(simulation.canonical.state_view());
+        assert_eq!(
+            run_phase10_damage_resolution(
+                &mut simulation.canonical,
+                &snapshot,
+                &[ElectricalExposure {
+                    target: EntityId(u64::MAX),
+                    source: EntityId(1),
+                    energy: Energy(1),
+                }],
+                &simulation.profiles.balance,
+            ),
+            Err(SimulationError::InvalidCanonicalState)
+        );
+        assert_eq!(
+            canonical::state_hash(simulation.canonical.state_view()),
+            before,
+            "orphan exposure rejection is atomic"
+        );
+    }
+
     fn retained_world_package_with_power_probe(
         scenario_id: &'static str,
         initial_world: InitialWorld,
@@ -4582,7 +7246,26 @@ mod tests {
                 .is_empty()
         );
 
-        run_phase8_interaction(&[], &mut phase5).expect("Phase 8 publishes derived heat");
+        let simulation = Simulation::new(package()).expect("test package is valid");
+        let track_graph = TrackGraph::compile(
+            simulation.canonical.structural.wires(),
+            simulation.canonical.structural.junctions(),
+        )
+        .expect("empty Track graph compiles");
+        run_phase8_interaction(
+            &simulation.canonical,
+            &mut phase5,
+            Phase8Inputs {
+                staged_mobiles: &[],
+                mobile_intents: &[],
+                staged_enemies: &[],
+                live_wires: &[],
+                track_graph: &track_graph,
+                physical: &simulation.profiles.physical_scale,
+                balance: &simulation.profiles.balance,
+            },
+        )
+        .expect("Phase 8 publishes derived heat");
 
         assert!(phase5.private_heat.is_empty());
         assert_eq!(

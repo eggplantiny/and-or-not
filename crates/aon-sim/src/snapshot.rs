@@ -2,10 +2,11 @@ use crate::mobility::TrackGraph;
 use crate::signal::{SignalWorld, resolve_drive};
 use crate::structural::StructuralWorld;
 use crate::{
-    Capacity, ConnectionGeneration, DriveVector, DriverId, DriverSample, EndpointTarget, EntityId,
-    FixedAabb, FixedVec2, GateId, GateSignalPorts, GateType, HeatEnergy, Integrity, JunctionId,
-    LogicLevel, MainCoreId, MobileControlPorts, MobileId, Revision, RoutingDomain,
-    SimulationContract, SinkId, StateHash, Tick, TrackPosition, WireId,
+    Capacity, ConnectionGeneration, ConstructionSiteId, ConstructionSiteStore, ConstructionTarget,
+    DamageState, DriveVector, DriverId, DriverSample, EndpointTarget, EnemyId, EnemyStore,
+    EntityId, Fixed, FixedAabb, FixedVec2, GateId, GateSignalPorts, GateType, HeatEnergy,
+    Integrity, JunctionId, LogicLevel, MainCoreId, MobileControlPorts, MobileId, Revision,
+    RoutingDomain, RunStatus, SimulationContract, SinkId, StateHash, Tick, TrackPosition, WireId,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +24,7 @@ pub struct FixedSubstrateRenderRecord {
     pub origin: FixedVec2,
     pub routing_area: FixedAabb,
     pub footprint: FixedAabb,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +38,8 @@ pub struct MobileRenderRecord {
     pub stop: LogicLevel,
     pub left: LogicLevel,
     pub right: LogicLevel,
+    pub build: Option<LogicLevel>,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +61,7 @@ pub struct GateRenderRecord {
     pub pending_level: Option<LogicLevel>,
     pub pending_switch_energy: Option<crate::Energy>,
     pub cancelled_switching_heat: crate::HeatEnergy,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,6 +76,7 @@ pub struct WireRenderRecord {
     pub previous_drive: DriveVector,
     pub active_level: LogicLevel,
     pub previous_level: LogicLevel,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +85,26 @@ pub struct JunctionRenderRecord {
     pub routing_domain: RoutingDomain,
     pub position: FixedVec2,
     pub connection_generation: ConnectionGeneration,
+    pub damage_state: Option<DamageState>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnemyRenderRecord {
+    pub id: EnemyId,
+    pub position: FixedVec2,
+    pub velocity_per_tick: FixedVec2,
+    pub radius: Fixed,
+    pub integrity: Integrity,
+    pub heat_energy: HeatEnergy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstructionSiteRenderRecord {
+    pub id: ConstructionSiteId,
+    pub target: ConstructionTarget,
+    pub required_work: crate::Energy,
+    pub completed_work: crate::Energy,
+    pub activation_ready: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -122,6 +148,9 @@ pub(crate) struct RenderSnapshotSource<'a> {
     pub main_core: Option<&'a crate::MainCoreState>,
     pub structural: &'a StructuralWorld,
     pub signal: &'a SignalWorld,
+    pub enemies: &'a EnemyStore,
+    pub construction_sites: &'a ConstructionSiteStore,
+    pub run_status: RunStatus,
     pub logic_threshold: u64,
 }
 
@@ -139,6 +168,9 @@ pub struct RenderSnapshot {
     gates: Vec<GateRenderRecord>,
     wires: Vec<WireRenderRecord>,
     junctions: Vec<JunctionRenderRecord>,
+    enemies: Vec<EnemyRenderRecord>,
+    construction_sites: Vec<ConstructionSiteRenderRecord>,
+    run_status: RunStatus,
 }
 
 impl Default for RenderSnapshot {
@@ -161,6 +193,9 @@ impl Default for RenderSnapshot {
             gates: Vec::new(),
             wires: Vec::new(),
             junctions: Vec::new(),
+            enemies: Vec::new(),
+            construction_sites: Vec::new(),
+            run_status: RunStatus::Running,
         }
     }
 }
@@ -214,6 +249,18 @@ impl RenderSnapshot {
         &self.junctions
     }
 
+    pub fn enemies(&self) -> &[EnemyRenderRecord] {
+        &self.enemies
+    }
+
+    pub fn construction_sites(&self) -> &[ConstructionSiteRenderRecord] {
+        &self.construction_sites
+    }
+
+    pub const fn run_status(&self) -> RunStatus {
+        self.run_status
+    }
+
     pub(crate) fn write(&mut self, source: RenderSnapshotSource<'_>) {
         let RenderSnapshotSource {
             scenario_id,
@@ -224,6 +271,9 @@ impl RenderSnapshot {
             main_core,
             structural,
             signal,
+            enemies,
+            construction_sites,
+            run_status,
             logic_threshold,
         } = source;
         self.scenario_id.clear();
@@ -231,8 +281,12 @@ impl RenderSnapshot {
         self.next_tick = next_tick;
         self.topology_revision = topology_revision;
         self.contract = contract;
-        self.primitive_count = structural.live_primitive_count() + u64::from(main_core.is_some());
+        self.primitive_count = structural.live_primitive_count()
+            + u64::from(main_core.is_some())
+            + u64::try_from(enemies.len()).expect("validated Enemy count fits u64")
+            + u64::try_from(construction_sites.len()).expect("validated Site count fits u64");
         self.state_hash = state_hash;
+        self.run_status = run_status;
         self.main_core = main_core.map(|core| MainCoreRenderRecord {
             id: core.id(),
             position: core.position(),
@@ -252,6 +306,7 @@ impl RenderSnapshot {
                         origin: record.origin,
                         routing_area: record.routing_area,
                         footprint: record.footprint,
+                        damage_state: record.damage_state,
                     }),
             );
         self.fixed_substrates
@@ -286,6 +341,12 @@ impl RenderSnapshot {
                         right: signal
                             .sink_level(ports.right)
                             .expect("validated canonical Mobile RIGHT Sink exists"),
+                        build: ports.build.map(|build| {
+                            signal
+                                .sink_level(build)
+                                .expect("validated canonical Mobile BUILD Sink exists")
+                        }),
+                        damage_state: record.damage_state,
                     }
                 }),
         );
@@ -335,6 +396,7 @@ impl RenderSnapshot {
                     pending_level: gate_signal.pending_level,
                     pending_switch_energy: gate_signal.pending_switch_energy,
                     cancelled_switching_heat: gate_signal.cancelled_switching_heat,
+                    damage_state: record.damage_state,
                 }
             }));
         self.gates
@@ -357,6 +419,7 @@ impl RenderSnapshot {
                     previous_drive: wire_signal.previous,
                     active_level: resolve_drive(wire_signal.active, logic_threshold),
                     previous_level: resolve_drive(wire_signal.previous, logic_threshold),
+                    damage_state: record.damage_state,
                 }
             }));
         self.wires
@@ -373,10 +436,39 @@ impl RenderSnapshot {
                         routing_domain: record.routing_domain,
                         position: record.position,
                         connection_generation: record.connection_generation,
+                        damage_state: record.damage_state,
                     }),
             );
         self.junctions
             .sort_unstable_by_key(|record| record.id.entity_id());
+
+        self.enemies.clear();
+        self.enemies
+            .extend(enemies.iter().map(|enemy| EnemyRenderRecord {
+                id: enemy.id(),
+                position: enemy.position(),
+                velocity_per_tick: enemy.velocity_per_tick(),
+                radius: enemy.radius(),
+                integrity: enemy.integrity(),
+                heat_energy: enemy.heat_energy(),
+            }));
+        self.enemies.sort_unstable_by_key(|record| record.id);
+
+        self.construction_sites.clear();
+        self.construction_sites
+            .extend(
+                construction_sites
+                    .iter()
+                    .map(|site| ConstructionSiteRenderRecord {
+                        id: site.id,
+                        target: site.target.clone(),
+                        required_work: site.required_work,
+                        completed_work: site.completed_work,
+                        activation_ready: site.activation_ready,
+                    }),
+            );
+        self.construction_sites
+            .sort_unstable_by_key(|record| record.id);
     }
 }
 

@@ -577,12 +577,12 @@ fn world_generation_validates_main_core_and_power_source_quantization() {
 }
 
 #[test]
-fn replay_header_identifies_v2_v6_main_core_power_generation() {
+fn replay_header_identifies_v2_v7_main_core_power_generation() {
     let simulation = reference_simulation();
     let header = simulation.replay_header();
 
     assert_eq!(header.format_version, ReplayFormatVersion::V2);
-    assert_eq!(header.state_hash_version, StateHashVersion::V6);
+    assert_eq!(header.state_hash_version, StateHashVersion::V7);
     assert_eq!(
         header.world_generator_version,
         WorldGeneratorVersion::MainCorePowerV1

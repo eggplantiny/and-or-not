@@ -3,10 +3,10 @@ use crate::cell_buffer::{
     PresentationSource, WireConnections,
 };
 use aon_sim::{
-    EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GatePort, GatePortRef, GateRenderRecord,
-    GateType, Heading, LogicLevel, MobilePort, MobilePortRef, MobileRenderRecord,
-    PhysicalScaleProfile, PortAnchor, RenderSnapshot, RoutingDomain, TrackPosition, WireEnd,
-    WireId, WireRenderRecord, floor_div, polyline_length,
+    ConstructionSiteRenderRecord, ConstructionTarget, EndpointTarget, EntityId, Fixed, FixedAabb,
+    FixedVec2, GatePort, GatePortRef, GateRenderRecord, GateType, Heading, LogicLevel, MobilePort,
+    MobilePortRef, MobileRenderRecord, PhysicalScaleProfile, PortAnchor, RenderSnapshot,
+    RoutingDomain, TrackPosition, WireEnd, WireId, WireRenderRecord, floor_div, polyline_length,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -368,6 +368,14 @@ pub fn project_snapshot(
             &mut ranked_picks,
             &mut diagnostics,
         );
+        draw_enemies(
+            snapshot,
+            pitch,
+            bounds,
+            &mut buffer,
+            &mut ranked_picks,
+            &mut diagnostics,
+        );
         draw_mobiles(
             snapshot,
             pitch,
@@ -377,6 +385,17 @@ pub fn project_snapshot(
             &mut diagnostics,
         );
     }
+
+    draw_construction_sites(
+        snapshot,
+        view,
+        coordinate_origin,
+        pitch,
+        bounds,
+        &mut buffer,
+        &mut ranked_picks,
+        &mut diagnostics,
+    );
 
     if let ViewMode::Circuit { substrate } = view
         && let Some(mobile) = snapshot
@@ -452,6 +471,111 @@ fn draw_main_core(
         ),
     ));
     push_pick(picks, at, CellLayer::MainCore, PickTarget::Entity(entity));
+}
+
+fn draw_enemies(
+    snapshot: &RenderSnapshot,
+    pitch: Fixed,
+    bounds: GridBounds,
+    buffer: &mut CellBuffer,
+    picks: &mut BTreeMap<CellPoint, Vec<RankedPick>>,
+    diagnostics: &mut Vec<PresenterDiagnostic>,
+) {
+    for enemy in snapshot.enemies() {
+        let entity = enemy.id.entity_id();
+        let Some(at) = project_fixed_point(enemy.position, FixedVec2::default(), pitch)
+            .and_then(GridPoint::to_cell)
+        else {
+            diagnostics.push(PresenterDiagnostic::CoordinateOutsideHostRange { entity });
+            continue;
+        };
+        if !bounds.contains(GridPoint::new(i64::from(at.x), i64::from(at.y))) {
+            continue;
+        }
+        buffer.write(CellWrite::new(
+            at,
+            CellLayer::Mobile,
+            CellVisual::new(
+                'E',
+                CellTone::Neutral,
+                Some(PresentationSource::Canonical(entity)),
+            ),
+        ));
+        push_pick(picks, at, CellLayer::Mobile, PickTarget::Entity(entity));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_construction_sites(
+    snapshot: &RenderSnapshot,
+    view: ViewMode,
+    coordinate_origin: FixedVec2,
+    pitch: Fixed,
+    bounds: GridBounds,
+    buffer: &mut CellBuffer,
+    picks: &mut BTreeMap<CellPoint, Vec<RankedPick>>,
+    diagnostics: &mut Vec<PresenterDiagnostic>,
+) {
+    for site in snapshot
+        .construction_sites()
+        .iter()
+        .filter(|site| construction_site_visible(site, view))
+    {
+        let entity = site.id.entity_id();
+        let Some(at) = project_fixed_point(
+            construction_site_visual_anchor(site),
+            coordinate_origin,
+            pitch,
+        )
+        .and_then(GridPoint::to_cell) else {
+            diagnostics.push(PresenterDiagnostic::CoordinateOutsideHostRange { entity });
+            continue;
+        };
+        if !bounds.contains(GridPoint::new(i64::from(at.x), i64::from(at.y))) {
+            continue;
+        }
+        buffer.write(CellWrite::new(
+            at,
+            CellLayer::Junction,
+            CellVisual::new(
+                construction_site_glyph(&site.target),
+                CellTone::Ghost,
+                Some(PresentationSource::Canonical(entity)),
+            ),
+        ));
+        push_pick(picks, at, CellLayer::Junction, PickTarget::Entity(entity));
+    }
+}
+
+fn construction_site_visible(site: &ConstructionSiteRenderRecord, view: ViewMode) -> bool {
+    let domain = match &site.target {
+        ConstructionTarget::Gate { routing_domain, .. }
+        | ConstructionTarget::Wire { routing_domain, .. }
+        | ConstructionTarget::Junction { routing_domain, .. } => *routing_domain,
+        ConstructionTarget::FixedSubstrate { .. } => RoutingDomain::OpenWorld,
+    };
+    domain_visible(domain, view)
+}
+
+fn construction_site_visual_anchor(site: &ConstructionSiteRenderRecord) -> FixedVec2 {
+    match &site.target {
+        ConstructionTarget::Gate { origin, .. }
+        | ConstructionTarget::FixedSubstrate { origin, .. } => *origin,
+        ConstructionTarget::Junction { position, .. } => *position,
+        ConstructionTarget::Wire { points, .. } => points
+            .first()
+            .copied()
+            .expect("validated Construction Wire has at least two points"),
+    }
+}
+
+const fn construction_site_glyph(target: &ConstructionTarget) -> char {
+    match target {
+        ConstructionTarget::Gate { .. } => 'g',
+        ConstructionTarget::Wire { .. } => 'w',
+        ConstructionTarget::Junction { .. } => 'j',
+        ConstructionTarget::FixedSubstrate { .. } => 'f',
+    }
 }
 
 fn domain_visible(domain: RoutingDomain, view: ViewMode) -> bool {
@@ -575,7 +699,7 @@ fn draw_mobile_ports(
     diagnostics: &mut Vec<PresenterDiagnostic>,
 ) {
     let entity = mobile.id.entity_id();
-    let ports = [
+    let mut ports = vec![
         (MobilePort::Stop, mobile.routing_area.min, 'S', mobile.stop),
         (
             MobilePort::Left,
@@ -590,6 +714,16 @@ fn draw_mobile_ports(
             mobile.right,
         ),
     ];
+    if let Some(build) = mobile.build {
+        // BUILD has no canonical geometric anchor. The remaining routing-area corner is a stable,
+        // host-only visual location and is never fed back into simulation geometry or state.
+        ports.push((
+            MobilePort::Build,
+            FixedVec2::new(mobile.routing_area.min.x, mobile.routing_area.max.y),
+            'B',
+            build,
+        ));
+    }
     for (port, point, glyph, level) in ports {
         let Some(at) =
             project_fixed_point(point, FixedVec2::default(), pitch).and_then(GridPoint::to_cell)

@@ -1,9 +1,12 @@
 use aon_sim::{
-    ArtifactBytes, Command, CommandEnvelope, ConnectionGeneration, EndpointTarget, EntityId, Fixed,
-    FixedAabb, FixedVec2, GateId, GatePort, GatePortRef, GateType, InitialWorld, JunctionId,
-    LogicLevel, PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
-    PlaceWireCommand, RemoveEntityCommand, RenderSnapshot, RoutingDomain, SignalProbeTarget,
-    SignalProbeValue, Simulation, SimulationPackage, Tick, WireId, decode_package,
+    ArtifactBytes, BalanceProfile, Command, CommandEnvelope, ConnectionGeneration,
+    ConstructionTarget, EndpointTarget, EnemyInitialState, EntityId, Fixed, FixedAabb, FixedVec2,
+    GateId, GatePort, GatePortRef, GateType, HeatEnergy, InitialWorld, Integrity, JunctionId,
+    LogicLevel, NumericProfile, PhysicalScaleProfile, PlaceConstructionSiteCommand,
+    PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, ProfileBundle, RemoveEntityCommand,
+    RenderSnapshot, RoutingDomain, RunStatus, SignalProbeTarget, SignalProbeValue, Simulation,
+    SimulationContract, SimulationPackage, StageFeatureSet, Tick, WireId, decode_package,
 };
 
 const SCENARIO: &[u8] = include_bytes!(concat!(
@@ -190,6 +193,28 @@ fn render_snapshot_is_a_sorted_exact_owned_projection() {
     assert_eq!(substrate.id, EntityId(1));
     assert_eq!(substrate.origin, point(0, 0));
     assert_eq!(substrate.routing_area, substrate.footprint);
+    assert_eq!(substrate.damage_state, None);
+    assert!(
+        snapshot
+            .gates()
+            .iter()
+            .all(|record| record.damage_state.is_none())
+    );
+    assert!(
+        snapshot
+            .wires()
+            .iter()
+            .all(|record| record.damage_state.is_none())
+    );
+    assert!(
+        snapshot
+            .junctions()
+            .iter()
+            .all(|record| record.damage_state.is_none())
+    );
+    assert!(snapshot.enemies().is_empty());
+    assert!(snapshot.construction_sites().is_empty());
+    assert_eq!(snapshot.run_status(), RunStatus::Running);
 
     let first_gate = snapshot.gates()[0];
     assert_eq!(first_gate.id, GateId(EntityId(2)));
@@ -283,6 +308,137 @@ fn render_snapshot_is_a_sorted_exact_owned_projection() {
         junction.connection_generation,
         ConnectionGeneration::INITIAL
     );
+}
+
+fn s1m4_package() -> SimulationPackage {
+    let profiles = ProfileBundle {
+        numeric: NumericProfile::reference_v1("numeric-s1m4-snapshot"),
+        physical_scale: PhysicalScaleProfile::stage0_alpha("physical-s1m4-snapshot"),
+        balance: BalanceProfile::construction_contact_damage_alpha("balance-s1m4-snapshot"),
+    };
+    let contract = SimulationContract::from_profiles(&profiles).expect("S1-M4 profiles validate");
+    SimulationPackage::new(
+        "s1m4-snapshot",
+        InitialWorld::MainCorePowerEnemyV1 {
+            main_core_position: point(0, 0),
+            main_core_integrity: Integrity(100),
+            main_core_heat_energy: HeatEnergy(0),
+            power_sources: vec![],
+            enemies: vec![EnemyInitialState::new(
+                point(-4 * WORLD_PITCH, 0),
+                point(0, 0),
+                Fixed(WORLD_PITCH),
+                Integrity(10),
+                HeatEnergy(3),
+            )],
+        },
+        StageFeatureSet {
+            signal: true,
+            mobility: true,
+            capacity: true,
+            sensing: true,
+            power: true,
+            construction: true,
+            contact: true,
+            damage: true,
+            ..StageFeatureSet::none()
+        },
+        contract,
+        profiles,
+    )
+}
+
+#[test]
+fn s1m4_snapshot_projects_enemy_site_damage_build_and_run_status() {
+    let mut simulation = Simulation::new(s1m4_package()).expect("S1-M4 simulation starts");
+    simulation
+        .step(&[envelope(
+            0,
+            0,
+            Command::PlaceWire(PlaceWireCommand {
+                routing_domain: RoutingDomain::OpenWorld,
+                points: vec![point(10 * WORLD_PITCH, 0), point(14 * WORLD_PITCH, 0)],
+                endpoint_a: EndpointTarget::Free,
+                endpoint_b: EndpointTarget::Free,
+            }),
+        )])
+        .expect("S1-M4 track Wire is valid");
+    let mobile_bounds = FixedAabb::new(
+        point(-4 * CIRCUIT_PITCH, -4 * CIRCUIT_PITCH),
+        point(4 * CIRCUIT_PITCH, 4 * CIRCUIT_PITCH),
+    );
+    simulation
+        .step(&[envelope(
+            1,
+            0,
+            Command::PlaceMobileSubstrate(PlaceMobileSubstrateCommand {
+                origin: point(11 * WORLD_PITCH, 0),
+                routing_area: mobile_bounds,
+                footprint: mobile_bounds,
+            }),
+        )])
+        .expect("S1-M4 Mobile is valid");
+    let placement = simulation
+        .step(&[envelope(
+            2,
+            0,
+            Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+                target: ConstructionTarget::Junction {
+                    routing_domain: RoutingDomain::OpenWorld,
+                    position: point(6 * WORLD_PITCH, 0),
+                },
+            }),
+        )])
+        .expect("S1-M4 Construction Site is valid");
+    assert!(placement.command_rejections.is_empty());
+
+    let mut snapshot = RenderSnapshot::default();
+    let before_hash = simulation.state_hash();
+    simulation.write_render_snapshot(&mut snapshot);
+
+    assert_eq!(simulation.state_hash(), before_hash);
+    assert_eq!(snapshot.state_hash(), before_hash);
+    assert_eq!(snapshot.primitive_count(), 5);
+    assert_eq!(snapshot.run_status(), RunStatus::Running);
+    assert_eq!(snapshot.enemies().len(), 1);
+    let enemy = snapshot.enemies()[0];
+    assert_eq!(enemy.position, point(-4 * WORLD_PITCH, 0));
+    assert_eq!(enemy.velocity_per_tick, point(0, 0));
+    assert_eq!(enemy.integrity, Integrity(10));
+    assert_eq!(enemy.heat_energy, HeatEnergy(3));
+
+    assert_eq!(snapshot.wires().len(), 1);
+    assert_eq!(
+        snapshot.wires()[0]
+            .damage_state
+            .expect("v5 Wire carries DamageState")
+            .integrity,
+        Integrity(10)
+    );
+    assert_eq!(snapshot.mobiles().len(), 1);
+    let mobile = snapshot.mobiles()[0];
+    assert_eq!(
+        mobile
+            .damage_state
+            .expect("v5 Mobile carries DamageState")
+            .integrity,
+        Integrity(20)
+    );
+    assert_eq!(mobile.build, Some(LogicLevel::Low));
+    assert!(mobile.ports.build.is_some());
+
+    assert_eq!(snapshot.construction_sites().len(), 1);
+    let site = &snapshot.construction_sites()[0];
+    assert_eq!(site.required_work.0, 4);
+    assert_eq!(site.completed_work.0, 0);
+    assert!(!site.activation_ready);
+    assert!(matches!(
+        site.target,
+        ConstructionTarget::Junction {
+            routing_domain: RoutingDomain::OpenWorld,
+            position
+        } if position == point(6 * WORLD_PITCH, 0)
+    ));
 }
 
 #[test]

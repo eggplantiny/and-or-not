@@ -14,8 +14,8 @@ pub mod probe;
 
 use aon_sim::{
     ArtifactBytes, CommandEnvelope, DriverId, EntityId, GateId, LogicLevel, MobileId, PackageError,
-    PhysicalScaleProfile, RenderSnapshot, Replay, ReplayError, SignalProbeTarget, Simulation,
-    SimulationError, SimulationPackage, StateHash, StepReport, Tick, decode_package,
+    PhysicalScaleProfile, RenderSnapshot, Replay, ReplayError, RunStatus, SignalProbeTarget,
+    Simulation, SimulationError, SimulationPackage, StateHash, StepReport, Tick, decode_package,
     decode_replay_artifact,
 };
 use bevy::input::{ButtonState, keyboard::KeyboardInput};
@@ -619,18 +619,42 @@ fn advance_canonical_simulation(
     };
     match step {
         Ok(report) => {
+            let terminal_next_tick =
+                matches!(report.run_status, RunStatus::Ended { .. }).then_some(report.next_tick);
+            let report_next_tick = report.next_tick;
+            let report_state_hash = report.state_hash;
             trace.checkpoints.push(report.state_hash);
+            trace.reports.push(report);
             if let Some(schedule) = replay_schedule.as_ref()
-                && let Some(expected) = replay_checkpoint(&schedule.replay, report.next_tick)
-                && expected != report.state_hash
+                && let Some(expected) = replay_checkpoint(&schedule.replay, report_next_tick)
+                && expected != report_state_hash
             {
                 fault.error = Some(HostError::Replay(ReplayError::CheckpointDivergence {
-                    next_tick: report.next_tick,
+                    next_tick: report_next_tick,
                     expected,
-                    actual: report.state_hash,
+                    actual: report_state_hash,
                 }));
             }
-            trace.reports.push(report);
+            if fault.error.is_none()
+                && let Some(schedule) = replay_schedule.as_ref()
+                && let Some(terminal_next_tick) = terminal_next_tick
+                && let Err(error) = schedule
+                    .replay
+                    .validate_terminal_boundary(terminal_next_tick)
+            {
+                fault.error = Some(HostError::Replay(error));
+            }
+        }
+        Err(SimulationError::RunEnded) => {
+            if let Some(schedule) = replay_schedule.as_ref()
+                && let Err(error) = schedule
+                    .replay
+                    .validate_terminal_boundary(canonical.simulation.next_tick())
+            {
+                fault.error = Some(HostError::Replay(error));
+                return;
+            }
+            fault.error = Some(HostError::Simulation(SimulationError::RunEnded));
         }
         Err(error) => fault.error = Some(HostError::Simulation(error)),
     }

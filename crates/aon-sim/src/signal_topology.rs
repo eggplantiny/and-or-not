@@ -428,6 +428,9 @@ impl SignalGraph {
                 DriverRole::WireSenseB => {
                     SignalNodeKey::SensePort(WireId(record.owner), WireEnd::B)
                 }
+                DriverRole::ExternalMobileBuild => {
+                    SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Build)
+                }
             };
             graph.ensure_node(node);
             if graph.driver_nodes.insert(record.id, node).is_some() {
@@ -449,6 +452,9 @@ impl SignalGraph {
                 }
                 SinkRole::MobileRight => {
                     SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Right)
+                }
+                SinkRole::MobileBuild => {
+                    SignalNodeKey::MobilePort(MobileId(record.owner), MobilePort::Build)
                 }
             };
             graph.ensure_node(node);

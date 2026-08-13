@@ -1,9 +1,10 @@
 use crate::cell_buffer::TextPanel;
 use aon_sim::{
-    CommandAcceptance, CommandRejection, DriveVector, DriverSample, EndpointTarget, EntityId,
-    FixedAabb, FixedSubstrateRenderRecord, FixedVec2, GatePort, GatePortRef, GateRenderRecord,
-    LogicLevel, MainCoreRenderRecord, MobilePortRef, MobileRenderRecord, RenderSnapshot,
-    RoutingDomain, SignalArrivalKind, StepReport, Tick, WireEnd, WireRenderRecord,
+    CommandAcceptance, CommandRejection, ConstructionSiteRenderRecord, ConstructionTarget,
+    DamageState, DriveVector, DriverSample, EndpointTarget, EnemyRenderRecord, EntityId, FixedAabb,
+    FixedSubstrateRenderRecord, FixedVec2, GatePort, GatePortRef, GateRenderRecord, LogicLevel,
+    MainCoreRenderRecord, MobilePortRef, MobileRenderRecord, RenderSnapshot, RoutingDomain,
+    RunEndCause, RunStatus, SignalArrivalKind, StepReport, Tick, WireEnd, WireRenderRecord,
 };
 
 /// A presentation-stable selection namespace.
@@ -124,6 +125,10 @@ fn session_lines(input: InspectorInput<'_>) -> Vec<String> {
         ),
         format!("session.host_state={}", host_state_name(input.host_state)),
         format!("session.rate={}", rate_name(input.rate)),
+        format!(
+            "session.run_status={}",
+            run_status_text(input.snapshot.run_status())
+        ),
     ]
 }
 
@@ -142,6 +147,20 @@ fn append_selection(lines: &mut Vec<String>, input: InspectorInput<'_>) {
         .filter(|record| record.id.entity_id() == entity)
     {
         append_main_core(lines, core);
+    } else if let Some(enemy) = input
+        .snapshot
+        .enemies()
+        .iter()
+        .find(|record| record.id.entity_id() == entity)
+    {
+        append_enemy(lines, enemy);
+    } else if let Some(site) = input
+        .snapshot
+        .construction_sites()
+        .iter()
+        .find(|record| record.id.entity_id() == entity)
+    {
+        append_construction_site(lines, site);
     } else if let Some(gate) = input
         .snapshot
         .gates()
@@ -175,6 +194,7 @@ fn append_selection(lines: &mut Vec<String>, input: InspectorInput<'_>) {
             "junction.connection_generation={}",
             junction.connection_generation.0
         ));
+        append_damage_state(lines, "junction", junction.damage_state);
     } else if let Some(substrate) = input
         .snapshot
         .fixed_substrates()
@@ -205,6 +225,115 @@ fn append_main_core(lines: &mut Vec<String>, core: &MainCoreRenderRecord) {
     lines.push(format!("main_core.capacity={}", core.capacity.0));
     lines.push(format!("main_core.integrity={}", core.integrity.0));
     lines.push(format!("main_core.heat_energy={}", core.heat_energy.0));
+}
+
+fn append_enemy(lines: &mut Vec<String>, enemy: &EnemyRenderRecord) {
+    lines.push(format!("enemy.id={}", enemy.id.entity_id().0));
+    lines.push(format!(
+        "enemy.position={}",
+        fixed_vec2_text(enemy.position)
+    ));
+    lines.push(format!(
+        "enemy.velocity_per_tick={}",
+        fixed_vec2_text(enemy.velocity_per_tick)
+    ));
+    lines.push(format!("enemy.radius={}", enemy.radius.0));
+    lines.push(format!("enemy.integrity={}", enemy.integrity.0));
+    lines.push(format!("enemy.heat_energy={}", enemy.heat_energy.0));
+}
+
+fn append_construction_site(lines: &mut Vec<String>, site: &ConstructionSiteRenderRecord) {
+    lines.push(format!("construction_site.id={}", site.id.entity_id().0));
+    lines.push(format!(
+        "construction_site.required_work={}",
+        site.required_work.0
+    ));
+    lines.push(format!(
+        "construction_site.completed_work={}",
+        site.completed_work.0
+    ));
+    lines.push(format!(
+        "construction_site.activation_ready={}",
+        site.activation_ready
+    ));
+    match &site.target {
+        ConstructionTarget::Gate {
+            gate_type,
+            origin,
+            routing_domain,
+        } => {
+            lines.push("construction_site.target=gate".to_owned());
+            lines.push(format!(
+                "construction_site.gate.type={}",
+                gate_type_name(*gate_type)
+            ));
+            lines.push(format!(
+                "construction_site.gate.origin={}",
+                fixed_vec2_text(*origin)
+            ));
+            lines.push(format!(
+                "construction_site.gate.domain={}",
+                routing_domain_text(*routing_domain)
+            ));
+        }
+        ConstructionTarget::Wire {
+            routing_domain,
+            points,
+            endpoint_a,
+            endpoint_b,
+        } => {
+            lines.push("construction_site.target=wire".to_owned());
+            lines.push(format!(
+                "construction_site.wire.domain={}",
+                routing_domain_text(*routing_domain)
+            ));
+            lines.push(format!(
+                "construction_site.wire.points={}",
+                points_text(points)
+            ));
+            lines.push(format!(
+                "construction_site.wire.endpoint_a={}",
+                endpoint_text(*endpoint_a)
+            ));
+            lines.push(format!(
+                "construction_site.wire.endpoint_b={}",
+                endpoint_text(*endpoint_b)
+            ));
+        }
+        ConstructionTarget::Junction {
+            routing_domain,
+            position,
+        } => {
+            lines.push("construction_site.target=junction".to_owned());
+            lines.push(format!(
+                "construction_site.junction.domain={}",
+                routing_domain_text(*routing_domain)
+            ));
+            lines.push(format!(
+                "construction_site.junction.position={}",
+                fixed_vec2_text(*position)
+            ));
+        }
+        ConstructionTarget::FixedSubstrate {
+            origin,
+            routing_area,
+            footprint,
+        } => {
+            lines.push("construction_site.target=fixed-substrate".to_owned());
+            lines.push(format!(
+                "construction_site.fixed_substrate.origin={}",
+                fixed_vec2_text(*origin)
+            ));
+            lines.push(format!(
+                "construction_site.fixed_substrate.routing_area={}",
+                fixed_aabb_text(*routing_area)
+            ));
+            lines.push(format!(
+                "construction_site.fixed_substrate.footprint={}",
+                fixed_aabb_text(*footprint)
+            ));
+        }
+    }
 }
 
 fn append_gate(lines: &mut Vec<String>, gate: &GateRenderRecord) {
@@ -279,6 +408,7 @@ fn append_gate(lines: &mut Vec<String>, gate: &GateRenderRecord) {
         "gate.cancelled_heat={}",
         gate.cancelled_switching_heat.0
     ));
+    append_damage_state(lines, "gate", gate.damage_state);
 }
 
 fn append_mobile(lines: &mut Vec<String>, mobile: &MobileRenderRecord) {
@@ -292,11 +422,23 @@ fn append_mobile(lines: &mut Vec<String>, mobile: &MobileRenderRecord) {
     lines.push(format!("mobile.left={}", logic_name(mobile.left)));
     lines.push(format!("mobile.right={}", logic_name(mobile.right)));
     lines.push(format!(
+        "mobile.build={}",
+        mobile.build.map_or("-", logic_name)
+    ));
+    lines.push(format!(
         "mobile.sinks={}/{}/{}",
         mobile.ports.stop.entity_id().0,
         mobile.ports.left.entity_id().0,
         mobile.ports.right.entity_id().0
     ));
+    lines.push(format!(
+        "mobile.build_sink={}",
+        mobile
+            .ports
+            .build
+            .map_or_else(|| "-".to_owned(), |sink| sink.entity_id().0.to_string())
+    ));
+    append_damage_state(lines, "mobile", mobile.damage_state);
 }
 
 fn append_wire(lines: &mut Vec<String>, wire: &WireRenderRecord) {
@@ -334,6 +476,7 @@ fn append_wire(lines: &mut Vec<String>, wire: &WireRenderRecord) {
         "wire.previous_level={}",
         logic_name(wire.previous_level)
     ));
+    append_damage_state(lines, "wire", wire.damage_state);
 }
 
 fn append_fixed_substrate(lines: &mut Vec<String>, substrate: &FixedSubstrateRenderRecord) {
@@ -349,6 +492,18 @@ fn append_fixed_substrate(lines: &mut Vec<String>, substrate: &FixedSubstrateRen
     lines.push(format!(
         "fixed_substrate.footprint={}",
         fixed_aabb_text(substrate.footprint)
+    ));
+    append_damage_state(lines, "fixed_substrate", substrate.damage_state);
+}
+
+fn append_damage_state(lines: &mut Vec<String>, prefix: &str, damage: Option<DamageState>) {
+    lines.push(format!(
+        "{prefix}.integrity={}",
+        damage.map_or_else(|| "-".to_owned(), |state| state.integrity.0.to_string())
+    ));
+    lines.push(format!(
+        "{prefix}.heat_energy={}",
+        damage.map_or_else(|| "-".to_owned(), |state| state.heat_energy.0.to_string())
     ));
 }
 
@@ -603,6 +758,26 @@ const fn rate_name(rate: InspectorRate) -> &'static str {
     }
 }
 
+fn run_status_text(status: RunStatus) -> String {
+    match status {
+        RunStatus::Running => "RUNNING".to_owned(),
+        RunStatus::Ended {
+            completed_tick,
+            cause,
+        } => format!(
+            "ENDED completed_tick:{} cause:{}",
+            completed_tick.0,
+            run_end_cause_name(cause)
+        ),
+    }
+}
+
+const fn run_end_cause_name(cause: RunEndCause) -> &'static str {
+    match cause {
+        RunEndCause::MainCoreDestroyed => "MAIN_CORE_DESTROYED",
+    }
+}
+
 const fn logic_name(level: LogicLevel) -> &'static str {
     match level {
         LogicLevel::Low => "LOW",
@@ -644,4 +819,20 @@ const fn arrival_kind_name(kind: SignalArrivalKind) -> &'static str {
 
 fn optional_tick_text(tick: Option<Tick>) -> String {
     tick.map_or_else(|| "-".to_owned(), |tick| tick.0.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_run_status_has_a_stable_inspector_value() {
+        assert_eq!(
+            run_status_text(RunStatus::Ended {
+                completed_tick: Tick(7),
+                cause: RunEndCause::MainCoreDestroyed,
+            }),
+            "ENDED completed_tick:7 cause:MAIN_CORE_DESTROYED"
+        );
+    }
 }

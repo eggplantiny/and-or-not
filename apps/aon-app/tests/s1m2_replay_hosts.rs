@@ -163,7 +163,7 @@ fn assert_trace(expected: &[StateHash], actual: &[StateHash]) {
         .enumerate()
         .find(|(_, (expected, actual))| expected != actual)
     {
-        panic!("first V6 divergence at nextTick {next_tick}: {expected} != {actual}");
+        panic!("first V7 divergence at nextTick {next_tick}: {expected} != {actual}");
     }
 }
 
@@ -173,7 +173,7 @@ fn replay_v2_hostile_frames_match_direct_headless_and_bevy_and_empty_is_omittabl
     let (explicit, expected_hashes, expected_reports) =
         record_replay(&package, vec![hostile_frame(), empty_frame()]);
     assert_eq!(explicit.header().format_version, ReplayFormatVersion::V2);
-    assert_eq!(explicit.header().state_hash_version, StateHashVersion::V6);
+    assert_eq!(explicit.header().state_hash_version, StateHashVersion::V7);
     assert_eq!(explicit.world_inputs().len(), 2);
     assert!(explicit.world_inputs()[0].hostiles().is_empty());
 
@@ -223,7 +223,7 @@ fn retained_fixture_path(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn retained_c07_and_c08_reports_and_v6_hashes_match_headless_and_bevy() {
+fn retained_c07_and_c08_reports_and_v7_hashes_match_headless_and_bevy() {
     for name in [
         "s1-m2-c07-sensing-v1.json",
         "s1-m2-c08-brownout-full-v1.json",

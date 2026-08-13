@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "b1540d6ad19c616ce60e96523108264355311168c51a0b92de2fdf596e2646fd",
-    "stateHashVersion": "aon-state-v6",
+    "stateHashVersion": "aon-state-v7",
     "worldGeneratorVersion": "aon-empty-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1",
+    "initialStateHash": "5148fa91f240dd4ceb450b62e72953e123effc9fbdbf318dacc7bcd13a2e87d8",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -309,27 +309,27 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1"
+      "stateHash": "5148fa91f240dd4ceb450b62e72953e123effc9fbdbf318dacc7bcd13a2e87d8"
     },
     {
       "nextTick": 15,
-      "stateHash": "c5671008e684a827a75ca56aac8953f6abb9f604fd7b1fe05446a5a9b45baa1c"
+      "stateHash": "653c80d434c39b1b8030f9bf339cccd024183c4e358a22052abf529b5aa76bcb"
     },
     {
       "nextTick": 20,
-      "stateHash": "3a7687ad5dfb54744d93aef1897c9a8574d3da738ad790659a25e31c56186d8a"
+      "stateHash": "f15955cd9019d17f68fb1c655ce9edef1c4de27e52350838f2687cdf7b974339"
     },
     {
       "nextTick": 33,
-      "stateHash": "98d6d64293aef3453b78265512a40110bf6977742da3c1a9a7b0c95120f35042"
+      "stateHash": "1a622a274b60a06d2fcf52e99c3f1e2e8bfd4d390043addd0b09a78b3028a3cc"
     },
     {
       "nextTick": 46,
-      "stateHash": "70321d5e8a8f66fedb9ae230863998f9bd8b0ffd6c97ae034113331885d62fed"
+      "stateHash": "9178f413413b68ff10c031ebd80eeba4868e623056593ec89b93d7ceffcbe06e"
     },
     {
       "nextTick": 100000,
-      "stateHash": "957a8644c2c9246f37912701883b7eb4da097dea2b515b91ddfb1b25bfcd5a83"
+      "stateHash": "f928103047a12735c15591b5db662aefc92b9fdfc43f468ba0c506ecfe0982ec"
     }
   ]
 }

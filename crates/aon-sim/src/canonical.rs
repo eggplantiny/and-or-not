@@ -1,18 +1,21 @@
+use crate::construction::ConstructionSiteStore;
+use crate::enemy::EnemyStore;
 use crate::event::{
     DriverSample, DriverTransition, EventCalendar, EventKey, EventPayloadAllocator, SignalArrival,
 };
 use crate::path_certificate::{PathCertificateArena, PathElementStamp};
 use crate::power_source::PowerSourceStore;
 use crate::signal::{DriveVector, GateSignalRecord, SignalWorld, WireSignalSnapshot};
+use crate::simulation::{RunEndCause, RunStatus};
 use crate::structural::StructuralWorld;
 use crate::{
     EndpointTarget, EntityLocation, EntityRegistry, FixedAabb, FixedVec2, Heading, LogicLevel,
     MainCoreState, Revision, RoutingDomain, SimulationContract, StateHash, Tick, TrackPosition,
 };
+use std::collections::BTreeSet;
 
-const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V6\0";
-pub(crate) const STATE_ENCODER_VERSION: u16 = 6;
-const RESERVED_EMPTY_STORE_COUNT: usize = 3;
+const STATE_DOMAIN: &[u8] = b"AON\0STATE\0V7\0";
+pub(crate) const STATE_ENCODER_VERSION: u16 = 7;
 
 #[derive(Clone, Copy)]
 pub(crate) struct StateView<'a> {
@@ -21,6 +24,10 @@ pub(crate) struct StateView<'a> {
     pub topology_revision: Revision,
     pub main_core: Option<&'a MainCoreState>,
     pub power_sources: &'a PowerSourceStore,
+    pub enemies: &'a EnemyStore,
+    pub construction_sites: &'a ConstructionSiteStore,
+    pub pending_destructions: &'a BTreeSet<crate::EntityId>,
+    pub run_status: RunStatus,
     pub structural: &'a StructuralWorld,
     pub signal: &'a SignalWorld,
     pub event_payloads: &'a EventPayloadAllocator,
@@ -37,6 +44,10 @@ struct StateComponents<'a> {
     entities: &'a EntityRegistry,
     main_core: Option<&'a MainCoreState>,
     power_sources: &'a PowerSourceStore,
+    enemies: &'a EnemyStore,
+    construction_sites: &'a ConstructionSiteStore,
+    pending_destructions: &'a BTreeSet<crate::EntityId>,
+    run_status: RunStatus,
     structural: Option<&'a StructuralWorld>,
     signal: &'a SignalWorld,
     event_payloads: &'a EventPayloadAllocator,
@@ -62,6 +73,10 @@ fn encode_state(state: StateView<'_>, write: &mut dyn FnMut(&[u8])) {
             entities: state.structural.entities(),
             main_core: state.main_core,
             power_sources: state.power_sources,
+            enemies: state.enemies,
+            construction_sites: state.construction_sites,
+            pending_destructions: state.pending_destructions,
+            run_status: state.run_status,
             structural: Some(state.structural),
             signal: state.signal,
             event_payloads: state.event_payloads,
@@ -131,11 +146,64 @@ fn encode_state_components(state: StateComponents<'_>, write: &mut dyn FnMut(&[u
     encode_driver_events(state.driver_events, write);
     encode_signal_events(state.signal_events, write);
 
-    // Destruction, radiation, and relay stores remain reserved in V6.
-    for _ in 0..RESERVED_EMPTY_STORE_COUNT {
-        write_u64(0, write);
-    }
+    encode_pending_destructions(state.pending_destructions, write);
+    // Radiation and Relay retain their reserved zero-count encodings.
+    write_u64(0, write);
+    write_u64(0, write);
+    encode_enemies(state.enemies, write);
+    encode_construction_sites(state.construction_sites, write);
+    encode_run_status(state.run_status, write);
     encode_path_certificates(state.path_certificates, write);
+}
+
+fn encode_pending_destructions(pending: &BTreeSet<crate::EntityId>, write: &mut dyn FnMut(&[u8])) {
+    write_u64(pending.len() as u64, write);
+    for entity in pending {
+        write_u64(entity.0, write);
+    }
+}
+
+fn encode_enemies(enemies: &EnemyStore, write: &mut dyn FnMut(&[u8])) {
+    write_u64(enemies.len() as u64, write);
+    for enemy in enemies.iter() {
+        write_u64(enemy.id().entity_id().0, write);
+        encode_point(enemy.position(), write);
+        encode_point(enemy.velocity_per_tick(), write);
+        write_i64(enemy.radius().0, write);
+        write_u64(enemy.integrity().0, write);
+        write_u64(enemy.heat_energy().0, write);
+    }
+}
+
+fn encode_construction_sites(sites: &ConstructionSiteStore, write: &mut dyn FnMut(&[u8])) {
+    write_u64(sites.len() as u64, write);
+    for site in sites.iter() {
+        write_u64(site.id.entity_id().0, write);
+        crate::command::encode_construction_target(&site.target, write)
+            .expect("validated canonical Construction Site point count fits u32");
+        write_u64(site.required_work.0, write);
+        write_u64(site.completed_work.0, write);
+        write_u8(u8::from(site.activation_ready), write);
+    }
+}
+
+fn encode_run_status(status: RunStatus, write: &mut dyn FnMut(&[u8])) {
+    match status {
+        RunStatus::Running => write_u8(0, write),
+        RunStatus::Ended {
+            completed_tick,
+            cause,
+        } => {
+            write_u8(1, write);
+            write_u64(completed_tick.0, write);
+            write_u8(
+                match cause {
+                    RunEndCause::MainCoreDestroyed => 0,
+                },
+                write,
+            );
+        }
+    }
 }
 
 fn encode_power_sources(sources: &PowerSourceStore, write: &mut dyn FnMut(&[u8])) {
@@ -225,14 +293,7 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         encode_gate_signal_record(gate, write);
     }
 
-    let mobiles: Vec<_> = signal.iter_mobile_entries().collect();
-    write_u64(mobiles.len() as u64, write);
-    for (mobile, ports) in mobiles {
-        write_u64(mobile.entity_id().0, write);
-        write_u64(ports.stop.entity_id().0, write);
-        write_u64(ports.left.entity_id().0, write);
-        write_u64(ports.right.entity_id().0, write);
-    }
+    encode_mobile_signal_records(signal, write);
 
     let wires: Vec<_> = signal.iter_wires().collect();
     write_u64(wires.len() as u64, write);
@@ -249,6 +310,24 @@ fn encode_signal_stores(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
         write_u64(slot.strength.0, write);
         write_u64(slot.revision.0, write);
         write_u64(slot.emitted_at.0, write);
+    }
+}
+
+fn encode_mobile_signal_records(signal: &SignalWorld, write: &mut dyn FnMut(&[u8])) {
+    let mobiles: Vec<_> = signal.iter_mobile_entries().collect();
+    write_u64(mobiles.len() as u64, write);
+    for (mobile, ports) in mobiles {
+        write_u64(mobile.entity_id().0, write);
+        write_u64(ports.stop.entity_id().0, write);
+        write_u64(ports.left.entity_id().0, write);
+        write_u64(ports.right.entity_id().0, write);
+        match ports.build {
+            Some(build) => {
+                write_u8(1, write);
+                write_u64(build.entity_id().0, write);
+            }
+            None => write_u8(0, write),
+        }
     }
 }
 
@@ -393,6 +472,7 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         write_u8(record.gate_type.canonical_tag(), write);
         encode_point(record.origin, write);
         encode_routing_domain(record.routing_domain, write);
+        encode_damage_state(record.damage_state, write);
     }
 
     let mut wires: Vec<_> = structural
@@ -412,6 +492,7 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         }
         encode_endpoint(record.endpoint_a, write);
         encode_endpoint(record.endpoint_b, write);
+        encode_damage_state(record.damage_state, write);
     }
 
     let mut junctions: Vec<_> = structural
@@ -426,6 +507,7 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         encode_routing_domain(record.routing_domain, write);
         encode_point(record.position, write);
         write_u64(record.connection_generation.0, write);
+        encode_damage_state(record.damage_state, write);
     }
 
     let mut substrates: Vec<_> = structural
@@ -440,6 +522,7 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         encode_point(record.origin, write);
         encode_aabb(record.routing_area, write);
         encode_aabb(record.footprint, write);
+        encode_damage_state(record.damage_state, write);
     }
 
     let mut mobiles: Vec<_> = structural
@@ -454,6 +537,18 @@ fn encode_structural_stores(structural: &StructuralWorld, write: &mut dyn FnMut(
         encode_track_position(record.track_position, write);
         encode_aabb(record.routing_area, write);
         encode_aabb(record.footprint, write);
+        encode_damage_state(record.damage_state, write);
+    }
+}
+
+fn encode_damage_state(state: Option<crate::DamageState>, write: &mut dyn FnMut(&[u8])) {
+    match state {
+        Some(state) => {
+            write_u8(1, write);
+            write_u64(state.integrity.0, write);
+            write_u64(state.heat_energy.0, write);
+        }
+        None => write_u8(0, write),
     }
 }
 
@@ -593,6 +688,10 @@ mod tests {
 
     struct TestRuntime {
         power_sources: PowerSourceStore,
+        enemies: EnemyStore,
+        construction_sites: ConstructionSiteStore,
+        pending_destructions: BTreeSet<crate::EntityId>,
+        run_status: RunStatus,
         signal: SignalWorld,
         payloads: EventPayloadAllocator,
         driver_events: EventCalendar<DriverTransition>,
@@ -604,6 +703,10 @@ mod tests {
         fn new() -> Self {
             Self {
                 power_sources: PowerSourceStore::default(),
+                enemies: EnemyStore::default(),
+                construction_sites: ConstructionSiteStore::default(),
+                pending_destructions: BTreeSet::new(),
+                run_status: RunStatus::Running,
                 signal: SignalWorld::new(),
                 payloads: EventPayloadAllocator::new(),
                 driver_events: EventCalendar::new(),
@@ -625,6 +728,10 @@ mod tests {
                 topology_revision,
                 main_core: None,
                 power_sources: &self.power_sources,
+                enemies: &self.enemies,
+                construction_sites: &self.construction_sites,
+                pending_destructions: &self.pending_destructions,
+                run_status: self.run_status,
                 structural,
                 signal: &self.signal,
                 event_payloads: &self.payloads,
@@ -646,6 +753,10 @@ mod tests {
                 entities,
                 main_core: None,
                 power_sources: &runtime.power_sources,
+                enemies: &runtime.enemies,
+                construction_sites: &runtime.construction_sites,
+                pending_destructions: &runtime.pending_destructions,
+                run_status: runtime.run_status,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -687,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn state_encoding_v6_has_exact_contract_tick_revision_and_identity_order() {
+    fn state_encoding_v7_has_exact_contract_tick_revision_and_identity_order() {
         let mut entities = EntityRegistry::new();
         entities
             .allocate(EntityLocation::Gate(GateIndex(7)))
@@ -707,6 +818,10 @@ mod tests {
                 entities: &entities,
                 main_core: None,
                 power_sources: &runtime.power_sources,
+                enemies: &runtime.enemies,
+                construction_sites: &runtime.construction_sites,
+                pending_destructions: &runtime.pending_destructions,
+                run_status: runtime.run_status,
                 structural: None,
                 signal: &runtime.signal,
                 event_payloads: &runtime.payloads,
@@ -718,8 +833,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V6\0");
-        expected.extend_from_slice(&6_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V7\0");
+        expected.extend_from_slice(&7_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -740,7 +855,322 @@ mod tests {
     }
 
     #[test]
-    fn main_core_v6_section_has_exact_anchor_order_and_is_hash_sensitive() {
+    fn v7_pending_destruction_store_is_counted_and_entity_id_ordered() {
+        let pending = BTreeSet::from([EntityId(9), EntityId(2), EntityId(7)]);
+        let mut actual = Vec::new();
+        encode_pending_destructions(&pending, &mut |part| actual.extend_from_slice(part));
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        for id in [2_u64, 7, 9] {
+            expected.extend_from_slice(&id.to_le_bytes());
+        }
+        assert_eq!(actual, expected);
+
+        let changed = BTreeSet::from([EntityId(2), EntityId(7), EntityId(10)]);
+        let mut changed_bytes = Vec::new();
+        encode_pending_destructions(&changed, &mut |part| changed_bytes.extend_from_slice(part));
+        assert_ne!(actual, changed_bytes);
+    }
+
+    #[test]
+    fn v7_optional_damage_state_has_exact_presence_integrity_and_heat_bytes() {
+        let encode = |state| {
+            let mut bytes = Vec::new();
+            encode_damage_state(state, &mut |part| bytes.extend_from_slice(part));
+            bytes
+        };
+        assert_eq!(encode(None), vec![0]);
+
+        let baseline = encode(Some(crate::DamageState::new(
+            crate::Integrity(41),
+            crate::HeatEnergy(73),
+        )));
+        let mut expected = vec![1];
+        expected.extend_from_slice(&41_u64.to_le_bytes());
+        expected.extend_from_slice(&73_u64.to_le_bytes());
+        assert_eq!(baseline, expected);
+        assert_ne!(
+            baseline,
+            encode(Some(crate::DamageState::new(
+                crate::Integrity(42),
+                crate::HeatEnergy(73),
+            )))
+        );
+        assert_ne!(
+            baseline,
+            encode(Some(crate::DamageState::new(
+                crate::Integrity(41),
+                crate::HeatEnergy(74),
+            )))
+        );
+    }
+
+    #[test]
+    fn v7_enemy_store_has_exact_sorted_rows_and_every_field_is_sensitive() {
+        let make = |id, x, y, vx, vy, radius, integrity, heat| {
+            crate::EnemyState::new(
+                crate::EnemyId(EntityId(id)),
+                point(x, y),
+                point(vx, vy),
+                Fixed(radius),
+                crate::Integrity(integrity),
+                crate::HeatEnergy(heat),
+            )
+        };
+        let encode = |rows: Vec<crate::EnemyState>| {
+            let store = EnemyStore::new(rows).expect("test Enemy store is canonical");
+            let mut bytes = Vec::new();
+            encode_enemies(&store, &mut |part| bytes.extend_from_slice(part));
+            bytes
+        };
+        let baseline = encode(vec![
+            make(9, -3, 4, 5, -6, 7, 8, 10),
+            make(2, 11, -12, -13, 14, 15, 16, 17),
+        ]);
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        for values in [
+            [2_i64, 11, -12, -13, 14, 15, 16, 17],
+            [9_i64, -3, 4, 5, -6, 7, 8, 10],
+        ] {
+            expected.extend_from_slice(&(values[0] as u64).to_le_bytes());
+            for value in &values[1..6] {
+                expected.extend_from_slice(&value.to_le_bytes());
+            }
+            expected.extend_from_slice(&(values[6] as u64).to_le_bytes());
+            expected.extend_from_slice(&(values[7] as u64).to_le_bytes());
+        }
+        assert_eq!(baseline, expected);
+
+        assert_ne!(
+            baseline,
+            encode(vec![
+                make(2, 11, -12, -13, 14, 15, 16, 17),
+                make(10, -3, 4, 5, -6, 7, 8, 10),
+            ])
+        );
+        for changed in [
+            make(9, -2, 4, 5, -6, 7, 8, 10),
+            make(9, -3, 3, 5, -6, 7, 8, 10),
+            make(9, -3, 4, 6, -6, 7, 8, 10),
+            make(9, -3, 4, 5, -5, 7, 8, 10),
+            make(9, -3, 4, 5, -6, 8, 8, 10),
+            make(9, -3, 4, 5, -6, 7, 9, 10),
+            make(9, -3, 4, 5, -6, 7, 8, 11),
+        ] {
+            assert_ne!(
+                baseline,
+                encode(vec![make(2, 11, -12, -13, 14, 15, 16, 17), changed])
+            );
+        }
+    }
+
+    #[test]
+    fn v7_construction_site_and_run_status_have_exact_bytes_and_sensitivity() {
+        let site = crate::ConstructionSite {
+            id: crate::ConstructionSiteId(EntityId(5)),
+            target: crate::ConstructionTarget::Junction {
+                routing_domain: RoutingDomain::OpenWorld,
+                position: point(-21, 34),
+            },
+            required_work: crate::Energy(55),
+            completed_work: crate::Energy(13),
+            activation_ready: false,
+        };
+        let encode_site = |site: crate::ConstructionSite| {
+            let store = ConstructionSiteStore::new(vec![site]).expect("test Site is canonical");
+            let mut bytes = Vec::new();
+            encode_construction_sites(&store, &mut |part| bytes.extend_from_slice(part));
+            bytes
+        };
+        let baseline = encode_site(site.clone());
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.extend_from_slice(&5_u64.to_le_bytes());
+        expected.push(2);
+        expected.push(0);
+        expected.extend_from_slice(&(-21_i64).to_le_bytes());
+        expected.extend_from_slice(&34_i64.to_le_bytes());
+        expected.extend_from_slice(&55_u64.to_le_bytes());
+        expected.extend_from_slice(&13_u64.to_le_bytes());
+        expected.push(0);
+        assert_eq!(baseline, expected);
+
+        let mut id_changed = site.clone();
+        id_changed.id = crate::ConstructionSiteId(EntityId(6));
+        assert_ne!(baseline, encode_site(id_changed));
+        let mut required_changed = site.clone();
+        required_changed.required_work = crate::Energy(56);
+        assert_ne!(baseline, encode_site(required_changed));
+        let mut progress_changed = site.clone();
+        progress_changed.completed_work = crate::Energy(14);
+        assert_ne!(baseline, encode_site(progress_changed));
+        let mut target_changed = site.clone();
+        target_changed.target = crate::ConstructionTarget::Junction {
+            routing_domain: RoutingDomain::OpenWorld,
+            position: point(-20, 34),
+        };
+        assert_ne!(baseline, encode_site(target_changed));
+        let ready = crate::ConstructionSite {
+            required_work: crate::Energy(55),
+            completed_work: crate::Energy(55),
+            activation_ready: true,
+            ..site
+        };
+        assert_ne!(baseline, encode_site(ready));
+
+        let mut running = Vec::new();
+        encode_run_status(RunStatus::Running, &mut |part| {
+            running.extend_from_slice(part)
+        });
+        assert_eq!(running, vec![0]);
+        let mut ended = Vec::new();
+        encode_run_status(
+            RunStatus::Ended {
+                completed_tick: Tick(89),
+                cause: RunEndCause::MainCoreDestroyed,
+            },
+            &mut |part| ended.extend_from_slice(part),
+        );
+        let mut ended_expected = vec![1];
+        ended_expected.extend_from_slice(&89_u64.to_le_bytes());
+        ended_expected.push(0);
+        assert_eq!(ended, ended_expected);
+        assert_ne!(running, ended);
+        let mut other_tick = Vec::new();
+        encode_run_status(
+            RunStatus::Ended {
+                completed_tick: Tick(90),
+                cause: RunEndCause::MainCoreDestroyed,
+            },
+            &mut |part| other_tick.extend_from_slice(part),
+        );
+        assert_ne!(ended, other_tick);
+    }
+
+    #[test]
+    fn every_new_v7_root_store_reaches_the_full_state_hash() {
+        let contract = contract();
+        let structural = StructuralWorld::new();
+        let base = TestRuntime::new();
+        let base_hash = state_hash(base.view(&contract, Tick(0), Revision(0), &structural));
+
+        let mut with_enemy = TestRuntime::new();
+        with_enemy.enemies = EnemyStore::new(vec![crate::EnemyState::new(
+            crate::EnemyId(EntityId(1)),
+            point(0, 0),
+            point(1, 0),
+            Fixed(2),
+            crate::Integrity(3),
+            crate::HeatEnergy(4),
+        )])
+        .expect("Enemy fixture is canonical");
+        assert_ne!(
+            base_hash,
+            state_hash(with_enemy.view(&contract, Tick(0), Revision(0), &structural))
+        );
+
+        let mut with_site = TestRuntime::new();
+        with_site.construction_sites = ConstructionSiteStore::new(vec![crate::ConstructionSite {
+            id: crate::ConstructionSiteId(EntityId(1)),
+            target: crate::ConstructionTarget::Junction {
+                routing_domain: RoutingDomain::OpenWorld,
+                position: point(0, 0),
+            },
+            required_work: crate::Energy(2),
+            completed_work: crate::Energy(0),
+            activation_ready: false,
+        }])
+        .expect("Site fixture is canonical");
+        assert_ne!(
+            base_hash,
+            state_hash(with_site.view(&contract, Tick(0), Revision(0), &structural))
+        );
+
+        let mut with_pending = TestRuntime::new();
+        with_pending.pending_destructions.insert(EntityId(1));
+        assert_ne!(
+            base_hash,
+            state_hash(with_pending.view(&contract, Tick(0), Revision(0), &structural))
+        );
+
+        let mut ended = TestRuntime::new();
+        ended.run_status = RunStatus::Ended {
+            completed_tick: Tick(0),
+            cause: RunEndCause::MainCoreDestroyed,
+        };
+        assert_ne!(
+            base_hash,
+            state_hash(ended.view(&contract, Tick(0), Revision(0), &structural))
+        );
+    }
+
+    #[test]
+    fn main_core_power_enemy_v7_full_world_has_a_fixed_initial_golden() {
+        let (structural, core_id, source_ids, enemy_ids) =
+            StructuralWorld::new_with_main_core_power_source_and_enemy_registry_entries(1, 1)
+                .expect("full-world registry fixture allocates");
+        assert_eq!(core_id.entity_id(), EntityId(1));
+        assert_eq!(source_ids[0].entity_id(), EntityId(2));
+        assert_eq!(enemy_ids[0].entity_id(), EntityId(3));
+
+        let core = MainCoreState::new(
+            core_id,
+            point(0, 0),
+            crate::Capacity(65_536_000),
+            crate::Integrity(100),
+            crate::HeatEnergy(0),
+        );
+        let power_sources = PowerSourceStore::new(vec![crate::PowerSourceState::new(
+            source_ids[0],
+            point(65_536, 0),
+            crate::Energy(100),
+        )])
+        .expect("full-world Power Source fixture is canonical");
+        let enemies = EnemyStore::new(vec![crate::EnemyState::new(
+            enemy_ids[0],
+            point(131_072, 0),
+            point(-65_536, 0),
+            Fixed(65_536),
+            crate::Integrity(10),
+            crate::HeatEnergy(0),
+        )])
+        .expect("full-world Enemy fixture is canonical");
+        let construction_sites = ConstructionSiteStore::default();
+        let pending_destructions = BTreeSet::new();
+        let signal = SignalWorld::new();
+        let payloads = EventPayloadAllocator::new();
+        let driver_events = EventCalendar::new();
+        let signal_events = EventCalendar::new();
+        let path_certificates = PathCertificateArena::new();
+
+        let hash = state_hash(StateView {
+            contract: &contract(),
+            next_tick: Tick(0),
+            topology_revision: Revision(0),
+            main_core: Some(&core),
+            power_sources: &power_sources,
+            enemies: &enemies,
+            construction_sites: &construction_sites,
+            pending_destructions: &pending_destructions,
+            run_status: RunStatus::Running,
+            structural: &structural,
+            signal: &signal,
+            event_payloads: &payloads,
+            driver_events: &driver_events,
+            signal_events: &signal_events,
+            path_certificates: &path_certificates,
+        });
+        assert_eq!(
+            hash.to_string(),
+            "0df7615e1c2e68de5cb58b294e3edac16eada81935cb39875c1d6f57fe04ce43"
+        );
+    }
+
+    #[test]
+    fn main_core_v7_section_has_exact_anchor_order_and_is_hash_sensitive() {
         let mut entities = EntityRegistry::new();
         let id = crate::MainCoreId(
             entities
@@ -765,6 +1195,10 @@ mod tests {
                     entities: &entities,
                     main_core: Some(&core),
                     power_sources: &runtime.power_sources,
+                    enemies: &runtime.enemies,
+                    construction_sites: &runtime.construction_sites,
+                    pending_destructions: &runtime.pending_destructions,
+                    run_status: runtime.run_status,
                     structural: None,
                     signal: &runtime.signal,
                     event_payloads: &runtime.payloads,
@@ -790,8 +1224,8 @@ mod tests {
         assert_eq!(&baseline[header_len..header_len + expected.len()], expected);
 
         let mut full_expected = Vec::new();
-        full_expected.extend_from_slice(b"AON\0STATE\0V6\0");
-        full_expected.extend_from_slice(&6_u16.to_le_bytes());
+        full_expected.extend_from_slice(b"AON\0STATE\0V7\0");
+        full_expected.extend_from_slice(&7_u16.to_le_bytes());
         full_expected.push(0);
         full_expected.extend_from_slice(&[0x11; 32]);
         full_expected.extend_from_slice(&[0x22; 32]);
@@ -855,12 +1289,12 @@ mod tests {
         let hash = StateHash::from_bytes(*blake3::hash(&baseline).as_bytes());
         assert_eq!(
             hash.to_string(),
-            "b53415b52909b20aa0b89623689961f14bb51386e0313edbf3ae84aead89c341"
+            "a565a740e043fe0655294962aaab269cd2ed3ac12dadb4890d7dc2d696dc0e06"
         );
     }
 
     #[test]
-    fn power_source_v6_section_has_exact_sorted_records_and_field_sensitive_hash() {
+    fn power_source_v7_section_has_exact_sorted_records_and_field_sensitive_hash() {
         let source = |id, x, y, generation| {
             crate::PowerSourceState::new(
                 crate::PowerSourceId(EntityId(id)),
@@ -1066,7 +1500,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_state_encoding_has_exact_v6_entity_order_records_and_raw_vertices() {
+    fn structural_state_encoding_has_exact_v7_entity_order_records_and_raw_vertices() {
         const WORLD_PITCH: i64 = 65_536;
         let physical = PhysicalScaleProfile::stage0_alpha("canonical-structural-test");
         let mut world = StructuralWorld::new();
@@ -1144,8 +1578,8 @@ mod tests {
         );
 
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"AON\0STATE\0V6\0");
-        expected.extend_from_slice(&6_u16.to_le_bytes());
+        expected.extend_from_slice(b"AON\0STATE\0V7\0");
+        expected.extend_from_slice(&7_u16.to_le_bytes());
         expected.push(0);
         expected.extend_from_slice(&[0x11; 32]);
         expected.extend_from_slice(&[0x22; 32]);
@@ -1168,6 +1602,7 @@ mod tests {
         append_point(&mut expected, point(0, 0));
         expected.push(1);
         expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.push(0);
 
         expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.extend_from_slice(&4_u64.to_le_bytes());
@@ -1182,6 +1617,7 @@ mod tests {
         expected.push(2);
         expected.push(1);
         expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.push(0);
 
         expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.extend_from_slice(&3_u64.to_le_bytes());
@@ -1189,24 +1625,26 @@ mod tests {
         expected.extend_from_slice(&1_u64.to_le_bytes());
         append_point(&mut expected, point(2 * WORLD_PITCH, 0));
         expected.extend_from_slice(&1_u64.to_le_bytes());
+        expected.push(0);
 
         expected.extend_from_slice(&1_u64.to_le_bytes());
         expected.extend_from_slice(&1_u64.to_le_bytes());
         append_point(&mut expected, point(0, 0));
         append_aabb(&mut expected, substrate_bounds);
         append_aabb(&mut expected, substrate_bounds);
+        expected.push(0);
         expected.extend_from_slice(&0_u64.to_le_bytes());
         append_empty_signal_and_events(&mut expected);
 
         assert_eq!(actual, expected);
         assert_eq!(
             state_hash(runtime.view(&contract, Tick(3), Revision(2), &world)).to_string(),
-            "617bb627b25d3da52a28a3295246f086e8cb639ed08edea5ca8401cfb000844e"
+            "23adc52da720d83895e9113aa9d1117f2d741279eba6ae35cb4507c77a8339d3"
         );
     }
 
     #[test]
-    fn mobile_track_positions_have_exact_v6_bytes_and_field_boundaries() {
+    fn mobile_track_positions_have_exact_v7_bytes_and_field_boundaries() {
         const EDGE_LENGTH: i64 = 65_536;
         let edge = |edge, offset, heading| TrackPosition::Edge {
             edge: WireId(EntityId(edge)),
@@ -1299,7 +1737,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Forward,
             }),
-            "Edge identity reaches the full V6 state hash"
+            "Edge identity reaches the full V7 state hash"
         );
         assert_ne!(
             baseline,
@@ -1308,7 +1746,7 @@ mod tests {
                 offset: Fixed(WORLD_PITCH),
                 heading: Heading::Forward,
             }),
-            "the exact edge-length offset boundary reaches the full V6 state hash"
+            "the exact edge-length offset boundary reaches the full V7 state hash"
         );
         assert_ne!(
             baseline,
@@ -1317,7 +1755,7 @@ mod tests {
                 offset: Fixed(0),
                 heading: Heading::Reverse,
             }),
-            "Heading reaches the full V6 state hash"
+            "Heading reaches the full V7 state hash"
         );
 
         let at_junction = TrackPosition::Junction {
@@ -1327,7 +1765,7 @@ mod tests {
         let junction_hash = hash(at_junction);
         assert_ne!(
             baseline, junction_hash,
-            "Edge/Junction discriminant reaches the full V6 state hash"
+            "Edge/Junction discriminant reaches the full V7 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1335,7 +1773,7 @@ mod tests {
                 junction: junction_b,
                 incoming_edge: edge_a,
             }),
-            "Junction identity reaches the full V6 state hash"
+            "Junction identity reaches the full V7 state hash"
         );
         assert_ne!(
             junction_hash,
@@ -1343,12 +1781,12 @@ mod tests {
                 junction: junction_a,
                 incoming_edge: edge_b,
             }),
-            "incoming Edge identity reaches the full V6 state hash"
+            "incoming Edge identity reaches the full V7 state hash"
         );
     }
 
     #[test]
-    fn populated_mobile_control_sink_map_has_exact_v6_signal_bytes() {
+    fn populated_mobile_control_sink_map_has_exact_v7_signal_bytes() {
         let mobile = MobileId(EntityId(17));
         let mut signal = SignalWorld::new();
         let ports = signal
@@ -1360,6 +1798,7 @@ mod tests {
                 stop: SinkId(EntityId(1)),
                 left: SinkId(EntityId(2)),
                 right: SinkId(EntityId(3)),
+                build: None,
             },
             "STOP/LEFT/RIGHT retain distinct canonical Sink identities"
         );
@@ -1382,6 +1821,7 @@ mod tests {
         for value in [17_u64, 1, 2, 3] {
             expected.extend_from_slice(&value.to_le_bytes());
         }
+        expected.push(0); // BUILD absent for retained Mobile activation.
         expected.extend_from_slice(&0_u64.to_le_bytes()); // Wire count.
         expected.extend_from_slice(&0_u64.to_le_bytes()); // Sink/Driver slot count.
 
@@ -1389,7 +1829,44 @@ mod tests {
     }
 
     #[test]
-    fn mobile_port_endpoint_has_exact_v6_bytes_for_all_control_sinks() {
+    fn v7_mobile_signal_row_appends_exact_optional_build_sink() {
+        let mobile = MobileId(EntityId(17));
+        let encode = |signal: &SignalWorld| {
+            let mut bytes = Vec::new();
+            encode_mobile_signal_records(signal, &mut |part| bytes.extend_from_slice(part));
+            bytes
+        };
+
+        let mut retained = SignalWorld::new();
+        retained
+            .activate_mobile(mobile)
+            .expect("retained Mobile ports activate");
+        let mut retained_expected = Vec::new();
+        retained_expected.extend_from_slice(&1_u64.to_le_bytes());
+        for value in [17_u64, 1, 2, 3] {
+            retained_expected.extend_from_slice(&value.to_le_bytes());
+        }
+        retained_expected.push(0);
+        assert_eq!(encode(&retained), retained_expected);
+
+        let mut current = SignalWorld::new();
+        let ports = current
+            .activate_mobile_with_build(mobile, Tick(4))
+            .expect("Balance-v5 Mobile BUILD ports activate");
+        assert_eq!(ports.build, Some(SinkId(EntityId(4))));
+        let mut current_expected = Vec::new();
+        current_expected.extend_from_slice(&1_u64.to_le_bytes());
+        for value in [17_u64, 1, 2, 3] {
+            current_expected.extend_from_slice(&value.to_le_bytes());
+        }
+        current_expected.push(1);
+        current_expected.extend_from_slice(&4_u64.to_le_bytes());
+        assert_eq!(encode(&current), current_expected);
+        assert_ne!(encode(&retained), encode(&current));
+    }
+
+    #[test]
+    fn mobile_port_endpoint_has_exact_v7_bytes_for_all_control_sinks() {
         let endpoint = |mobile, port| {
             endpoint_bytes(EndpointTarget::MobilePort(MobilePortRef {
                 mobile: MobileId(EntityId(mobile)),
@@ -1400,6 +1877,7 @@ mod tests {
             (MobilePort::Stop, 0_u8),
             (MobilePort::Left, 1),
             (MobilePort::Right, 2),
+            (MobilePort::Build, 3),
         ] {
             let mut expected = vec![3]; // EndpointTarget::MobilePort.
             expected.extend_from_slice(&29_u64.to_le_bytes());
@@ -1414,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn main_core_anchor_endpoint_has_exact_v6_bytes() {
+    fn main_core_anchor_endpoint_has_exact_v7_bytes() {
         let endpoint = |id| {
             endpoint_bytes(EndpointTarget::MainCoreAnchor(crate::MainCoreId(EntityId(
                 id,
@@ -1653,6 +2131,9 @@ mod tests {
         let signal_events = EventCalendar::new();
         let path_certificates = PathCertificateArena::new();
         let power_sources = PowerSourceStore::default();
+        let enemies = EnemyStore::default();
+        let construction_sites = ConstructionSiteStore::default();
+        let pending_destructions = BTreeSet::new();
 
         let left = state_hash(StateView {
             contract: &contract,
@@ -1660,6 +2141,10 @@ mod tests {
             topology_revision: Revision(0),
             main_core: None,
             power_sources: &power_sources,
+            enemies: &enemies,
+            construction_sites: &construction_sites,
+            pending_destructions: &pending_destructions,
+            run_status: RunStatus::Running,
             structural: &structural,
             signal: &signal,
             event_payloads: &left_payloads,
@@ -1676,6 +2161,10 @@ mod tests {
                 topology_revision: Revision(0),
                 main_core: None,
                 power_sources: &power_sources,
+                enemies: &enemies,
+                construction_sites: &construction_sites,
+                pending_destructions: &pending_destructions,
+                run_status: RunStatus::Running,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1699,6 +2188,10 @@ mod tests {
                 topology_revision: Revision(0),
                 main_core: None,
                 power_sources: &power_sources,
+                enemies: &enemies,
+                construction_sites: &construction_sites,
+                pending_destructions: &pending_destructions,
+                run_status: RunStatus::Running,
                 structural: &structural,
                 signal: &signal,
                 event_payloads: &left_payloads,
@@ -1715,6 +2208,10 @@ mod tests {
             topology_revision: Revision(0),
             main_core: None,
             power_sources: &power_sources,
+            enemies: &enemies,
+            construction_sites: &construction_sites,
+            pending_destructions: &pending_destructions,
+            run_status: RunStatus::Running,
             structural: &structural,
             signal: &signal,
             event_payloads: &fresh_payloads,
@@ -1799,7 +2296,7 @@ mod tests {
     }
 
     #[test]
-    fn gate_v6_row_appends_exact_unpowered_tick_counter() {
+    fn gate_v7_row_retains_exact_unpowered_tick_counter() {
         let gate = GateId(EntityId(41));
         let mut signal = SignalWorld::new();
         signal
@@ -1841,7 +2338,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_v6_row_has_exact_optional_sense_state_and_field_sensitive_hash() {
+    fn wire_v7_row_retains_exact_optional_sense_state_and_field_sensitive_hash() {
         let wire = WireId(EntityId(41));
         let mut signal = SignalWorld::new();
         signal.activate_wire(wire).expect("Wire activates");
@@ -2042,6 +2539,7 @@ mod tests {
                 stop: SinkId(EntityId(1)),
                 left: SinkId(EntityId(2)),
                 right: SinkId(EntityId(3)),
+                build: None,
             })
         );
         (world, runtime, index)
@@ -2061,12 +2559,19 @@ mod tests {
         let driver_events = EventCalendar::new();
         let signal_events = EventCalendar::new();
         let power_sources = PowerSourceStore::default();
+        let enemies = EnemyStore::default();
+        let construction_sites = ConstructionSiteStore::default();
+        let pending_destructions = BTreeSet::new();
         state_hash(StateView {
             contract: &contract,
             next_tick: Tick(0),
             topology_revision: Revision(0),
             main_core: None,
             power_sources: &power_sources,
+            enemies: &enemies,
+            construction_sites: &construction_sites,
+            pending_destructions: &pending_destructions,
+            run_status: RunStatus::Running,
             structural: &structural,
             signal: &signal,
             event_payloads: &payloads,
@@ -2080,9 +2585,12 @@ mod tests {
         for value in [1_u64, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0] {
             output.extend_from_slice(&value.to_le_bytes());
         }
-        for _ in 0..RESERVED_EMPTY_STORE_COUNT {
+        // pending destruction, Radiation, Relay, Enemy, and Construction Site counts
+        for _ in 0..5 {
             output.extend_from_slice(&0_u64.to_le_bytes());
         }
+        // RunStatus::Running
+        output.push(0);
         output.extend_from_slice(&1_u64.to_le_bytes());
         output.extend_from_slice(&0_u64.to_le_bytes());
     }

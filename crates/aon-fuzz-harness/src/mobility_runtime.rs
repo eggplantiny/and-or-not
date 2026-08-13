@@ -868,11 +868,12 @@ fn mobile_command(origin: FixedVec2) -> Command {
     })
 }
 
-const fn port_y(port: MobilePort) -> i64 {
+fn port_y(port: MobilePort) -> i64 {
     match port {
         MobilePort::Stop => 0,
         MobilePort::Left => -2 * CIRCUIT_PITCH,
         MobilePort::Right => 2 * CIRCUIT_PITCH,
+        MobilePort::Build => unreachable!("BUILD has no fixed Stage-0 control-port anchor"),
     }
 }
 

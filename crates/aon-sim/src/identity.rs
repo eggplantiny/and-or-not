@@ -39,6 +39,8 @@ typed_entity_id!(DriverId);
 typed_entity_id!(SinkId);
 typed_entity_id!(RelaySiteId);
 typed_entity_id!(MobileId);
+typed_entity_id!(EnemyId);
+typed_entity_id!(ConstructionSiteId);
 
 macro_rules! dense_index {
     ($name:ident) => {

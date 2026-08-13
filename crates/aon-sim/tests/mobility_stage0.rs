@@ -386,6 +386,7 @@ fn assert_unknown_control_stops_at_junction(port: MobilePort) {
             mobile_record.ports.right,
             (LogicLevel::Low, LogicLevel::Low, LogicLevel::X),
         ),
+        MobilePort::Build => unreachable!("retained Stage-0 Mobile has no BUILD port"),
     };
     assert!(stopped.signal_arrivals.iter().any(|arrival| {
         arrival.source_driver == driver

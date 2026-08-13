@@ -101,7 +101,7 @@ fn retained_mobility_stop_replay_is_canonical_and_executes_headlessly() {
             .last()
             .expect("retained mobility Replay has a final checkpoint")
             .state_hash,
-        StateHash::from_hex("d25802b743b430e87bf303645e3aabf9149191b3884593dfe1852a35c330ccd0")
+        StateHash::from_hex("7e62181961e0787bac49dd296408a1f0a4219d64675d3a065c3ce818571aaab5")
             .expect("retained mobility final golden is canonical")
     );
 
@@ -272,7 +272,7 @@ fn current_input_only_replay_is_canonical_and_resumes_after_the_matched_set_rele
             .last()
             .expect("current-input-only Replay has a final checkpoint")
             .state_hash,
-        StateHash::from_hex("c1e47ccb3ae076c07af3546c7dfbbe6bc9df30d598a19f6f8c1d503dd4a93a1b")
+        StateHash::from_hex("d89e836e9be9a04501a20cbe1b2ea1cabcae65bcbd8f6426c72557ad781c7daa")
             .expect("current-input-only final golden is canonical")
     );
 

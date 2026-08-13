@@ -148,7 +148,7 @@ $requiredTests = @(
         Package = "aon-sim"
         TargetArguments = @("--test", "replay_golden")
         TestName = "retained_feedback_ring_is_the_exact_canonical_replay_encoding"
-        Evidence = "regenerated feedback Replay preserves its command stream under the current V6 encoder"
+        Evidence = "regenerated feedback Replay preserves its command stream under the current V7 encoder"
     },
     @{
         Gates = @(1, 10)
@@ -252,7 +252,7 @@ $requiredTests = @(
         Gates = @(4, 10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::main_core_anchor_endpoint_has_exact_v6_bytes"
+        TestName = "canonical::tests::main_core_anchor_endpoint_has_exact_v7_bytes"
         Evidence = "independent current-State MainCoreAnchor endpoint bytes"
     },
     @{
@@ -364,21 +364,21 @@ $requiredTests = @(
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--test", "bootstrap_simulation")
-        TestName = "s1m2_empty_state_v6_hash_has_a_golden_value"
+        TestName = "current_empty_state_v7_hash_has_a_golden_value"
         Evidence = "retained Empty world hash under the current global State encoder"
     },
     @{
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::state_encoding_v6_has_exact_contract_tick_revision_and_identity_order"
+        TestName = "canonical::tests::state_encoding_v7_has_exact_contract_tick_revision_and_identity_order"
         Evidence = "independent Empty-compatible current-State prefix and identity field order"
     },
     @{
         Gates = @(10)
         Package = "aon-sim"
         TargetArguments = @("--lib")
-        TestName = "canonical::tests::main_core_v6_section_has_exact_anchor_order_and_is_hash_sensitive"
+        TestName = "canonical::tests::main_core_v7_section_has_exact_anchor_order_and_is_hash_sensitive"
         Evidence = "independent Main Core current-State field order and sensitivity"
     },
     @{

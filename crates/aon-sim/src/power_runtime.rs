@@ -53,7 +53,12 @@ pub struct NominalPowerDemand {
 }
 
 impl NominalPowerDemand {
-    fn new(owner: EntityId, kind: DemandKind, nominal: Energy, node: PowerNodeKey) -> Self {
+    pub(crate) fn new(
+        owner: EntityId,
+        kind: DemandKind,
+        nominal: Energy,
+        node: PowerNodeKey,
+    ) -> Self {
         Self {
             id: DemandId::new(owner, kind),
             nominal,
@@ -128,6 +133,18 @@ impl NominalPowerDemandSet {
 
     pub const fn is_empty(&self) -> bool {
         self.demands.is_empty()
+    }
+
+    /// Adds S1-M4 interaction loads before the Phase-4 demand set is frozen.
+    ///
+    /// The complete result is re-canonicalized by `DemandId`, so an interaction load can never
+    /// silently shadow an ordinary Power load.
+    pub(crate) fn with_additional(
+        mut self,
+        additional: impl IntoIterator<Item = NominalPowerDemand>,
+    ) -> Result<Self, PowerRuntimeError> {
+        self.demands.extend(additional);
+        Self::from_unsorted(self.demands)
     }
 }
 

@@ -4,9 +4,9 @@ use aon_sim::{
     NumericProfile, PhysicalScaleProfile, PowerNodeKey, PowerSourceAttachment, PowerSourceStore,
     PowerTopologyInput, ProfileBundle, Replay, ReplayArtifact, ReplayError, ReplayFormatVersion,
     STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4, STATE_HASH_VERSION_V5, STATE_HASH_VERSION_V6,
-    Simulation, SimulationContract, SimulationPackage, StageFeatureSet, StateHashVersion, Tick,
-    WorldGeneratorVersion, WorldInputEvent, decode_replay_artifact, decode_scenario_manifest,
-    encode_replay_artifact, solve_power_step,
+    STATE_HASH_VERSION_V7, Simulation, SimulationContract, SimulationPackage, StageFeatureSet,
+    StateHashVersion, Tick, WorldGeneratorVersion, WorldInputEvent, decode_replay_artifact,
+    decode_scenario_manifest, encode_replay_artifact, solve_power_step,
 };
 
 const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -149,7 +149,7 @@ fn initial_checkpoint(simulation: &Simulation) -> HashCheckpoint {
 }
 
 #[test]
-fn every_current_initial_world_advertises_state_v6_in_a_v2_header() {
+fn every_current_initial_world_advertises_state_v7_in_a_v2_header() {
     let cases = [
         (empty_simulation(), WorldGeneratorVersion::EmptyV1),
         (main_core_simulation(), WorldGeneratorVersion::MainCoreV1),
@@ -162,8 +162,8 @@ fn every_current_initial_world_advertises_state_v6_in_a_v2_header() {
     for (simulation, expected_generator) in cases {
         let header = simulation.replay_header();
         assert_eq!(header.format_version, ReplayFormatVersion::V2);
-        assert_eq!(header.state_hash_version, StateHashVersion::V6);
-        assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V6);
+        assert_eq!(header.state_hash_version, StateHashVersion::V7);
+        assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V7);
         assert_eq!(header.world_generator_version, expected_generator);
         assert_eq!(header.initial_state_hash, simulation.state_hash());
         initial_hashes.push(header.initial_state_hash);
@@ -174,12 +174,22 @@ fn every_current_initial_world_advertises_state_v6_in_a_v2_header() {
 }
 
 #[test]
-fn retained_state_v3_v4_and_v5_headers_are_typed_but_execution_rejected() {
+fn retained_main_core_power_initial_state_v7_hash_has_a_fixed_golden() {
+    let simulation = main_core_power_simulation();
+    assert_eq!(
+        simulation.state_hash().to_string(),
+        "1edf1acfe26bb891f308129bc24d371f82b7fc0bcbef30e59a8d35e310e7b7b1"
+    );
+}
+
+#[test]
+fn retained_state_v3_through_v6_headers_are_typed_but_execution_rejected() {
     let simulation = empty_simulation();
     for (version, actual) in [
         (StateHashVersion::V3, STATE_HASH_VERSION_V3),
         (StateHashVersion::V4, STATE_HASH_VERSION_V4),
         (StateHashVersion::V5, STATE_HASH_VERSION_V5),
+        (StateHashVersion::V6, STATE_HASH_VERSION_V6),
     ] {
         let mut header = simulation.replay_header();
         header.state_hash_version = version;
@@ -193,7 +203,7 @@ fn retained_state_v3_v4_and_v5_headers_are_typed_but_execution_rejected() {
         assert_eq!(
             replay.validate_against(&simulation),
             Err(ReplayError::UnsupportedStateHashVersion {
-                expected: STATE_HASH_VERSION_V6,
+                expected: STATE_HASH_VERSION_V7,
                 actual: actual.to_owned(),
             })
         );

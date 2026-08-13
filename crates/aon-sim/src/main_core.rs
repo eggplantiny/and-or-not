@@ -70,6 +70,14 @@ impl MainCoreState {
         self.heat_energy
     }
 
+    pub(crate) const fn set_integrity(&mut self, integrity: Integrity) {
+        self.integrity = integrity;
+    }
+
+    pub(crate) const fn set_heat_energy(&mut self, heat_energy: HeatEnergy) {
+        self.heat_energy = heat_energy;
+    }
+
     pub(crate) const fn anchor_view(self) -> MainCoreAnchorView {
         MainCoreAnchorView {
             id: self.id,

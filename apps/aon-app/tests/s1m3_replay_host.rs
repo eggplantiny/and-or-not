@@ -12,7 +12,7 @@ fn replay_path() -> PathBuf {
 }
 
 #[test]
-fn retained_c22_v6_trace_and_reports_match_headless_and_bevy() {
+fn retained_c22_v7_trace_and_reports_match_headless_and_bevy() {
     let replay_path = replay_path();
     let artifact = load_replay(&replay_path).expect("the retained C-22 Replay decodes");
     let scenario_path = replay_path

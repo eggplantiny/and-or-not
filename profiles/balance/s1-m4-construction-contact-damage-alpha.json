@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 5,
+  "profileId": "balance-s1-m4-construction-contact-damage-alpha",
+  "kind": "balance",
+  "simulationHz": 20,
+  "gateBaseDelay": 1,
+  "gateSwitchBaseEnergy": 1,
+  "senseDelay": 1,
+  "logicThreshold": 100,
+  "nominalGateDrive": 400,
+  "inputLoad": 1,
+  "wireLoadPerWU": { "numerator": 1, "denominator": 1 },
+  "fanoutFreeLoad": 4,
+  "fanoutStep": 4,
+  "wireLinearK": { "numerator": 1, "denominator": 10 },
+  "wireQuadraticK": { "numerator": 1, "denominator": 40 },
+  "logicOperateThreshold": { "numerator": 1, "denominator": 5 },
+  "brownoutDelayFloor": { "numerator": 1, "denominator": 5 },
+  "senseRadius": 81920,
+  "quartzPeriod": 8,
+  "radiationCellSize": 65536,
+  "capacityProbe": {
+    "mainCoreCapacity": 100,
+    "relayCapacity": 500,
+    "overcapLinearK": { "numerator": 1, "denominator": 1 },
+    "overcapQuadraticK": { "numerator": 2, "denominator": 1 },
+    "capacityDenominatorFloor": 1,
+    "relayOfflineGraceTicks": 1,
+    "supportHeatFraction": { "numerator": 1, "denominator": 4 }
+  },
+  "powerProbe": {
+    "gateIdleDemand": 1,
+    "gateDriveDemand": 1,
+    "gateSwitchDemandPerEnergy": { "numerator": 1, "denominator": 1 },
+    "wireLeakagePerWU": { "numerator": 1, "denominator": 1 },
+    "wireSenseDemandPerWU": { "numerator": 1, "denominator": 1 },
+    "movementDemandPerWU": { "numerator": 1, "denominator": 1 },
+    "powerLossK": { "numerator": 0, "denominator": 1 },
+    "senseNominalDrive": 400,
+    "gateStateRetentionTicks": 3
+  },
+  "capacitySupportProbe": {
+    "supportPowerPerNCU": { "numerator": 1, "denominator": 1 }
+  },
+  "constructionProbe": {
+    "andGateWork": 8,
+    "orGateWork": 8,
+    "notGateWork": 6,
+    "junctionBaseWork": 4,
+    "wireEndpointWork": 2,
+    "wireWorkPerNCU": { "numerator": 1, "denominator": 1 },
+    "substrateWorkPerSquareWU": { "numerator": 1, "denominator": 1 },
+    "constructionPowerPerWork": { "numerator": 1, "denominator": 1 },
+    "builderWorkPerTick": 8,
+    "constructionHeatFraction": { "numerator": 1, "denominator": 4 }
+  },
+  "contactDamageProbe": {
+    "liveEnergyPerStrengthWU": { "numerator": 1, "denominator": 400 },
+    "worldLeakWeight": 2,
+    "enemyConductivity": 1,
+    "initialIntegrity": {
+      "mainCore": 100,
+      "wire": 10,
+      "gate": 10,
+      "junction": 10,
+      "fixedSubstrate": 20,
+      "mobileSubstrate": 20,
+      "enemy": 10
+    },
+    "thermalCapacity": {
+      "mainCore": 10,
+      "wire": 10,
+      "gate": 10,
+      "junction": 10,
+      "fixedSubstrate": 10,
+      "mobileSubstrate": 10,
+      "enemy": 10
+    },
+    "electricalTolerance": {
+      "mainCore": 1,
+      "wire": 1,
+      "gate": 1,
+      "junction": 1,
+      "fixedSubstrate": 1,
+      "mobileSubstrate": 1,
+      "enemy": 1
+    },
+    "safeTemperature": 65536,
+    "thermalDamageRate": { "numerator": 1, "denominator": 1 },
+    "enemyAttackEnergyPerTick": 10,
+    "gatePowerHeatFraction": { "numerator": 1, "denominator": 4 },
+    "movementHeatFraction": { "numerator": 1, "denominator": 4 }
+  }
+}

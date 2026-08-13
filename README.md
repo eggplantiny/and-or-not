@@ -26,7 +26,14 @@ materialization을 모두 통과했다.
 `f59fe50b6b19af0696e4f4fd0e2523f12889f973`은 별도 Windows-native `git clone --no-local`
 검증에서 653개 등록 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
 70-test S1-M2, 29-test S1-M3 fail-closed 기술 게이트를 모두 통과했다. WSL은 사용하지
-않았다. Stage 1 전체는 아직 진행 중이며, 다음 구현 경계는 S1-M4다.
+않았다.
+
+**S1-M4 Construction / Contact / Damage는 구현 및 pre-commit 검증을 완료했다.** Balance v5,
+Scenario v4, State V7, Construction Site/BUILD, canonical Enemy, Live Wire contact, Heat/Damage,
+Phase-10→Phase-0 destruction과 terminal RunStatus가 구현됐고, 5개 retained Replay의 Headless/Bevy
+전체 report·V7 trace가 일치한다. 95-test fail-closed S1-M4 게이트는 executable Gates 1–15를
+통과했다. 정식 완료 선언과 S1-M5 진입은 구현 커밋의 별도 Windows-native clean clone에서
+Gate 16까지 통과한 뒤 한다. WSL은 사용하지 않는다.
 
 ## Source baseline
 
@@ -43,6 +50,7 @@ materialization을 모두 통과했다.
 - S1-M1 implementation authority: `docs/AON_S1_M1_Canonical_Decisions_v1.0.md`
 - S1-M2 implementation authority: `docs/AON_S1_M2_Canonical_Decisions_v1.0.md`
 - S1-M3 implementation authority: `docs/AON_S1_M3_Canonical_Decisions_v1.0.md`
+- S1-M4 implementation authority: `docs/AON_S1_M4_Canonical_Decisions_v1.0.md`
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -128,7 +136,26 @@ cargo run -p aon-headless --locked --offline -- `
 
 이 fixture는 `U=120`, `S=100`, `E=20`, total Support Demand `28`, 낮은/높은 WireId의
 share `17/11`, ordinary intrinsic demand `240`, Source generation `268`, Phase 8 Support Heat
-`4+3`을 고정한다. State V6 trace와 전체 report는 Headless와 Bevy에서 동일해야 한다.
+`4+3`을 고정한다. State V7 trace와 전체 report는 Headless와 Bevy에서 동일해야 한다.
+
+Retained S1-M4 Construction / Contact / Damage Replays:
+
+```powershell
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m4/construction-partial-multibuilder-v1.json
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m4/construction-four-targets-v1.json
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m4/c10-contact-v1.json
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m4/c09-wire-break-v1.json
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m4/terminal-v1.json
+```
+
+이 fixture set은 partial/source-less/full Construction, 4종 Site의 다음-Phase-0 fresh-ID 활성화,
+C-10의 `20 -> 5+5+10`, C-09의 lethal Tick 45·전면 제거 Tick 46·stale Arrival Tick 51,
+Main Core terminal Tick 55를 고정한다.
 
 Materialize the retained S1-M0 Physical Scale experiment plan:
 
@@ -176,6 +203,7 @@ powershell -NoProfile -File .\scripts\s1-m0-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m1-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m2-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m3-technical-gate.ps1
+powershell -NoProfile -File .\scripts\s1-m4-technical-gate.ps1
 cargo test -p aon-sim --test signal_conformance --locked --offline
 cargo test -p aon-sim --test feedback_conformance --locked --offline
 cargo test -p aon-sim --test replay_golden --locked --offline
@@ -197,13 +225,14 @@ fixed-point numeric/geometry, stable identity registry, canonical Stage 0 struct
 Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event calendar, 명시적
 12-Phase `Simulation::step`, render snapshot, canonical state hash와 Replay v2까지 제공한다.
 
-- Scenario schema `1`의 Empty, schema `2`의 Main Core, schema `3`의 Main Core + Power Source
-  initial world, Numeric/Physical schema `1`, Balance schema `2`/`3`/`4`, semantics
+- Scenario schema `1`의 Empty, schema `2`의 Main Core, schema `3`의 Main Core + Power Source,
+  schema `4`의 Main Core + Power Source + canonical Enemy initial world, Numeric/Physical schema
+  `1`, Balance schema `2`/`3`/`4`/`5`, semantics
   `aon-semantics-v1`, hash algorithm `blake3-v1`을 지원한다.
 - Profile hash는 versioned canonical encoding을, state hash는 Main Core와 파생 anchor까지
   포함하고 Power Source, Gate retention, Wire Sense state를 추가한 전역
-  `AON\0STATE\0V6\0` encoder를 사용한다. retained V3/V4/V5 header는 strict
-  decode되지만 V6 실행에서는 typed unsupported-version 오류를 낸다.
+  `AON\0STATE\0V7\0` encoder를 사용한다. retained V3/V4/V5/V6 header는 strict
+  decode되지만 V7 실행에서는 typed unsupported-version 오류를 낸다.
 - Main Core는 첫 canonical EntityId, 위치, Capacity, Integrity, HeatEnergy와 implicit
   `MainCoreAnchor`를 가지며 제거할 수 없다. OpenWorld Wire만 정확한 anchor에 바인드할 수
   있고, 이 물리 endpoint는 Signal net을 서로 합치지 않는다.
@@ -221,8 +250,14 @@ Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event 
   ceil로 계산하고, 낮은 WireId부터 remainder를 배분한다. 양의 Wire share는
   `DemandKind::OvercapacitySupport` intrinsic load로 전체 nominal set에 포함되며, 실제 grant의
   `supportHeatFraction`만 Phase 8 report-only Heat가 된다. v2/v3 accounting은 S1-M3 관찰을
-  `None`으로 유지하고 v4의 활성 zero는 `Some(0)`으로 구분한다. 이 derived 값들은 V6에
+  `None`으로 유지하고 v4의 활성 zero는 `Some(0)`으로 구분한다. 이 derived 값들은 V7에
   들어가지 않으며 Capacity 초과가 build reject, Wire 삭제, 직접 delay/damage를 만들지 않는다.
+- Balance v5는 Construction/Contact/Damage 계수를 추가한다. BUILD Mobile은 Site별 Work를
+  요청하고 실제 Construction grant만 적용하며, 완료된 Site는 다음 Phase 0에 fresh ID로
+  활성화된다. Canonical Enemy trajectory와 실제 Wire Body의 swept contact는 Live Wire의 실제
+  grant를 보존적으로 흡수/Heat로 분할한다. Phase 9가 Heat를 정확히 한 번 적산하고 Phase 10이
+  Tick-start Temperature와 Electrical exposure로 Integrity를 동시에 줄인 뒤, 다음 Phase 0에
+  destruction을 적용한다. Main Core 파괴 Tick은 State V7과 `RunStatus::Ended`를 끝까지 commit한다.
 - S1-M2 Power는 SourceAnchor 기반 region, exact common-ratio solve, Gate/Sense/Movement
   brownout grant와 Phase 8 leakage/transmission heat report를 제공한다. HostileFrame은 Phase 1
   complete one-Tick input이며, Wire Sense A/B는 기존 Signal surface와 분리된다. Power/Sense
@@ -230,8 +265,9 @@ Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event 
 - in-flight topology edit는 stamped Path Certificate로 검증한다. Route Diff가 만든 sync와
   propagation은 revision-aware slot comparison으로 합쳐지고, 제거된 route는 passive Low를
   즉시 재해결한다.
-- Replay v2는 immutable initial-state Header, zero Seed, Empty/MainCore/MainCorePower world
-  generator, 기존 Command와 MainCore/PowerSource/Sense endpoint, strict typed HostileFrame,
+- Replay v2는 immutable initial-state Header, zero Seed, Empty/MainCore/MainCorePower 및
+  MainCorePowerEnemy world generator, 기존 Command와 tag-8 `PlaceConstructionSite`,
+  MainCore/PowerSource/Sense/BUILD endpoint, strict typed HostileFrame,
   normalized Tick scheduling, sparse hash checkpoint를 제공한다. Decode-only v1은 nonempty
   world input을 계속 거부한다.
 - Headless는 `replay <path>`로 artifact 기준 상대 Scenario를 로드하고, Bevy harness는 같은

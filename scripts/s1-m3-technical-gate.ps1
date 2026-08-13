@@ -357,8 +357,8 @@ $requiredTests = @(
         Gates = @(12, 15)
         Package = "aon-app"
         TargetArguments = @("--test", "s1m3_replay_host")
-        TestName = "retained_c22_v6_trace_and_reports_match_headless_and_bevy"
-        Evidence = "C-22 reports and V6 checkpoints match Headless and native Bevy hosts"
+        TestName = "retained_c22_v7_trace_and_reports_match_headless_and_bevy"
+        Evidence = "C-22 reports and V7 checkpoints match Headless and native Bevy hosts"
     },
     @{
         Gates = @(2, 11, 13)

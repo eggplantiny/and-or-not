@@ -18,9 +18,9 @@ const FINAL_NEXT_TICK: Tick = Tick(3);
 const EXPECTED_SUPPORTED: Capacity = Capacity(1_000 * FIXED_ONE as u64);
 const EXPECTED_USED: Capacity = Capacity(12 * FIXED_ONE as u64);
 const EXPECTED_INITIAL_HASH: &str =
-    "39b3c5e4d9f0855c46c7b2e80d91d623f641675516fe0770416dc4e52402a230";
+    "10848af61611215af9f07707f2e06c4987a020a36e8adf7ae4902bb629c8609e";
 const EXPECTED_FINAL_HASH: &str =
-    "ffa752a27489371a0b30d61b47dba49af275e7298ad9259548feec67fa238114";
+    "bc387ac3e2a80bf2fa68a16c7385b3afaf506797e02255badc53284dd7a5b24b";
 
 fn package() -> aon_sim::SimulationPackage {
     decode_package(ArtifactBytes {
@@ -56,7 +56,7 @@ fn retained_capacity_replay_is_canonical_and_executes_headlessly_with_exact_c21_
     assert_eq!(artifact.replay().final_next_tick(), FINAL_NEXT_TICK);
     assert_eq!(
         artifact.replay().header().state_hash_version,
-        StateHashVersion::V6
+        StateHashVersion::V7
     );
     assert_eq!(
         artifact.replay().header().world_generator_version,

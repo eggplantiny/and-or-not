@@ -2,6 +2,7 @@
 
 mod capacity_support;
 mod mobility_runtime;
+mod s1m4_runtime;
 mod topology_runtime;
 
 pub use capacity_support::{
@@ -13,19 +14,26 @@ pub use mobility_runtime::{
     MAX_MOBILITY_RUNTIME_INPUT_BYTES, MobilityRuntimeCoverage, MobilityRuntimeExecutionObservation,
     MobilityRuntimeObservation, MobilityRuntimeScenario, exercise_mobility_runtime,
 };
+pub use s1m4_runtime::{
+    MAX_S1M4_KERNEL_INPUT_BYTES, MAX_S1M4_RUNTIME_INPUT_BYTES, S1m4KernelCoverage,
+    S1m4KernelExecutionObservation, S1m4KernelInvariant, S1m4KernelObservation, S1m4KernelStage,
+    S1m4RuntimeCoverage, S1m4RuntimeExecutionObservation, S1m4RuntimeObservation,
+    S1m4RuntimeScenario, S1m4RuntimeStage, exercise_s1m4_kernels, exercise_s1m4_runtime,
+};
 pub use topology_runtime::{
     MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, TopologyRuntimeCoverage, TopologyRuntimeExecutionObservation,
     TopologyRuntimeObservation, TopologyRuntimeScenario, exercise_topology_runtime,
 };
 
 use aon_sim::{
-    ArtifactBytes, BindPortCommand, Command, CommandEncodingError, CommandEnvelope, DriveStrength,
-    DriverId, DriverSample, EndpointTarget, EntityId, Fixed, FixedAabb, FixedVec2, GateId,
-    GatePort, GatePortRef, GateSignalPorts, GateSignalSnapshot, GateType, GeometryError,
-    JunctionId, LogicLevel, ModuleError, NumericError, PackageError, PlaceFixedSubstrateCommand,
-    PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
-    RemoveEntityCommand, RoutingDomain, SetExternalDriverCommand, Simulation, SimulationError,
-    StateHash, StepReport, Tick, WireEnd, WireId, WireSignalSnapshot, decode_balance_profile,
+    ArtifactBytes, BindPortCommand, Command, CommandEncodingError, CommandEnvelope,
+    ConstructionTarget, DriveStrength, DriverId, DriverSample, EndpointTarget, EntityId, Fixed,
+    FixedAabb, FixedVec2, GateId, GatePort, GatePortRef, GateSignalPorts, GateSignalSnapshot,
+    GateType, GeometryError, JunctionId, LogicLevel, ModuleError, NumericError, PackageError,
+    PlaceConstructionSiteCommand, PlaceFixedSubstrateCommand, PlaceGateCommand,
+    PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand,
+    RoutingDomain, SetExternalDriverCommand, Simulation, SimulationError, StateHash, StepReport,
+    Tick, WireEnd, WireId, WireSignalSnapshot, decode_balance_profile,
     decode_experiment_plan_artifact, decode_module_artifact, decode_package,
     decode_replay_artifact, decode_scenario_manifest, polyline_length, validate_quantized,
 };
@@ -177,7 +185,7 @@ pub fn exercise_module_decoder(input: &[u8]) -> ModuleDecoderObservation {
 /// The low two bits of the first byte select the target. The remaining, bounded bytes are
 /// supplied to that decoder. Numeric and Physical targets use checked-in reference artifacts for
 /// the other package members. Balance uses its standalone strict multi-version decoder so valid
-/// v2, v3, and v4 artifacts can all reach an accepted result without Scenario hash coupling.
+/// v2 through v5 artifacts can all reach an accepted result without Scenario hash coupling.
 pub fn exercise_decoder(input: &[u8]) -> DecoderObservation {
     let bounded = &input[..input.len().min(MAX_DECODER_INPUT_BYTES)];
     let selector = bounded.first().copied().unwrap_or(0);
@@ -1185,7 +1193,7 @@ struct ArbitraryCommandBatch {
 /// envelope through both public encoding paths, and submits the batch to a fresh Simulation.
 ///
 /// The first bounded byte selects the envelope count. Remaining bytes are consumed cyclically.
-/// Each command index rotates the byte-selected tag so short inputs can still cover all eight
+/// Each command index rotates the byte-selected tag so short inputs can still cover all nine
 /// command variants. Tick, ordinal, EntityId, coordinate, domain, endpoint, and point-count fields
 /// deliberately include valid, reserved, extreme, duplicate, and malformed representations.
 pub fn exercise_commands(input: &[u8]) -> CommandObservation {
@@ -1424,7 +1432,14 @@ fn arbitrary_command(
     cursor: &mut CyclicBytes<'_>,
     context: CommandFuzzContext,
 ) -> (u8, Command) {
-    let tag = cursor.next_u8().wrapping_add(index as u8) & 0b111;
+    let selector = cursor.next_u8().wrapping_add(index as u8);
+    // Reserve low-nibble 8 for Command v1 tag 8 while retaining the original low-three-bit
+    // mapping for every other selector, so the pre-S1-M4 corpus keeps its exact paths.
+    let tag = if selector & 0b1111 == 8 {
+        8
+    } else {
+        selector & 0b111
+    };
     let command = match tag {
         0 => Command::PlaceGate(PlaceGateCommand {
             gate_type: arbitrary_gate_type(cursor),
@@ -1468,7 +1483,7 @@ fn arbitrary_command(
             },
             target: arbitrary_endpoint(cursor, context),
         }),
-        _ => Command::SetExternalDriver(SetExternalDriverCommand {
+        7 => Command::SetExternalDriver(SetExternalDriverCommand {
             driver: DriverId(arbitrary_entity_id(cursor, context)),
             level: match cursor.next_u8() % 3 {
                 0 => LogicLevel::Low,
@@ -1477,8 +1492,45 @@ fn arbitrary_command(
             },
             strength: DriveStrength(cursor.next_u64()),
         }),
+        _ => Command::PlaceConstructionSite(PlaceConstructionSiteCommand {
+            target: arbitrary_construction_target(cursor, context),
+        }),
     };
     (tag, command)
+}
+
+fn arbitrary_construction_target(
+    cursor: &mut CyclicBytes<'_>,
+    context: CommandFuzzContext,
+) -> ConstructionTarget {
+    match cursor.next_u8() % 4 {
+        0 => ConstructionTarget::Gate {
+            gate_type: arbitrary_gate_type(cursor),
+            origin: arbitrary_point(cursor),
+            routing_domain: arbitrary_routing_domain(cursor, context),
+        },
+        1 => {
+            let routing_domain = arbitrary_routing_domain(cursor, context);
+            let point_count =
+                usize::from(cursor.next_u8()) % (MAX_COMMAND_WIRE_POINTS.saturating_add(1));
+            let points = (0..point_count).map(|_| arbitrary_point(cursor)).collect();
+            ConstructionTarget::Wire {
+                routing_domain,
+                points,
+                endpoint_a: arbitrary_endpoint(cursor, context),
+                endpoint_b: arbitrary_endpoint(cursor, context),
+            }
+        }
+        2 => ConstructionTarget::Junction {
+            routing_domain: arbitrary_routing_domain(cursor, context),
+            position: arbitrary_point(cursor),
+        },
+        _ => ConstructionTarget::FixedSubstrate {
+            origin: arbitrary_point(cursor),
+            routing_area: arbitrary_aabb(cursor),
+            footprint: arbitrary_aabb(cursor),
+        },
+    }
 }
 
 fn arbitrary_tick(valid_tick: Tick, cursor: &mut CyclicBytes<'_>) -> Tick {
@@ -1713,10 +1765,10 @@ mod tests {
 
     #[test]
     fn short_command_input_covers_all_variants_and_both_encoders() {
-        let observation = exercise_commands(&[8, 0]);
+        let observation = exercise_commands(&[9, 0]);
 
-        assert_eq!(observation.envelopes.len(), 8);
-        assert_eq!(observation.variant_mask, 0xff);
+        assert_eq!(observation.envelopes.len(), 9);
+        assert_eq!(observation.variant_mask, 0x1ff);
         assert!(observation.encodings.iter().all(|encoding| {
             encoding.allocated_result.is_ok()
                 && encoding.streamed_result.is_ok()
@@ -1746,6 +1798,7 @@ mod tests {
                 (5, CommandRejectionReason::UnknownEntity),
                 (6, CommandRejectionReason::UnknownEntity),
                 (7, CommandRejectionReason::UnknownDriver),
+                (8, CommandRejectionReason::UnsupportedPlacement),
             ]
         );
     }

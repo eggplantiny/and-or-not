@@ -1,6 +1,6 @@
 use crate::{
-    ArtifactKind, FixedVec2, HashParseError, NumericError, ProfileHash, ProfileKind,
-    ProfileValidationError,
+    ArtifactKind, Fixed, FixedVec2, HashParseError, HeatEnergy, Integrity, NumericError,
+    ProfileHash, ProfileKind, ProfileValidationError,
 };
 use thiserror::Error;
 
@@ -72,6 +72,46 @@ pub enum PackageError {
     #[error("Scenario initial world contains duplicate Power Source position {position:?}")]
     DuplicateInitialPowerSourcePosition { position: FixedVec2 },
 
+    #[error("Scenario initial world must contain at least one Enemy")]
+    EmptyInitialEnemySet,
+
+    #[error(
+        "Scenario initial Enemy trajectory overflows: position={position:?}, velocityPerTick={velocity_per_tick:?}"
+    )]
+    InitialEnemyTrajectoryOverflow {
+        position: FixedVec2,
+        velocity_per_tick: FixedVec2,
+    },
+
+    #[error(
+        "Scenario initial world contains duplicate Enemy: position={position:?}, velocityPerTick={velocity_per_tick:?}, radius={radius:?}, integrity={integrity:?}, heatEnergy={heat_energy:?}"
+    )]
+    DuplicateInitialEnemy {
+        position: FixedVec2,
+        velocity_per_tick: FixedVec2,
+        radius: Fixed,
+        integrity: Integrity,
+        heat_energy: HeatEnergy,
+    },
+
+    #[error("Scenario v4 requires stage feature `{feature}`")]
+    MissingRequiredScenarioFeature { feature: &'static str },
+
+    #[error("Scenario initial-world field `{field}` is not aligned to wireGeometryQuantum")]
+    InitialWorldFieldNotQuantumAligned { field: &'static str },
+
+    #[error("Scenario v4 requires Balance schema 5, got {actual}")]
+    ScenarioV4RequiresBalanceV5 { actual: u32 },
+
+    #[error(
+        "Scenario initial integrity for `{entity_kind}` does not match Balance v5: expected {expected}, got {actual}"
+    )]
+    InitialIntegrityProfileMismatch {
+        entity_kind: &'static str,
+        expected: Integrity,
+        actual: Integrity,
+    },
+
     #[error("profile kind mismatch: expected {expected}, got {actual}")]
     ProfileKindMismatch {
         expected: ProfileKind,
@@ -100,6 +140,18 @@ pub enum PackageError {
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum SimulationError {
+    #[error("the simulation Run has already ended")]
+    RunEnded,
+
+    #[error(
+        "initial integrity for `{entity_kind}` does not match Balance v5: expected {expected:?}, got {actual:?}"
+    )]
+    InitialIntegrityProfileMismatch {
+        entity_kind: &'static str,
+        expected: Integrity,
+        actual: Integrity,
+    },
+
     #[error("canonical numeric overflow")]
     NumericOverflow,
 

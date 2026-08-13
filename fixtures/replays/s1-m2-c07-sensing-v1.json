@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63",
-    "stateHashVersion": "aon-state-v6",
+    "stateHashVersion": "aon-state-v7",
     "worldGeneratorVersion": "aon-main-core-power-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "8b0c8f872b033be3f8c7a33f78c5ead7503cb9f29e39ba5eb9a737ffec0bf5c5",
+    "initialStateHash": "9b025cf680c2920594662a4f67c413b8ac09f1a8e89df564f367d7215925a85f",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -244,47 +244,47 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "8b0c8f872b033be3f8c7a33f78c5ead7503cb9f29e39ba5eb9a737ffec0bf5c5"
+      "stateHash": "9b025cf680c2920594662a4f67c413b8ac09f1a8e89df564f367d7215925a85f"
     },
     {
       "nextTick": 1,
-      "stateHash": "a1ed3effa32980c1b59935011d07f4ef31289577614d0e1b9de58dc985f50e2c"
+      "stateHash": "62e22960ea812508ea54d061bd7121951e75441117ee698cbf22e7d8c7bbbcd7"
     },
     {
       "nextTick": 2,
-      "stateHash": "c5784ed44a2495741e22ab08f9986a45ecf8a517924accecb9d160eac5023f84"
+      "stateHash": "f6f3158ad2b11d1a6fd5b8e94360fad3175746cae48f9741d224200849b3ba8c"
     },
     {
       "nextTick": 3,
-      "stateHash": "70214c59b13bf0d6b1a12b143c9fdecdb61003f4478dbd4497e8263c0e45b477"
+      "stateHash": "ed2c5c68069b0bd4eddef11ad96321a4a3a66928db6abe2270f0a734e165868e"
     },
     {
       "nextTick": 4,
-      "stateHash": "805e6cbdc6bd191ad7ed867d2b97013e0956e9796c316380b470356155d54aff"
+      "stateHash": "116383acc65e16a35e247729cb88d5b2045466674ee5b28d74ceb9bbc3604cad"
     },
     {
       "nextTick": 5,
-      "stateHash": "951c38b9f5e4c26c96e8671fdda85a6a48dab9350a7ffc0cf7131e57104317aa"
+      "stateHash": "c4fab0a68442cceb294c45ea5ed61fb510660bfa47290d51b52b2130503c0b96"
     },
     {
       "nextTick": 6,
-      "stateHash": "b94e8fbc35ff77fa061a54dfbbb4b96684e357fd29b8b7e9b17c5f420340c50b"
+      "stateHash": "b34c0adcc849ed789bd6401434c74f1dcb0dbab1d3ddb097424fc2b594a66b17"
     },
     {
       "nextTick": 7,
-      "stateHash": "34f66adf8d7ba3115c22aab8f6e6a00b2ebf9bb4c7c42dcaea95303192ec89ea"
+      "stateHash": "3de53f66ae0fa274ef4a7e0fb41576bbb5379d7d12a1a3a23005c5e3fcccc12d"
     },
     {
       "nextTick": 8,
-      "stateHash": "ed2cb7da72764f4e854a1c6c2855e4b3e40ed5a28928c3ffa83d11a9192f4f34"
+      "stateHash": "1d3ae900da09dfdffa8afc72ddd279fa98e3221ebe07fb3c0d0c11156fed9926"
     },
     {
       "nextTick": 9,
-      "stateHash": "b41a521aa7b6d7ec77ef47bb396451bef9ec0b2f6441e962ff2b80035dce2bd2"
+      "stateHash": "40e82fdaec8d69dfc3c3d22cbdda1a76526ef07ac41425203e640a7dafe1933b"
     },
     {
       "nextTick": 10,
-      "stateHash": "f7e3c45129336c4f018e63ad942500701efd98c2963c903fdd0c4e6df6b70d47"
+      "stateHash": "e6fb6b7d3f738f87aa3e3af11f8dcececcbe19e5620ed8814404e65729df1fa0"
     }
   ]
 }

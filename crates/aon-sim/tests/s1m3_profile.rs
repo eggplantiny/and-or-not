@@ -1,6 +1,6 @@
 use aon_sim::{
-    BALANCE_SCHEMA_VERSION_V4, BalanceProfile, JsonErrorCategory, PackageError, ProfileKind,
-    ProfileValidationError, Rational, decode_balance_profile,
+    BALANCE_SCHEMA_VERSION_V4, BALANCE_SCHEMA_VERSION_V5, BalanceProfile, JsonErrorCategory,
+    PackageError, ProfileKind, ProfileValidationError, Rational, decode_balance_profile,
 };
 
 const BALANCE_V2: &[u8] = include_bytes!(concat!(
@@ -219,13 +219,13 @@ fn v4_json_rejects_unknown_duplicate_zero_denominator_and_wrong_schema() {
 
     let mut wrong_schema: serde_json::Value =
         serde_json::from_slice(BALANCE_V4).expect("v4 fixture JSON");
-    wrong_schema["schemaVersion"] = 5.into();
+    wrong_schema["schemaVersion"] = 6.into();
     assert_eq!(
         decode_balance_profile(&encode_json(&wrong_schema)),
         Err(PackageError::UnsupportedSchema {
             artifact: aon_sim::ArtifactKind::Profile(ProfileKind::Balance),
-            expected: BALANCE_SCHEMA_VERSION_V4,
-            actual: 5,
+            expected: BALANCE_SCHEMA_VERSION_V5,
+            actual: 6,
         })
     );
 }
@@ -242,7 +242,7 @@ fn unsupported_balance_schema_precedes_strict_version_body_faults() {
         decode_balance_profile(&encode_json(&compound)),
         Err(PackageError::UnsupportedSchema {
             artifact: aon_sim::ArtifactKind::Profile(ProfileKind::Balance),
-            expected: BALANCE_SCHEMA_VERSION_V4,
+            expected: BALANCE_SCHEMA_VERSION_V5,
             actual: 99,
         })
     );

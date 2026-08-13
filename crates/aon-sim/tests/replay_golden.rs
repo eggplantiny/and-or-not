@@ -1,7 +1,7 @@
 use aon_sim::{
     ArtifactBytes, HASH_ALGORITHM_ID_BLAKE3_V1, REPLAY_FORMAT_VERSION_V2, ReplayContractField,
     ReplayError, SEMANTICS_VERSION_V1, STATE_HASH_VERSION_V3, STATE_HASH_VERSION_V4,
-    STATE_HASH_VERSION_V6, Seed, Simulation, StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1,
+    STATE_HASH_VERSION_V7, Seed, Simulation, StateHash, Tick, WORLD_GENERATOR_VERSION_EMPTY_V1,
     decode_package, decode_replay_artifact, encode_replay_artifact,
 };
 
@@ -16,7 +16,7 @@ const NUMERIC: &[u8] = include_bytes!("../../../profiles/numeric/v1.json");
 const PHYSICAL: &[u8] = include_bytes!("../../../profiles/physical-scale/stage0-alpha.json");
 const BALANCE: &[u8] = include_bytes!("../../../profiles/balance/stage0-alpha.json");
 
-const INITIAL_STATE_HASH: &str = "0010f831c5b32198d1f0f49f08a29629a5bfa9177504c2bf7271e6bc1a20fef1";
+const INITIAL_STATE_HASH: &str = "5148fa91f240dd4ceb450b62e72953e123effc9fbdbf318dacc7bcd13a2e87d8";
 const NUMERIC_PROFILE_HASH: &str =
     "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469";
 const PHYSICAL_SCALE_PROFILE_HASH: &str =
@@ -47,7 +47,7 @@ fn retained_v3_empty_artifact_strictly_decodes_and_round_trips_exactly() {
         balance_profile: BALANCE,
     })
     .expect("reference package decodes");
-    let simulation = Simulation::new(package).expect("fresh V6 simulation starts");
+    let simulation = Simulation::new(package).expect("fresh V7 simulation starts");
     assert_eq!(
         artifact.replay().validate_against(&simulation),
         Err(ReplayError::ContractMismatch {
@@ -81,7 +81,7 @@ fn retained_v4_empty_artifact_strictly_decodes_round_trips_and_is_execution_reje
         balance_profile: BALANCE,
     })
     .expect("reference package decodes");
-    let simulation = Simulation::new(package).expect("fresh V6 simulation starts");
+    let simulation = Simulation::new(package).expect("fresh V7 simulation starts");
     assert_eq!(
         artifact.replay().validate_against(&simulation),
         Err(ReplayError::ContractMismatch {
@@ -126,7 +126,7 @@ fn retained_feedback_ring_is_the_exact_canonical_replay_encoding() {
             .last()
             .expect("feedback Replay has a final checkpoint")
             .state_hash,
-        StateHash::from_hex("11699b3a0decbd6d72f227060fe737b637be9503aa2a6e726b3a8776b4ae6188")
+        StateHash::from_hex("7a1d9115196e34d7a9e0bebf651bcdedd1c2564ad97d105e7afa1f07ceb8d149")
             .expect("feedback final golden is canonical")
     );
 }
@@ -157,7 +157,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
         header.balance_profile_hash.to_string(),
         BALANCE_PROFILE_HASH
     );
-    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V6);
+    assert_eq!(header.state_hash_version.as_str(), STATE_HASH_VERSION_V7);
     assert_eq!(
         header.world_generator_version.as_str(),
         WORLD_GENERATOR_VERSION_EMPTY_V1
@@ -183,7 +183,7 @@ fn retained_100k_replay_round_trips_semantically_and_freezes_its_contract_golden
     assert_eq!(final_checkpoint.next_tick, Tick(100_000));
     assert_eq!(
         final_checkpoint.state_hash,
-        StateHash::from_hex("957a8644c2c9246f37912701883b7eb4da097dea2b515b91ddfb1b25bfcd5a83")
+        StateHash::from_hex("f928103047a12735c15591b5db662aefc92b9fdfc43f468ba0c506ecfe0982ec")
             .expect("100k final golden is canonical")
     );
 }

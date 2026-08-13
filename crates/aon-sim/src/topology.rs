@@ -1,7 +1,7 @@
 use crate::mobility::MobilePortRef;
 use crate::{
-    ConnectionGeneration, EntityId, FixedSubstrateIndex, FixedVec2, GateId, GateIndex, JunctionId,
-    JunctionIndex, MainCoreId, NumericError, PowerSourceId, WireId, WireIndex,
+    ConnectionGeneration, DamageState, EntityId, FixedSubstrateIndex, FixedVec2, GateId, GateIndex,
+    JunctionId, JunctionIndex, MainCoreId, NumericError, PowerSourceId, WireId, WireIndex,
 };
 use std::ops::Range;
 use thiserror::Error;
@@ -214,6 +214,7 @@ pub(crate) struct GateRecord {
     pub gate_type: GateType,
     pub origin: FixedVec2,
     pub routing_domain: RoutingDomain,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -223,9 +224,11 @@ pub(crate) struct GateStore {
     gate_types: Vec<GateType>,
     origins: Vec<FixedVec2>,
     routing_domains: Vec<RoutingDomain>,
+    damage_states: Vec<Option<DamageState>>,
 }
 
 impl GateStore {
+    #[cfg(test)]
     pub fn push(
         &mut self,
         id: GateId,
@@ -233,12 +236,24 @@ impl GateStore {
         origin: FixedVec2,
         routing_domain: RoutingDomain,
     ) -> Result<GateIndex, TopologyError> {
+        self.push_with_damage(id, gate_type, origin, routing_domain, None)
+    }
+
+    pub fn push_with_damage(
+        &mut self,
+        id: GateId,
+        gate_type: GateType,
+        origin: FixedVec2,
+        routing_domain: RoutingDomain,
+        damage_state: Option<DamageState>,
+    ) -> Result<GateIndex, TopologyError> {
         let index = store_index(self.ids.len()).map(GateIndex)?;
         self.ids.push(id);
         self.alive.push(true);
         self.gate_types.push(gate_type);
         self.origins.push(origin);
         self.routing_domains.push(routing_domain);
+        self.damage_states.push(damage_state);
         Ok(index)
     }
 
@@ -250,6 +265,7 @@ impl GateStore {
             gate_type: *self.gate_types.get(index)?,
             origin: *self.origins.get(index)?,
             routing_domain: *self.routing_domains.get(index)?,
+            damage_state: *self.damage_states.get(index)?,
         })
     }
 
@@ -257,6 +273,16 @@ impl GateStore {
         let record = self.get(index).ok_or_else(|| self.index_error(index.0))?;
         self.alive[index.0 as usize] = false;
         Ok(record)
+    }
+
+    pub fn set_damage_state(
+        &mut self,
+        index: GateIndex,
+        damage_state: DamageState,
+    ) -> Result<(), TopologyError> {
+        self.get(index).ok_or_else(|| self.index_error(index.0))?;
+        self.damage_states[index.0 as usize] = Some(damage_state);
+        Ok(())
     }
 
     pub fn iter_alive(&self) -> impl Iterator<Item = (GateIndex, GateRecord)> + '_ {
@@ -278,6 +304,7 @@ impl GateStore {
         self.gate_types.reserve(additional);
         self.origins.reserve(additional);
         self.routing_domains.reserve(additional);
+        self.damage_states.reserve(additional);
     }
 
     #[cfg(test)]
@@ -295,6 +322,7 @@ impl GateStore {
         self.gate_types.swap(first, second);
         self.origins.swap(first, second);
         self.routing_domains.swap(first, second);
+        self.damage_states.swap(first, second);
         Ok(())
     }
 
@@ -344,6 +372,7 @@ pub(crate) struct WireRecord<'a> {
     pub endpoint_a: EndpointTarget,
     pub endpoint_b: EndpointTarget,
     pub connection_generation: ConnectionGeneration,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -355,10 +384,12 @@ pub(crate) struct WireStore {
     endpoint_a: Vec<EndpointTarget>,
     endpoint_b: Vec<EndpointTarget>,
     connection_generations: Vec<ConnectionGeneration>,
+    damage_states: Vec<Option<DamageState>>,
     geometry: GeometryArena,
 }
 
 impl WireStore {
+    #[cfg(test)]
     pub fn push(
         &mut self,
         id: WireId,
@@ -366,6 +397,18 @@ impl WireStore {
         points: &[FixedVec2],
         endpoint_a: EndpointTarget,
         endpoint_b: EndpointTarget,
+    ) -> Result<WireIndex, TopologyError> {
+        self.push_with_damage(id, routing_domain, points, endpoint_a, endpoint_b, None)
+    }
+
+    pub fn push_with_damage(
+        &mut self,
+        id: WireId,
+        routing_domain: RoutingDomain,
+        points: &[FixedVec2],
+        endpoint_a: EndpointTarget,
+        endpoint_b: EndpointTarget,
+        damage_state: Option<DamageState>,
     ) -> Result<WireIndex, TopologyError> {
         let index = store_index(self.ids.len()).map(WireIndex)?;
         let range = self.geometry.append(points)?;
@@ -377,6 +420,7 @@ impl WireStore {
         self.endpoint_b.push(endpoint_b);
         self.connection_generations
             .push(ConnectionGeneration::INITIAL);
+        self.damage_states.push(damage_state);
         Ok(index)
     }
 
@@ -392,6 +436,7 @@ impl WireStore {
             endpoint_a: *self.endpoint_a.get(index)?,
             endpoint_b: *self.endpoint_b.get(index)?,
             connection_generation: *self.connection_generations.get(index)?,
+            damage_state: *self.damage_states.get(index)?,
         })
     }
 
@@ -433,6 +478,10 @@ impl WireStore {
                 .connection_generations
                 .get(raw)
                 .ok_or(TopologyError::UnknownStoreIndex)?,
+            damage_state: *self
+                .damage_states
+                .get(raw)
+                .ok_or(TopologyError::UnknownStoreIndex)?,
         })
     }
 
@@ -442,6 +491,16 @@ impl WireStore {
             WireEnd::A => record.endpoint_a,
             WireEnd::B => record.endpoint_b,
         })
+    }
+
+    pub fn set_damage_state(
+        &mut self,
+        index: WireIndex,
+        damage_state: DamageState,
+    ) -> Result<(), TopologyError> {
+        self.get(index).ok_or_else(|| self.index_error(index.0))?;
+        self.damage_states[index.0 as usize] = Some(damage_state);
+        Ok(())
     }
 
     pub fn set_endpoint(
@@ -489,6 +548,7 @@ impl WireStore {
         self.endpoint_a.reserve(additional);
         self.endpoint_b.reserve(additional);
         self.connection_generations.reserve(additional);
+        self.damage_states.reserve(additional);
         self.geometry.reserve_capacity_for_test(additional);
     }
 
@@ -509,6 +569,7 @@ impl WireStore {
         self.endpoint_a.swap(first, second);
         self.endpoint_b.swap(first, second);
         self.connection_generations.swap(first, second);
+        self.damage_states.swap(first, second);
         Ok(())
     }
 
@@ -537,6 +598,7 @@ pub(crate) struct JunctionRecord {
     pub routing_domain: RoutingDomain,
     pub position: FixedVec2,
     pub connection_generation: ConnectionGeneration,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -546,14 +608,26 @@ pub(crate) struct JunctionStore {
     routing_domains: Vec<RoutingDomain>,
     positions: Vec<FixedVec2>,
     connection_generations: Vec<ConnectionGeneration>,
+    damage_states: Vec<Option<DamageState>>,
 }
 
 impl JunctionStore {
+    #[cfg(test)]
     pub fn push(
         &mut self,
         id: JunctionId,
         routing_domain: RoutingDomain,
         position: FixedVec2,
+    ) -> Result<JunctionIndex, TopologyError> {
+        self.push_with_damage(id, routing_domain, position, None)
+    }
+
+    pub fn push_with_damage(
+        &mut self,
+        id: JunctionId,
+        routing_domain: RoutingDomain,
+        position: FixedVec2,
+        damage_state: Option<DamageState>,
     ) -> Result<JunctionIndex, TopologyError> {
         let index = store_index(self.ids.len()).map(JunctionIndex)?;
         self.ids.push(id);
@@ -562,6 +636,7 @@ impl JunctionStore {
         self.positions.push(position);
         self.connection_generations
             .push(ConnectionGeneration::INITIAL);
+        self.damage_states.push(damage_state);
         Ok(index)
     }
 
@@ -573,6 +648,7 @@ impl JunctionStore {
             routing_domain: *self.routing_domains.get(index)?,
             position: *self.positions.get(index)?,
             connection_generation: *self.connection_generations.get(index)?,
+            damage_state: *self.damage_states.get(index)?,
         })
     }
 
@@ -588,6 +664,16 @@ impl JunctionStore {
         self.connection_generations[slot] = self.connection_generations[slot]
             .checked_advance()
             .map_err(|_| TopologyError::NumericOverflow)?;
+        Ok(())
+    }
+
+    pub fn set_damage_state(
+        &mut self,
+        index: JunctionIndex,
+        damage_state: DamageState,
+    ) -> Result<(), TopologyError> {
+        self.get(index).ok_or_else(|| self.index_error(index.0))?;
+        self.damage_states[index.0 as usize] = Some(damage_state);
         Ok(())
     }
 
@@ -610,6 +696,7 @@ impl JunctionStore {
         self.routing_domains.reserve(additional);
         self.positions.reserve(additional);
         self.connection_generations.reserve(additional);
+        self.damage_states.reserve(additional);
     }
 
     #[cfg(test)]
@@ -627,6 +714,7 @@ impl JunctionStore {
         self.routing_domains.swap(first, second);
         self.positions.swap(first, second);
         self.connection_generations.swap(first, second);
+        self.damage_states.swap(first, second);
         Ok(())
     }
 
@@ -655,6 +743,7 @@ pub(crate) struct FixedSubstrateRecord {
     pub origin: FixedVec2,
     pub routing_area: FixedAabb,
     pub footprint: FixedAabb,
+    pub damage_state: Option<DamageState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -664,15 +753,17 @@ pub(crate) struct FixedSubstrateStore {
     origins: Vec<FixedVec2>,
     routing_areas: Vec<FixedAabb>,
     footprints: Vec<FixedAabb>,
+    damage_states: Vec<Option<DamageState>>,
 }
 
 impl FixedSubstrateStore {
-    pub fn push(
+    pub fn push_with_damage(
         &mut self,
         id: EntityId,
         origin: FixedVec2,
         routing_area: FixedAabb,
         footprint: FixedAabb,
+        damage_state: Option<DamageState>,
     ) -> Result<FixedSubstrateIndex, TopologyError> {
         let index = store_index(self.ids.len()).map(FixedSubstrateIndex)?;
         self.ids.push(id);
@@ -680,6 +771,7 @@ impl FixedSubstrateStore {
         self.origins.push(origin);
         self.routing_areas.push(routing_area);
         self.footprints.push(footprint);
+        self.damage_states.push(damage_state);
         Ok(index)
     }
 
@@ -691,6 +783,7 @@ impl FixedSubstrateStore {
             origin: *self.origins.get(index)?,
             routing_area: *self.routing_areas.get(index)?,
             footprint: *self.footprints.get(index)?,
+            damage_state: *self.damage_states.get(index)?,
         })
     }
 
@@ -701,6 +794,16 @@ impl FixedSubstrateStore {
         let record = self.get(index).ok_or_else(|| self.index_error(index.0))?;
         self.alive[index.0 as usize] = false;
         Ok(record)
+    }
+
+    pub fn set_damage_state(
+        &mut self,
+        index: FixedSubstrateIndex,
+        damage_state: DamageState,
+    ) -> Result<(), TopologyError> {
+        self.get(index).ok_or_else(|| self.index_error(index.0))?;
+        self.damage_states[index.0 as usize] = Some(damage_state);
+        Ok(())
     }
 
     pub fn iter_alive(
@@ -724,6 +827,7 @@ impl FixedSubstrateStore {
         self.origins.reserve(additional);
         self.routing_areas.reserve(additional);
         self.footprints.reserve(additional);
+        self.damage_states.reserve(additional);
     }
 
     #[cfg(test)]
@@ -741,6 +845,7 @@ impl FixedSubstrateStore {
         self.origins.swap(first, second);
         self.routing_areas.swap(first, second);
         self.footprints.swap(first, second);
+        self.damage_states.swap(first, second);
         Ok(())
     }
 

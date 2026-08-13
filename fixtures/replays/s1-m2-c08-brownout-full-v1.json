@@ -6,10 +6,10 @@
     "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
     "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
     "balanceProfileHash": "96d89224a7edc9b2bbd82b092891465d42b0c8e3954ebed6f9693af216cdcc63",
-    "stateHashVersion": "aon-state-v6",
+    "stateHashVersion": "aon-state-v7",
     "worldGeneratorVersion": "aon-main-core-power-v1",
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
-    "initialStateHash": "086b4b71ba63d0795c1bda727e06ff3b949c1daac60b22cd59da9df27fe46db7",
+    "initialStateHash": "48ec25d23896e8e69e66cf11a25a70bdf11a0a4af981b46c96b43b17f8618809",
     "hashAlgorithmId": "blake3-v1"
   },
   "commands": [
@@ -181,27 +181,27 @@
   "checkpoints": [
     {
       "nextTick": 0,
-      "stateHash": "086b4b71ba63d0795c1bda727e06ff3b949c1daac60b22cd59da9df27fe46db7"
+      "stateHash": "48ec25d23896e8e69e66cf11a25a70bdf11a0a4af981b46c96b43b17f8618809"
     },
     {
       "nextTick": 1,
-      "stateHash": "35b0e4658ec22033555ee990c8bca8f8ded3d72be976f9535649bc63cf141aef"
+      "stateHash": "a9a02edca8ce2ca526028891fb5f801637e18485c47bf87353fa31e911b35d4d"
     },
     {
       "nextTick": 2,
-      "stateHash": "ec335954982159c0ad3be89524d244742725ac5845c391efd614bcb54ae49bad"
+      "stateHash": "2bd216c50ef809d8408a7e6fa28f18fa4e172d291526ae4730b84b750352048e"
     },
     {
       "nextTick": 3,
-      "stateHash": "8f4ec40acbd437949bd69afc6dd73a3b6985fc505f00dd2ff8753c5b484df658"
+      "stateHash": "0b32d551f22dfb38375fbead9e8b6f417d6dae63d24182db3e3569d26aaedbd4"
     },
     {
       "nextTick": 4,
-      "stateHash": "c92073953f8bd8c8290b4f706dbf208c2e6330bd32bfdc429e667f7c0b30a889"
+      "stateHash": "cbc9d47c7737fca4f65fd7108b2f005446b88afc49a99162734823f6abcb3249"
     },
     {
       "nextTick": 5,
-      "stateHash": "516070270ef1ef46bf312d2c2e906a0597974b6e3afa4546c7642a5e6224b3f3"
+      "stateHash": "fb34a679a37826071f026a8e79216ec8c62a22c33cbc7396e17bab4f48199712"
     }
   ]
 }

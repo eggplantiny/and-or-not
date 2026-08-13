@@ -4,7 +4,7 @@ use aon_sim::{
     InitialWorld, Integrity, JsonErrorCategory, MainCoreId, NumericProfile, PackageError,
     PhysicalScaleProfile, ProfileBundle, RemoveEntityCommand, RenderSnapshot, Replay,
     ReplayArtifact, RoutingDomain, SCENARIO_SCHEMA_VERSION_V1, SCENARIO_SCHEMA_VERSION_V2,
-    SCENARIO_SCHEMA_VERSION_V3, Simulation, SimulationContract, SimulationError, SimulationPackage,
+    SCENARIO_SCHEMA_VERSION_V4, Simulation, SimulationContract, SimulationError, SimulationPackage,
     StageFeatureSet, Tick, TopologyNodeId, WireEnd, WireId, WorldGeneratorVersion,
     decode_replay_artifact, decode_scenario_manifest, encode_replay_artifact,
 };
@@ -583,7 +583,7 @@ fn scenario_decode_precedence_and_v1_v2_pairing_are_frozen() {
         decode_scenario_manifest(&serde_json::to_vec(&unsupported).expect("JSON serializes")),
         Err(PackageError::UnsupportedSchema {
             artifact: ArtifactKind::Scenario,
-            expected: SCENARIO_SCHEMA_VERSION_V3,
+            expected: SCENARIO_SCHEMA_VERSION_V4,
             actual: 99,
         })
     );

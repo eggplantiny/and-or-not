@@ -458,6 +458,10 @@ fn selected_probe_target(
                 aon_sim::MobilePort::Stop => mobile.ports.stop,
                 aon_sim::MobilePort::Left => mobile.ports.left,
                 aon_sim::MobilePort::Right => mobile.ports.right,
+                aon_sim::MobilePort::Build => mobile
+                    .ports
+                    .build
+                    .ok_or(NativeEditorError::SelectionCannotBeProbed)?,
             }))
         }
         PickTarget::WireEnd { wire, .. } => Ok(SignalProbeTarget::Wire(wire)),

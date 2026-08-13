@@ -25,8 +25,8 @@ const FINAL_NEXT_TICK: Tick = Tick(3);
 
 const BALANCE_HASH: &str = "a0a8974aebc87e30d602ffa019340e59c908912c0b36e0e0634e51214afc45ef";
 const SCENARIO_HASH: &str = "bdebfe491a2f3a31dfdcd7c2470cf447415137459de5e4d65095d3d38f0e01a5";
-const INITIAL_HASH: &str = "47cddc7a4a1a1371d6600953bb7c0acc7c7e5e465741869375026e7efcab9369";
-const FINAL_HASH: &str = "7f687d752df7146141be826dbb74668866494c1a024ec6f157bb3eb264c3445c";
+const INITIAL_HASH: &str = "5f332a3c78c91eba13d7eb926c20da653c4403d5a1acc15fc1891defee49a60c";
+const FINAL_HASH: &str = "296e8c6225a6bc7d2575a69efe4a330472f09e8bdfc83b64551ab24e3b58a358";
 
 fn package() -> aon_sim::SimulationPackage {
     decode_package(ArtifactBytes {
@@ -223,7 +223,7 @@ fn retained_c22_is_canonical_headless_and_exact_across_support_power_and_heat() 
     );
     let header = artifact.replay().header();
     assert_eq!(header.format_version, ReplayFormatVersion::V2);
-    assert_eq!(header.state_hash_version, StateHashVersion::V6);
+    assert_eq!(header.state_hash_version, StateHashVersion::V7);
     assert_eq!(
         header.world_generator_version,
         WorldGeneratorVersion::MainCorePowerV1

@@ -7,6 +7,7 @@ pub const PROFILE_SCHEMA_VERSION_V1: u32 = 1;
 pub const PROFILE_SCHEMA_VERSION_V2: u32 = 2;
 pub const PROFILE_SCHEMA_VERSION_V3: u32 = 3;
 pub const BALANCE_SCHEMA_VERSION_V4: u32 = 4;
+pub const BALANCE_SCHEMA_VERSION_V5: u32 = 5;
 
 pub const REFERENCE_WIRE_GEOMETRY_QUANTUM: Fixed = Fixed(FIXED_ONE / 64);
 pub const REFERENCE_CIRCUIT_ROUTING_PITCH: Fixed = Fixed(FIXED_ONE / 4);
@@ -439,6 +440,78 @@ pub struct PowerProbeProfile {
     pub gate_state_retention_ticks: u64,
 }
 
+/// S1-M4 conformance coefficients for measured construction.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConstructionProbeProfile {
+    pub and_gate_work: u64,
+    pub or_gate_work: u64,
+    pub not_gate_work: u64,
+    pub junction_base_work: u64,
+    pub wire_endpoint_work: u64,
+    #[serde(rename = "wireWorkPerNCU")]
+    pub wire_work_per_ncu: Rational,
+    #[serde(rename = "substrateWorkPerSquareWU")]
+    pub substrate_work_per_square_wu: Rational,
+    pub construction_power_per_work: Rational,
+    pub builder_work_per_tick: u64,
+    pub construction_heat_fraction: Rational,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrimitiveIntegrityProfile {
+    pub main_core: u64,
+    pub wire: u64,
+    pub gate: u64,
+    pub junction: u64,
+    pub fixed_substrate: u64,
+    pub mobile_substrate: u64,
+    pub enemy: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrimitiveThermalCapacityProfile {
+    pub main_core: u64,
+    pub wire: u64,
+    pub gate: u64,
+    pub junction: u64,
+    pub fixed_substrate: u64,
+    pub mobile_substrate: u64,
+    pub enemy: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ElectricalToleranceProfile {
+    pub main_core: u64,
+    pub wire: u64,
+    pub gate: u64,
+    pub junction: u64,
+    pub fixed_substrate: u64,
+    pub mobile_substrate: u64,
+    pub enemy: u64,
+}
+
+/// S1-M4 conformance coefficients for live contact, damage, and thermal integration.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContactDamageProbeProfile {
+    #[serde(rename = "liveEnergyPerStrengthWU")]
+    pub live_energy_per_strength_wu: Rational,
+    pub world_leak_weight: u64,
+    pub enemy_conductivity: u64,
+    pub initial_integrity: PrimitiveIntegrityProfile,
+    pub thermal_capacity: PrimitiveThermalCapacityProfile,
+    pub electrical_tolerance: ElectricalToleranceProfile,
+    pub safe_temperature: Fixed,
+    pub thermal_damage_rate: Rational,
+    pub enemy_attack_energy_per_tick: u64,
+    pub gate_power_heat_fraction: Rational,
+    pub movement_heat_fraction: Rational,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OrientationWeightTable {
@@ -495,6 +568,10 @@ pub struct BalanceProfile {
     pub power_probe: Option<PowerProbeProfile>,
     #[serde(default)]
     pub capacity_support_probe: Option<CapacitySupportProbeProfile>,
+    #[serde(default)]
+    pub construction_probe: Option<ConstructionProbeProfile>,
+    #[serde(default)]
+    pub contact_damage_probe: Option<ContactDamageProbeProfile>,
 }
 
 impl BalanceProfile {
@@ -524,6 +601,8 @@ impl BalanceProfile {
             radiation_reference: None,
             power_probe: None,
             capacity_support_probe: None,
+            construction_probe: None,
+            contact_damage_probe: None,
         }
     }
 
@@ -595,13 +674,72 @@ impl BalanceProfile {
         profile
     }
 
+    /// Reference S1-M4 construction/contact/damage conformance profile.
+    pub fn construction_contact_damage_alpha(profile_id: impl Into<String>) -> Self {
+        let mut profile = Self::capacity_support_probe_alpha(profile_id);
+        profile.schema_version = BALANCE_SCHEMA_VERSION_V5;
+        profile.construction_probe = Some(ConstructionProbeProfile {
+            and_gate_work: 8,
+            or_gate_work: 8,
+            not_gate_work: 6,
+            junction_base_work: 4,
+            wire_endpoint_work: 2,
+            wire_work_per_ncu: ratio(1, 1),
+            substrate_work_per_square_wu: ratio(1, 1),
+            construction_power_per_work: ratio(1, 1),
+            builder_work_per_tick: 8,
+            construction_heat_fraction: ratio(1, 4),
+        });
+        profile.contact_damage_probe = Some(ContactDamageProbeProfile {
+            live_energy_per_strength_wu: ratio(1, 400),
+            world_leak_weight: 2,
+            enemy_conductivity: 1,
+            initial_integrity: PrimitiveIntegrityProfile {
+                main_core: 100,
+                wire: 10,
+                gate: 10,
+                junction: 10,
+                fixed_substrate: 20,
+                mobile_substrate: 20,
+                enemy: 10,
+            },
+            thermal_capacity: PrimitiveThermalCapacityProfile {
+                main_core: 10,
+                wire: 10,
+                gate: 10,
+                junction: 10,
+                fixed_substrate: 10,
+                mobile_substrate: 10,
+                enemy: 10,
+            },
+            electrical_tolerance: ElectricalToleranceProfile {
+                main_core: 1,
+                wire: 1,
+                gate: 1,
+                junction: 1,
+                fixed_substrate: 1,
+                mobile_substrate: 1,
+                enemy: 1,
+            },
+            safe_temperature: Fixed(FIXED_ONE),
+            thermal_damage_rate: ratio(1, 1),
+            enemy_attack_energy_per_tick: 10,
+            gate_power_heat_fraction: ratio(1, 4),
+            movement_heat_fraction: ratio(1, 4),
+        });
+        profile
+    }
+
     pub fn validate(&self) -> Result<(), ProfileValidationError> {
         if !matches!(
             self.schema_version,
-            PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4
+            PROFILE_SCHEMA_VERSION_V2
+                | PROFILE_SCHEMA_VERSION_V3
+                | BALANCE_SCHEMA_VERSION_V4
+                | BALANCE_SCHEMA_VERSION_V5
         ) {
             return Err(ProfileValidationError::UnsupportedSchema {
-                expected: BALANCE_SCHEMA_VERSION_V4,
+                expected: BALANCE_SCHEMA_VERSION_V5,
                 actual: self.schema_version,
             });
         }
@@ -643,7 +781,10 @@ impl BalanceProfile {
         )?;
         if let Some(capacity_probe) = self.capacity_probe {
             validate_capacity_probe(capacity_probe)?;
-            if self.schema_version == BALANCE_SCHEMA_VERSION_V4 {
+            if matches!(
+                self.schema_version,
+                BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5
+            ) {
                 require_positive_rational(
                     "capacityProbe.overcapQuadraticK",
                     capacity_probe.overcap_quadratic_k,
@@ -661,10 +802,16 @@ impl BalanceProfile {
                     schema_version: PROFILE_SCHEMA_VERSION_V2,
                 });
             }
-            (PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4, Some(power_probe)) => {
+            (
+                PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5,
+                Some(power_probe),
+            ) => {
                 validate_power_probe(power_probe)?;
             }
-            (PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4, None) => {
+            (
+                PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5,
+                None,
+            ) => {
                 return Err(ProfileValidationError::FieldRequiredForSchema {
                     field: "powerProbe",
                     schema_version: self.schema_version,
@@ -680,19 +827,72 @@ impl BalanceProfile {
                     schema_version: self.schema_version,
                 });
             }
-            (BALANCE_SCHEMA_VERSION_V4, Some(capacity_support_probe)) => {
+            (
+                BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5,
+                Some(capacity_support_probe),
+            ) => {
                 if self.capacity_probe.is_none() {
                     return Err(ProfileValidationError::FieldRequiredForSchema {
                         field: "capacityProbe",
-                        schema_version: BALANCE_SCHEMA_VERSION_V4,
+                        schema_version: self.schema_version,
                     });
                 }
                 validate_capacity_support_probe(capacity_support_probe)?;
             }
-            (BALANCE_SCHEMA_VERSION_V4, None) => {
+            (BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5, None) => {
                 return Err(ProfileValidationError::FieldRequiredForSchema {
                     field: "capacitySupportProbe",
-                    schema_version: BALANCE_SCHEMA_VERSION_V4,
+                    schema_version: self.schema_version,
+                });
+            }
+            _ => unreachable!("supported Balance schemas were checked above"),
+        }
+        match (self.schema_version, self.construction_probe) {
+            (
+                PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4,
+                None,
+            ) => {}
+            (
+                PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4,
+                Some(_),
+            ) => {
+                return Err(ProfileValidationError::FieldForbiddenForSchema {
+                    field: "constructionProbe",
+                    schema_version: self.schema_version,
+                });
+            }
+            (BALANCE_SCHEMA_VERSION_V5, Some(construction_probe)) => {
+                validate_construction_probe(construction_probe)?;
+            }
+            (BALANCE_SCHEMA_VERSION_V5, None) => {
+                return Err(ProfileValidationError::FieldRequiredForSchema {
+                    field: "constructionProbe",
+                    schema_version: BALANCE_SCHEMA_VERSION_V5,
+                });
+            }
+            _ => unreachable!("supported Balance schemas were checked above"),
+        }
+        match (self.schema_version, self.contact_damage_probe) {
+            (
+                PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4,
+                None,
+            ) => {}
+            (
+                PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4,
+                Some(_),
+            ) => {
+                return Err(ProfileValidationError::FieldForbiddenForSchema {
+                    field: "contactDamageProbe",
+                    schema_version: self.schema_version,
+                });
+            }
+            (BALANCE_SCHEMA_VERSION_V5, Some(contact_damage_probe)) => {
+                validate_contact_damage_probe(contact_damage_probe)?;
+            }
+            (BALANCE_SCHEMA_VERSION_V5, None) => {
+                return Err(ProfileValidationError::FieldRequiredForSchema {
+                    field: "contactDamageProbe",
+                    schema_version: BALANCE_SCHEMA_VERSION_V5,
                 });
             }
             _ => unreachable!("supported Balance schemas were checked above"),
@@ -746,18 +946,31 @@ impl BalanceProfile {
         // is already part of the canonical header.
         if matches!(
             self.schema_version,
-            PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4
+            PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5
         ) {
             let power_probe = self
                 .power_probe
                 .expect("validated Balance v3/v4 has a Power probe");
             encode_power_probe(power_probe, write);
         }
-        if self.schema_version == BALANCE_SCHEMA_VERSION_V4 {
+        if matches!(
+            self.schema_version,
+            BALANCE_SCHEMA_VERSION_V4 | BALANCE_SCHEMA_VERSION_V5
+        ) {
             let capacity_support_probe = self
                 .capacity_support_probe
                 .expect("validated Balance v4 has a capacity-support probe");
             encode_rational(capacity_support_probe.support_power_per_ncu, write);
+        }
+        if self.schema_version == BALANCE_SCHEMA_VERSION_V5 {
+            let construction_probe = self
+                .construction_probe
+                .expect("validated Balance v5 has a construction probe");
+            let contact_damage_probe = self
+                .contact_damage_probe
+                .expect("validated Balance v5 has a contact/damage probe");
+            encode_construction_probe(construction_probe, write);
+            encode_contact_damage_probe(contact_damage_probe, write);
         }
     }
 }
@@ -1153,6 +1366,193 @@ fn validate_power_probe(profile: PowerProbeProfile) -> Result<(), ProfileValidat
     Ok(())
 }
 
+fn validate_construction_probe(
+    profile: ConstructionProbeProfile,
+) -> Result<(), ProfileValidationError> {
+    for (field, value) in [
+        ("constructionProbe.andGateWork", profile.and_gate_work),
+        ("constructionProbe.orGateWork", profile.or_gate_work),
+        ("constructionProbe.notGateWork", profile.not_gate_work),
+        (
+            "constructionProbe.junctionBaseWork",
+            profile.junction_base_work,
+        ),
+        (
+            "constructionProbe.wireEndpointWork",
+            profile.wire_endpoint_work,
+        ),
+        (
+            "constructionProbe.builderWorkPerTick",
+            profile.builder_work_per_tick,
+        ),
+    ] {
+        require_positive_u64(field, value)?;
+    }
+    require_positive_rational(
+        "constructionProbe.wireWorkPerNCU",
+        profile.wire_work_per_ncu,
+    )?;
+    require_positive_rational(
+        "constructionProbe.substrateWorkPerSquareWU",
+        profile.substrate_work_per_square_wu,
+    )?;
+    require_positive_rational(
+        "constructionProbe.constructionPowerPerWork",
+        profile.construction_power_per_work,
+    )?;
+    require_unit_interval(
+        "constructionProbe.constructionHeatFraction",
+        profile.construction_heat_fraction,
+    )
+}
+
+fn validate_contact_damage_probe(
+    profile: ContactDamageProbeProfile,
+) -> Result<(), ProfileValidationError> {
+    require_positive_rational(
+        "contactDamageProbe.liveEnergyPerStrengthWU",
+        profile.live_energy_per_strength_wu,
+    )?;
+    for (field, value) in [
+        (
+            "contactDamageProbe.worldLeakWeight",
+            profile.world_leak_weight,
+        ),
+        (
+            "contactDamageProbe.enemyConductivity",
+            profile.enemy_conductivity,
+        ),
+        (
+            "contactDamageProbe.enemyAttackEnergyPerTick",
+            profile.enemy_attack_energy_per_tick,
+        ),
+    ] {
+        require_positive_u64(field, value)?;
+    }
+    validate_primitive_integrity(profile.initial_integrity)?;
+    validate_primitive_thermal_capacity(profile.thermal_capacity)?;
+    validate_electrical_tolerance(profile.electrical_tolerance)?;
+    if profile.safe_temperature.0 < 0 {
+        return Err(ProfileValidationError::NegativeField {
+            profile: ProfileKind::Balance,
+            field: "contactDamageProbe.safeTemperature",
+        });
+    }
+    require_positive_rational(
+        "contactDamageProbe.thermalDamageRate",
+        profile.thermal_damage_rate,
+    )?;
+    require_unit_interval(
+        "contactDamageProbe.gatePowerHeatFraction",
+        profile.gate_power_heat_fraction,
+    )?;
+    require_unit_interval(
+        "contactDamageProbe.movementHeatFraction",
+        profile.movement_heat_fraction,
+    )
+}
+
+fn validate_primitive_integrity(
+    profile: PrimitiveIntegrityProfile,
+) -> Result<(), ProfileValidationError> {
+    validate_positive_u64_fields([
+        (
+            "contactDamageProbe.initialIntegrity.mainCore",
+            profile.main_core,
+        ),
+        ("contactDamageProbe.initialIntegrity.wire", profile.wire),
+        ("contactDamageProbe.initialIntegrity.gate", profile.gate),
+        (
+            "contactDamageProbe.initialIntegrity.junction",
+            profile.junction,
+        ),
+        (
+            "contactDamageProbe.initialIntegrity.fixedSubstrate",
+            profile.fixed_substrate,
+        ),
+        (
+            "contactDamageProbe.initialIntegrity.mobileSubstrate",
+            profile.mobile_substrate,
+        ),
+        ("contactDamageProbe.initialIntegrity.enemy", profile.enemy),
+    ])
+}
+
+fn validate_primitive_thermal_capacity(
+    profile: PrimitiveThermalCapacityProfile,
+) -> Result<(), ProfileValidationError> {
+    validate_positive_u64_fields([
+        (
+            "contactDamageProbe.thermalCapacity.mainCore",
+            profile.main_core,
+        ),
+        ("contactDamageProbe.thermalCapacity.wire", profile.wire),
+        ("contactDamageProbe.thermalCapacity.gate", profile.gate),
+        (
+            "contactDamageProbe.thermalCapacity.junction",
+            profile.junction,
+        ),
+        (
+            "contactDamageProbe.thermalCapacity.fixedSubstrate",
+            profile.fixed_substrate,
+        ),
+        (
+            "contactDamageProbe.thermalCapacity.mobileSubstrate",
+            profile.mobile_substrate,
+        ),
+        ("contactDamageProbe.thermalCapacity.enemy", profile.enemy),
+    ])
+}
+
+fn validate_electrical_tolerance(
+    profile: ElectricalToleranceProfile,
+) -> Result<(), ProfileValidationError> {
+    validate_positive_u64_fields([
+        (
+            "contactDamageProbe.electricalTolerance.mainCore",
+            profile.main_core,
+        ),
+        ("contactDamageProbe.electricalTolerance.wire", profile.wire),
+        ("contactDamageProbe.electricalTolerance.gate", profile.gate),
+        (
+            "contactDamageProbe.electricalTolerance.junction",
+            profile.junction,
+        ),
+        (
+            "contactDamageProbe.electricalTolerance.fixedSubstrate",
+            profile.fixed_substrate,
+        ),
+        (
+            "contactDamageProbe.electricalTolerance.mobileSubstrate",
+            profile.mobile_substrate,
+        ),
+        (
+            "contactDamageProbe.electricalTolerance.enemy",
+            profile.enemy,
+        ),
+    ])
+}
+
+fn validate_positive_u64_fields<const N: usize>(
+    fields: [(&'static str, u64); N],
+) -> Result<(), ProfileValidationError> {
+    for (field, value) in fields {
+        require_positive_u64(field, value)?;
+    }
+    Ok(())
+}
+
+fn require_positive_u64(field: &'static str, value: u64) -> Result<(), ProfileValidationError> {
+    if value > 0 {
+        Ok(())
+    } else {
+        Err(ProfileValidationError::NonPositiveField {
+            profile: ProfileKind::Balance,
+            field,
+        })
+    }
+}
+
 fn validate_radiation_reference(
     profile: RadiationReferenceProfile,
 ) -> Result<(), ProfileValidationError> {
@@ -1306,6 +1706,91 @@ fn encode_power_probe(profile: PowerProbeProfile, write: &mut dyn FnMut(&[u8])) 
     encode_rational(profile.power_loss_k, write);
     write_u64(profile.sense_nominal_drive, write);
     write_u64(profile.gate_state_retention_ticks, write);
+}
+
+fn encode_construction_probe(profile: ConstructionProbeProfile, write: &mut dyn FnMut(&[u8])) {
+    for value in [
+        profile.and_gate_work,
+        profile.or_gate_work,
+        profile.not_gate_work,
+        profile.junction_base_work,
+        profile.wire_endpoint_work,
+    ] {
+        write_u64(value, write);
+    }
+    encode_rational(profile.wire_work_per_ncu, write);
+    encode_rational(profile.substrate_work_per_square_wu, write);
+    encode_rational(profile.construction_power_per_work, write);
+    write_u64(profile.builder_work_per_tick, write);
+    encode_rational(profile.construction_heat_fraction, write);
+}
+
+fn encode_contact_damage_probe(profile: ContactDamageProbeProfile, write: &mut dyn FnMut(&[u8])) {
+    encode_rational(profile.live_energy_per_strength_wu, write);
+    write_u64(profile.world_leak_weight, write);
+    write_u64(profile.enemy_conductivity, write);
+    encode_primitive_integrity(profile.initial_integrity, write);
+    encode_primitive_thermal_capacity(profile.thermal_capacity, write);
+    encode_electrical_tolerance(profile.electrical_tolerance, write);
+    write_i64(profile.safe_temperature.0, write);
+    encode_rational(profile.thermal_damage_rate, write);
+    write_u64(profile.enemy_attack_energy_per_tick, write);
+    encode_rational(profile.gate_power_heat_fraction, write);
+    encode_rational(profile.movement_heat_fraction, write);
+}
+
+fn encode_primitive_integrity(profile: PrimitiveIntegrityProfile, write: &mut dyn FnMut(&[u8])) {
+    encode_primitive_kind_values(
+        [
+            profile.main_core,
+            profile.wire,
+            profile.gate,
+            profile.junction,
+            profile.fixed_substrate,
+            profile.mobile_substrate,
+            profile.enemy,
+        ],
+        write,
+    );
+}
+
+fn encode_primitive_thermal_capacity(
+    profile: PrimitiveThermalCapacityProfile,
+    write: &mut dyn FnMut(&[u8]),
+) {
+    encode_primitive_kind_values(
+        [
+            profile.main_core,
+            profile.wire,
+            profile.gate,
+            profile.junction,
+            profile.fixed_substrate,
+            profile.mobile_substrate,
+            profile.enemy,
+        ],
+        write,
+    );
+}
+
+fn encode_electrical_tolerance(profile: ElectricalToleranceProfile, write: &mut dyn FnMut(&[u8])) {
+    encode_primitive_kind_values(
+        [
+            profile.main_core,
+            profile.wire,
+            profile.gate,
+            profile.junction,
+            profile.fixed_substrate,
+            profile.mobile_substrate,
+            profile.enemy,
+        ],
+        write,
+    );
+}
+
+fn encode_primitive_kind_values(values: [u64; 7], write: &mut dyn FnMut(&[u8])) {
+    for value in values {
+        write_u64(value, write);
+    }
 }
 
 fn write_u8(value: u8, write: &mut dyn FnMut(&[u8])) {
@@ -1509,7 +1994,7 @@ mod tests {
         assert_eq!(
             old_balance.validate(),
             Err(ProfileValidationError::UnsupportedSchema {
-                expected: BALANCE_SCHEMA_VERSION_V4,
+                expected: BALANCE_SCHEMA_VERSION_V5,
                 actual: PROFILE_SCHEMA_VERSION_V1,
             })
         );
@@ -1606,6 +2091,8 @@ mod tests {
         assert_eq!(profile.capacity_probe, None);
         assert_eq!(profile.radiation_reference, None);
         assert_eq!(profile.power_probe, None);
+        assert_eq!(profile.construction_probe, None);
+        assert_eq!(profile.contact_damage_probe, None);
         assert_eq!(profile.validate(), Ok(()));
     }
 
@@ -1660,6 +2147,57 @@ mod tests {
             &v4_bytes[v3_bytes.len()..],
             [1_i64.to_le_bytes(), 1_i64.to_le_bytes()].concat()
         );
+    }
+
+    #[test]
+    fn balance_v5_encoder_is_the_schema_tagged_retained_v4_stream_plus_exact_frozen_suffix() {
+        let v5 = BalanceProfile::construction_contact_damage_alpha("metadata-only-v5");
+        let mut retained_v4 = v5.clone();
+        retained_v4.schema_version = BALANCE_SCHEMA_VERSION_V4;
+        retained_v4.construction_probe = None;
+        retained_v4.contact_damage_probe = None;
+
+        let mut expected = Vec::new();
+        retained_v4.encode_canonical(&mut |bytes| expected.extend_from_slice(bytes));
+        let schema_offset = PROFILE_HASH_DOMAIN.len() + size_of::<u16>() + size_of::<u8>();
+        expected[schema_offset..schema_offset + size_of::<u32>()]
+            .copy_from_slice(&BALANCE_SCHEMA_VERSION_V5.to_le_bytes());
+
+        for value in [8_u64, 8, 6, 4, 2] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        for (numerator, denominator) in [(1_i64, 1_i64); 3] {
+            expected.extend_from_slice(&numerator.to_le_bytes());
+            expected.extend_from_slice(&denominator.to_le_bytes());
+        }
+        expected.extend_from_slice(&8_u64.to_le_bytes());
+        for (numerator, denominator) in [(1_i64, 4_i64), (1, 400)] {
+            expected.extend_from_slice(&numerator.to_le_bytes());
+            expected.extend_from_slice(&denominator.to_le_bytes());
+        }
+        expected.extend_from_slice(&2_u64.to_le_bytes());
+        expected.extend_from_slice(&1_u64.to_le_bytes());
+        for value in [100_u64, 10, 10, 10, 20, 20, 10] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [10_u64; 7] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [1_u64; 7] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        expected.extend_from_slice(&FIXED_ONE.to_le_bytes());
+        expected.extend_from_slice(&1_i64.to_le_bytes());
+        expected.extend_from_slice(&1_i64.to_le_bytes());
+        expected.extend_from_slice(&10_u64.to_le_bytes());
+        for _ in 0..2 {
+            expected.extend_from_slice(&1_i64.to_le_bytes());
+            expected.extend_from_slice(&4_i64.to_le_bytes());
+        }
+
+        let mut actual = Vec::new();
+        v5.encode_canonical(&mut |bytes| actual.extend_from_slice(bytes));
+        assert_eq!(actual, expected);
     }
 
     #[test]

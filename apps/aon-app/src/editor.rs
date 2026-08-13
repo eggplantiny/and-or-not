@@ -1,7 +1,8 @@
 use aon_sim::{
-    BindPortCommand, Command, CommandEnvelope, PlaceFixedSubstrateCommand, PlaceGateCommand,
-    PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand,
-    SetExternalDriverCommand, Tick,
+    BindPortCommand, Command, CommandEnvelope, PlaceConstructionSiteCommand,
+    PlaceFixedSubstrateCommand, PlaceGateCommand, PlaceJunctionCommand,
+    PlaceMobileSubstrateCommand, PlaceWireCommand, RemoveEntityCommand, SetExternalDriverCommand,
+    Tick,
 };
 use thiserror::Error;
 
@@ -15,6 +16,7 @@ pub enum EditIntent {
     RemoveEntity(RemoveEntityCommand),
     BindPort(BindPortCommand),
     SetExternalDriver(SetExternalDriverCommand),
+    PlaceConstructionSite(PlaceConstructionSiteCommand),
 }
 
 impl EditIntent {
@@ -28,6 +30,7 @@ impl EditIntent {
             Self::RemoveEntity(command) => Command::RemoveEntity(command),
             Self::BindPort(command) => Command::BindPort(command),
             Self::SetExternalDriver(command) => Command::SetExternalDriver(command),
+            Self::PlaceConstructionSite(command) => Command::PlaceConstructionSite(command),
         }
     }
 }
@@ -51,6 +54,7 @@ impl TryFrom<Command> for EditIntent {
             Command::RemoveEntity(command) => Ok(Self::RemoveEntity(command)),
             Command::BindPort(command) => Ok(Self::BindPort(command)),
             Command::SetExternalDriver(command) => Ok(Self::SetExternalDriver(command)),
+            Command::PlaceConstructionSite(command) => Ok(Self::PlaceConstructionSite(command)),
         }
     }
 }

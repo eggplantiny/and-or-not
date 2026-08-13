@@ -669,8 +669,8 @@ fn simulation_with_every_structural_kind() -> Simulation {
 
 fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"AON\0STATE\0V6\0");
-    push_u16(&mut bytes, 6); // encoder version
+    bytes.extend_from_slice(b"AON\0STATE\0V7\0");
+    push_u16(&mut bytes, 7); // encoder version
     bytes.push(0); // aon-semantics-v1
     bytes.extend_from_slice(contract.numeric_profile_hash.as_bytes());
     bytes.extend_from_slice(contract.physical_scale_profile_hash.as_bytes());
@@ -695,6 +695,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     bytes.push(2); // GateType::Not
     push_point(&mut bytes, 0, 0);
     push_fixed_domain(&mut bytes, 1);
+    bytes.push(0); // retained Gate has no DamageState
 
     push_u64(&mut bytes, 1); // Wire count
     push_u64(&mut bytes, 4);
@@ -708,12 +709,14 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     bytes.push(2); // GatePort::Output
     bytes.push(1); // EndpointTarget::Junction
     push_u64(&mut bytes, 3);
+    bytes.push(0); // retained Wire has no DamageState
 
     push_u64(&mut bytes, 1); // Junction count
     push_u64(&mut bytes, 3);
     push_fixed_domain(&mut bytes, 1);
     push_point(&mut bytes, WORLD_PITCH, 0);
     push_u64(&mut bytes, 1); // Wire placement affected this live Junction once
+    bytes.push(0); // retained Junction has no DamageState
 
     push_u64(&mut bytes, 1); // Fixed Substrate count
     push_u64(&mut bytes, 1);
@@ -722,6 +725,7 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
         push_point(&mut bytes, -SUBSTRATE_HALF_EXTENT, -SUBSTRATE_HALF_EXTENT);
         push_point(&mut bytes, SUBSTRATE_HALF_EXTENT, SUBSTRATE_HALF_EXTENT);
     }
+    bytes.push(0); // retained Fixed Substrate has no DamageState
     push_u64(&mut bytes, 0); // Mobile Substrate count
 
     // Driver allocation slots. Driver 1 is the inert external input; Driver 2 is the NOT output.
@@ -793,9 +797,10 @@ fn independently_encoded_all_kinds_state(contract: &SimulationContract) -> Vec<u
     push_u64(&mut bytes, 0); // pending DriverTransition count
     push_u64(&mut bytes, 0); // pending SignalArrival count
 
-    for _ in 0..3 {
-        push_u64(&mut bytes, 0); // later-stage reserved sections
+    for _ in 0..5 {
+        push_u64(&mut bytes, 0); // pending destruction, Radiation, Relay, Enemy, Site counts
     }
+    bytes.push(0); // RunStatus::Running
     push_u64(&mut bytes, 2); // PathCertificateId frontier
     push_u64(&mut bytes, 1); // allocated PathCertificate slots
     push_u64(&mut bytes, 1); // consumed PathCertificateId
@@ -830,14 +835,14 @@ fn push_u128(bytes: &mut Vec<u8>, value: u128) {
 }
 
 #[test]
-fn every_structural_kind_has_an_independently_encoded_state_hash_golden() {
+fn every_structural_kind_has_an_independently_encoded_v7_state_hash_golden() {
     let simulation = simulation_with_every_structural_kind();
     let bytes = independently_encoded_all_kinds_state(simulation.contract());
     let independently_hashed = blake3::hash(&bytes);
 
     assert_eq!(
         independently_hashed.to_hex().as_str(),
-        "975c7a849af4ea9f2cf093e181bfb60757d7c53578452a81443ca80c31686d72"
+        "2ed84a2e5bc7b2638e59251a5a3bc9678426544294750f3ced620ce378ca3109"
     );
     assert_eq!(
         simulation.state_hash().as_bytes(),

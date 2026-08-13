@@ -1,0 +1,576 @@
+{
+  "scenarioPath": "../../scenarios/s1-m4-construction-contact-damage-v1.json",
+  "header": {
+    "formatVersion": 2,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a",
+    "stateHashVersion": "aon-state-v7",
+    "worldGeneratorVersion": "aon-main-core-power-enemy-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "51ace8554724d927c81c68716d15cc58a4115959076d031688ef85915e960111",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": -1572864,
+          "y": -1310720
+        },
+        "routingArea": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -524288,
+            "y": -524288
+          },
+          "max": {
+            "x": 524288,
+            "y": 524288
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": -1310720,
+            "y": -1310720
+          },
+          {
+            "x": -1245184,
+            "y": -1310720
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": -1294336,
+          "y": -1310720
+        },
+        "routingArea": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 0,
+      "command": {
+        "type": "place-construction-site",
+        "target": {
+          "kind": "gate",
+          "gateType": "and",
+          "origin": {
+            "x": -1277952,
+            "y": -1179648
+          },
+          "routingDomain": {
+            "kind": "fixed-substrate",
+            "substrate": 8
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 1,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 3,
+        "level": "high",
+        "strength": 400
+      }
+    },
+    {
+      "targetTick": 5,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 10
+      }
+    },
+    {
+      "targetTick": 5,
+      "ordinal": 1,
+      "command": {
+        "type": "remove-entity",
+        "target": 9
+      }
+    },
+    {
+      "targetTick": 6,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": -1310720,
+            "y": -1310720
+          },
+          {
+            "x": -1245184,
+            "y": -1310720
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 7,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": -1294336,
+          "y": -1310720
+        },
+        "routingArea": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 8,
+      "ordinal": 0,
+      "command": {
+        "type": "place-construction-site",
+        "target": {
+          "kind": "junction",
+          "routingDomain": {
+            "kind": "fixed-substrate",
+            "substrate": 8
+          },
+          "position": {
+            "x": -1179648,
+            "y": -1310720
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 8,
+      "ordinal": 1,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 9,
+        "level": "high",
+        "strength": 400
+      }
+    },
+    {
+      "targetTick": 10,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 14
+      }
+    },
+    {
+      "targetTick": 10,
+      "ordinal": 1,
+      "command": {
+        "type": "remove-entity",
+        "target": 13
+      }
+    },
+    {
+      "targetTick": 11,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": -1310720,
+            "y": -1310720
+          },
+          {
+            "x": -1245184,
+            "y": -1310720
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 12,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": -1294336,
+          "y": -1310720
+        },
+        "routingArea": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 13,
+      "ordinal": 0,
+      "command": {
+        "type": "place-construction-site",
+        "target": {
+          "kind": "wire",
+          "routingDomain": {
+            "kind": "fixed-substrate",
+            "substrate": 8
+          },
+          "points": [
+            {
+              "x": -1310720,
+              "y": -1441792
+            },
+            {
+              "x": -1245184,
+              "y": -1441792
+            }
+          ],
+          "endpointA": {
+            "kind": "free"
+          },
+          "endpointB": {
+            "kind": "free"
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 13,
+      "ordinal": 1,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 12,
+        "level": "high",
+        "strength": 400
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 18
+      }
+    },
+    {
+      "targetTick": 15,
+      "ordinal": 1,
+      "command": {
+        "type": "remove-entity",
+        "target": 17
+      }
+    },
+    {
+      "targetTick": 16,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": -1310720,
+            "y": -1310720
+          },
+          {
+            "x": -1245184,
+            "y": -1310720
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 17,
+      "ordinal": 0,
+      "command": {
+        "type": "place-mobile-substrate",
+        "origin": {
+          "x": -1294336,
+          "y": -1310720
+        },
+        "routingArea": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -262144,
+            "y": -262144
+          },
+          "max": {
+            "x": 262144,
+            "y": 262144
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 18,
+      "ordinal": 0,
+      "command": {
+        "type": "place-construction-site",
+        "target": {
+          "kind": "fixed-substrate",
+          "origin": {
+            "x": -1048576,
+            "y": -1310720
+          },
+          "routingArea": {
+            "min": {
+              "x": 0,
+              "y": 0
+            },
+            "max": {
+              "x": 65536,
+              "y": 65536
+            }
+          },
+          "footprint": {
+            "min": {
+              "x": 0,
+              "y": 0
+            },
+            "max": {
+              "x": 65536,
+              "y": 65536
+            }
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 18,
+      "ordinal": 1,
+      "command": {
+        "type": "set-external-driver",
+        "driver": 17,
+        "level": "high",
+        "strength": 400
+      }
+    },
+    {
+      "targetTick": 20,
+      "ordinal": 0,
+      "command": {
+        "type": "remove-entity",
+        "target": 22
+      }
+    },
+    {
+      "targetTick": 20,
+      "ordinal": 1,
+      "command": {
+        "type": "remove-entity",
+        "target": 21
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "51ace8554724d927c81c68716d15cc58a4115959076d031688ef85915e960111"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "117808bee66e44ba992bdac9b1515fdd99a1c027654b81b833e917aea3d44026"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "401d2f4e2e7036eb1daaf44d12bac942e81e6388a58cfba8784798b666356ac4"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "747043d98fade87bee2cee129ce9f3677ebb0cd76e2d3b841cf55e19d14d08e5"
+    },
+    {
+      "nextTick": 4,
+      "stateHash": "f2b27d9918ceecc86a5d73f2407efbd538e22d48854acfb147fa51c96ece08be"
+    },
+    {
+      "nextTick": 5,
+      "stateHash": "16762138b32db6f7d8e8e2fe4bf291b665b4bc8918650df4313cccb22dbb0d00"
+    },
+    {
+      "nextTick": 6,
+      "stateHash": "ddad6f0c5ca65a54fb1effd7b894a602cdf9a621e0ac1c3328ac817b45af0495"
+    },
+    {
+      "nextTick": 7,
+      "stateHash": "47aab3fbc1366d1b827e1be75b667fa4821074daae265f1548698a3210f2b3da"
+    },
+    {
+      "nextTick": 8,
+      "stateHash": "51d1f65a7aca0e46ef1e40befd650de747542b963b5fe0f81311052828c8bd43"
+    },
+    {
+      "nextTick": 9,
+      "stateHash": "064ff1455bbedcb112665761e568e30ddc51c48875fac5b35ec8f7e159527121"
+    },
+    {
+      "nextTick": 10,
+      "stateHash": "8b233169b30a65a057a8873e8075267c5beeb80a5e4e2ce97db162d034aa418d"
+    },
+    {
+      "nextTick": 11,
+      "stateHash": "936b7e8292963989052286d9c82bae57b748609232af6d2745d2e01b3d00ed8c"
+    },
+    {
+      "nextTick": 12,
+      "stateHash": "d1553b0f26e24b04ce1b10e0113f066fbdbf4d2e56d8fb2c335c2ca7c6b958f2"
+    },
+    {
+      "nextTick": 13,
+      "stateHash": "d80097ec4483c92143c3e19f3e73308ecaba02e0ad84b1fcf6eda351953826f5"
+    },
+    {
+      "nextTick": 14,
+      "stateHash": "d9704ab185f0f65b6ebb1bb7d5d765ba5856a85dab5f34df123c5c8f58a22a06"
+    },
+    {
+      "nextTick": 15,
+      "stateHash": "4d01d5296b949f8d5c6b7babe5a6745fa250ec93fc938eb5d2f2b618b0bd2aeb"
+    },
+    {
+      "nextTick": 16,
+      "stateHash": "af96e957855f81bf15296852fb879b38ad047ec7cae6419456f68b12729026f8"
+    },
+    {
+      "nextTick": 17,
+      "stateHash": "f7fcf9ccc66af09cc3fb4499f28ef5ee2da83a19392c55c3eeb9b88a305ead7a"
+    },
+    {
+      "nextTick": 18,
+      "stateHash": "df46069acd4647c743dd3ba74c9d14ac4612a938b4538bbd6e38ab220fdecda2"
+    },
+    {
+      "nextTick": 19,
+      "stateHash": "a6153b2b24736dfb5bbb16ed3f44f1d4feccbe205b48fa53161d7dd63f7f53a5"
+    },
+    {
+      "nextTick": 20,
+      "stateHash": "ef06efd891e864b117fbdda287a2c2603dff2097494c282a27470e3ff291870a"
+    },
+    {
+      "nextTick": 21,
+      "stateHash": "0670210744f55ef99e67d4170546bcd88f8a90a9dbe506d54163601c93fee3de"
+    }
+  ]
+}

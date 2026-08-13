@@ -686,7 +686,6 @@ const PATH_KIND_WIRE: u8 = 3;
 const PATH_KIND_JUNCTION: u8 = 4;
 const PATH_KIND_MOBILE_SUBSTRATE: u8 = 6;
 const PATH_KIND_POWER_SOURCE: u8 = 7;
-const PATH_KIND_CONSTRUCTION_SITE: u8 = 11;
 const PATH_LOCAL_WHOLE_ENTITY: u8 = 0;
 const PATH_LOCAL_GATE_POWER_PORT: u8 = 3;
 
@@ -702,8 +701,8 @@ fn load_path_token(demand: DemandId) -> Result<PowerPathToken, PowerTopologyErro
         crate::DemandKind::RelayActivation | crate::DemandKind::RelayUpkeep => PATH_KIND_RELAY_SITE,
         crate::DemandKind::Movement
         | crate::DemandKind::Extraction
-        | crate::DemandKind::Transfer => PATH_KIND_MOBILE_SUBSTRATE,
-        crate::DemandKind::Construction => PATH_KIND_CONSTRUCTION_SITE,
+        | crate::DemandKind::Transfer
+        | crate::DemandKind::Construction => PATH_KIND_MOBILE_SUBSTRATE,
         crate::DemandKind::RadiationEmission => {
             return Err(PowerTopologyError::AmbiguousDemandOwnerKind { demand });
         }

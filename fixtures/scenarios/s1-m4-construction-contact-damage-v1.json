@@ -1,0 +1,117 @@
+{
+  "hashAlgorithm": "blake3-v1",
+  "initialWorld": {
+    "enemies": [
+      {
+        "heatEnergy": 0,
+        "integrity": 10,
+        "position": {
+          "x": -6553600,
+          "y": 3407872
+        },
+        "radius": 327680,
+        "velocityPerTick": {
+          "x": 0,
+          "y": -65536
+        }
+      },
+      {
+        "heatEnergy": 0,
+        "integrity": 10,
+        "position": {
+          "x": 65536,
+          "y": 327680
+        },
+        "radius": 1024,
+        "velocityPerTick": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "heatEnergy": 0,
+        "integrity": 10,
+        "position": {
+          "x": 196608,
+          "y": 327680
+        },
+        "radius": 1024,
+        "velocityPerTick": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "heatEnergy": 0,
+        "integrity": 10,
+        "position": {
+          "x": 655360,
+          "y": 3014656
+        },
+        "radius": 1024,
+        "velocityPerTick": {
+          "x": 0,
+          "y": -65536
+        }
+      }
+    ],
+    "kind": "main-core-power-enemy-v1",
+    "mainCore": {
+      "heatEnergy": 0,
+      "integrity": 100,
+      "position": {
+        "x": -6553600,
+        "y": 0
+      }
+    },
+    "powerSources": [
+      {
+        "generationPerTick": 12,
+        "position": {
+          "x": -1310720,
+          "y": -1310720
+        }
+      },
+      {
+        "generationPerTick": 500,
+        "position": {
+          "x": -65536,
+          "y": 327680
+        }
+      }
+    ]
+  },
+  "profiles": {
+    "balance": {
+      "path": "../../profiles/balance/s1-m4-construction-contact-damage-alpha.json",
+      "profileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a",
+      "profileId": "balance-s1-m4-construction-contact-damage-alpha"
+    },
+    "numeric": {
+      "path": "../../profiles/numeric/v1.json",
+      "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+      "profileId": "numeric-v1"
+    },
+    "physicalScale": {
+      "path": "../../profiles/physical-scale/stage0-alpha.json",
+      "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+      "profileId": "physical-scale-stage0-alpha"
+    }
+  },
+  "requiredFeatures": {
+    "capacity": true,
+    "construction": true,
+    "contact": true,
+    "damage": true,
+    "mobility": true,
+    "payload": false,
+    "power": true,
+    "radiation": false,
+    "relay": false,
+    "sensing": true,
+    "signal": true
+  },
+  "scenarioId": "s1-m4-construction-contact-damage-v1",
+  "schemaVersion": 4,
+  "semanticsVersion": "aon-semantics-v1"
+}
