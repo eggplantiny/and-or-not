@@ -5,13 +5,19 @@ gates in TRD section 31.8. It is intentionally small enough to run in ordinary w
 `cargo-fuzz`/libFuzzer is unavailable.
 
 The decoder target uses the low two bits of byte 0 to select scenario, numeric profile, physical
-scale profile, or balance profile decoding. At most 16 KiB is interpreted. Profile cases replace
-only the selected profile in an otherwise valid reference package, ensuring that the selected
-typed decoder is reached.
+scale profile, or balance profile decoding. At most 16 KiB is interpreted. Numeric and Physical
+cases replace only the selected profile in an otherwise valid reference package. Balance cases use
+the standalone strict multi-version decoder so valid v2, v3, and v4 artifacts can all reach an
+accepted result without coupling the fuzz payload to one Scenario-declared hash.
+
+The retained decoder corpus also sends the S1-M3 C-22 Scenario and Balance v4 support profile
+through their bounded strict boundaries, preserving both the new accepted schema and earlier
+malformed-input rejection cases.
 
 The `replay` target supplies at most 16 KiB directly to the strict Replay JSON decoder. Its retained
-corpus includes legacy Empty-world input plus current Replay v2/State V6 S1-M1 and S1-M2 capacity,
-sensing, and brownout artifacts, as well as truncated and unknown-field artifacts. CI therefore
+corpus includes legacy Empty-world input plus current Replay v2/State V6 S1-M1 through S1-M3
+capacity, sensing, brownout, and C-22 capacity-support artifacts, as well as truncated and
+unknown-field artifacts. CI therefore
 preserves both accepted versioned paths and stable rejection paths without treating typed decode
 errors as harness failures.
 
@@ -81,6 +87,13 @@ rollback, dead-end bounce, and movement adjacent to both the largest and smalles
 quantized `i64` coordinates. Every simulation error, encoder mismatch, unexpected typed command
 outcome, or replica disagreement fails this target.
 
+The `capacity` target maps at most 128 bytes to 128 independent S1-M3 capacity-support cases.
+Each case uses bounded positive rational coefficients, checks the public soft-support curve against
+an independent exact `u128` oracle, and compares the next raw excess unit for monotonicity. It then
+partitions used Capacity across one to four Wires and verifies exact conservation, ascending
+WireId remainder allocation, and equality under reversed input order. Any typed arithmetic error,
+oracle mismatch, order dependence, or panic fails the target.
+
 Run the deterministic generated cases and retained regression corpus with:
 
 ```sh
@@ -99,14 +112,17 @@ cargo run -p aon-fuzz-harness --locked -- commands < input.bin
 cargo run -p aon-fuzz-harness --locked -- signal < input.bin
 cargo run -p aon-fuzz-harness --locked -- topology < input.bin
 cargo run -p aon-fuzz-harness --locked -- mobility < input.bin
+cargo run -p aon-fuzz-harness --locked -- capacity < input.bin
 cargo run -p aon-fuzz-harness --locked -- all < input.bin
 ```
 
 Normal typed decoder errors and checked numeric-overflow outcomes in the geometry and legacy
 command targets are accepted. The signal, topology, and mobility targets treat every simulation
-run error as a failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
+run error as a failure; the bounded capacity target likewise treats every kernel error as a
+failure. A panic, reference package/prefix failure, unexpected simulation invariant error, or
 disagreement between the two command encoders fails CI and CLI replay. Add every minimized
 reproducer under `corpus/decoder`, `corpus/replay`, `corpus/geometry`, `corpus/command`,
-`corpus/experiment`, `corpus/module`, `corpus/signal-runtime`, `corpus/topology-runtime`, or
-`corpus/mobility-runtime` and register it in `tests/regression_corpus.rs` so CI replays it
+`corpus/experiment`, `corpus/module`, `corpus/signal-runtime`, `corpus/topology-runtime`,
+`corpus/mobility-runtime`, or `corpus/capacity-support` and register it in
+`tests/regression_corpus.rs` so CI replays it
 permanently.

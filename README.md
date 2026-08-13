@@ -20,8 +20,14 @@ materialization을 모두 통과했다.
 **S1-M2 Sensing / Power / Brownout도 정식 완료됐다.** 구현 커밋
 `22d6ccd89cb0e1fa422111f98f99c9d371122695`은 별도 Windows-native `git clone --no-local`
 검증에서 629개 workspace 테스트와 25-test Stage 0, 47-test S1-M0, 45-test S1-M1,
-70-test S1-M2 fail-closed 기술 게이트를 모두 통과했다. Stage 1 전체는 아직 진행 중이며,
-다음 구현 경계는 S1-M3이다.
+70-test S1-M2 fail-closed 기술 게이트를 모두 통과했다.
+
+**S1-M3 Capacity Support Load 구현과 종료 증거는 준비됐지만 아직 정식 완료 상태가
+아니다.** Balance v4, exact soft-support arithmetic, WireId-stable distribution, intrinsic
+OvercapacitySupport Power load, Phase 8 Support Heat와 retained C-22 Headless/Bevy 증거를
+구현했고, 29-test fail-closed S1-M3 기술 게이트를 등록했다. 구현 커밋과 fresh
+Windows-native clean-tree 전체 검증 전이므로 tracker와 완료 선언은 그대로 열어 둔다.
+S1-M3 종료 뒤의 구현 경계는 S1-M4다.
 
 ## Source baseline
 
@@ -37,6 +43,7 @@ materialization을 모두 통과했다.
 - S1-M0 implementation authority: `docs/AON_S1_M0_Canonical_Decisions_v1.0.md`
 - S1-M1 implementation authority: `docs/AON_S1_M1_Canonical_Decisions_v1.0.md`
 - S1-M2 implementation authority: `docs/AON_S1_M2_Canonical_Decisions_v1.0.md`
+- S1-M3 implementation authority: `docs/AON_S1_M3_Canonical_Decisions_v1.0.md`
 
 PRD §57의 SSS v0.2 언급은 현재 파일보다 오래된 기준선이다. 구현은 SSS v1.0과 TRD v1.0을 기준으로 한다.
 
@@ -113,6 +120,17 @@ cargo run -p aon-headless --locked --offline -- `
   replay fixtures/replays/s1-m2-c08-brownout-half-v1.json
 ```
 
+Retained S1-M3 C-22 capacity-support Replay:
+
+```powershell
+cargo run -p aon-headless --locked --offline -- `
+  replay fixtures/replays/s1-m3-c22-capacity-support-v1.json
+```
+
+이 fixture는 `U=120`, `S=100`, `E=20`, total Support Demand `28`, 낮은/높은 WireId의
+share `17/11`, ordinary intrinsic demand `240`, Source generation `268`, Phase 8 Support Heat
+`4+3`을 고정한다. State V6 trace와 전체 report는 Headless와 Bevy에서 동일해야 한다.
+
 Materialize the retained S1-M0 Physical Scale experiment plan:
 
 ```powershell
@@ -158,6 +176,7 @@ powershell -NoProfile -File .\scripts\stage0-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m0-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m1-technical-gate.ps1
 powershell -NoProfile -File .\scripts\s1-m2-technical-gate.ps1
+powershell -NoProfile -File .\scripts\s1-m3-technical-gate.ps1
 cargo test -p aon-sim --test signal_conformance --locked --offline
 cargo test -p aon-sim --test feedback_conformance --locked --offline
 cargo test -p aon-sim --test replay_golden --locked --offline
@@ -180,7 +199,7 @@ Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event 
 12-Phase `Simulation::step`, render snapshot, canonical state hash와 Replay v2까지 제공한다.
 
 - Scenario schema `1`의 Empty, schema `2`의 Main Core, schema `3`의 Main Core + Power Source
-  initial world, Numeric/Physical schema `1`, Balance schema `2`/`3`, semantics
+  initial world, Numeric/Physical schema `1`, Balance schema `2`/`3`/`4`, semantics
   `aon-semantics-v1`, hash algorithm `blake3-v1`을 지원한다.
 - Profile hash는 versioned canonical encoding을, state hash는 Main Core와 파생 anchor까지
   포함하고 Power Source, Gate retention, Wire Sense state를 추가한 전역
@@ -199,6 +218,12 @@ Track Graph/TrackPosition/Mobile, Driver/Sink signal state, deterministic event 
   사용량 `U`와 Main Core 지원량 `S`를 산출한다. 초과 사용은 관찰 가능한 soft limit이며
   구조 배치를 거부하지 않는다. `StepReport`와 read-only Network Analyzer가 같은 값을
   노출하지만 derived accounting은 State Hash에 들어가지 않는다.
+- Balance v4에서 Phase 4는 `E=max(0,U-S)`와 exact rational soft-support curve를 한 번의 최종
+  ceil로 계산하고, 낮은 WireId부터 remainder를 배분한다. 양의 Wire share는
+  `DemandKind::OvercapacitySupport` intrinsic load로 전체 nominal set에 포함되며, 실제 grant의
+  `supportHeatFraction`만 Phase 8 report-only Heat가 된다. v2/v3 accounting은 S1-M3 관찰을
+  `None`으로 유지하고 v4의 활성 zero는 `Some(0)`으로 구분한다. 이 derived 값들은 V6에
+  들어가지 않으며 Capacity 초과가 build reject, Wire 삭제, 직접 delay/damage를 만들지 않는다.
 - S1-M2 Power는 SourceAnchor 기반 region, exact common-ratio solve, Gate/Sense/Movement
   brownout grant와 Phase 8 leakage/transmission heat report를 제공한다. HostileFrame은 Phase 1
   complete one-Tick input이며, Wire Sense A/B는 기존 Signal surface와 분리된다. Power/Sense

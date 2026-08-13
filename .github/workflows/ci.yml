@@ -47,6 +47,10 @@ jobs:
         shell: pwsh
         run: ./scripts/s1-m2-technical-gate.ps1
 
+      - name: S1-M3 technical gate
+        shell: pwsh
+        run: ./scripts/s1-m3-technical-gate.ps1
+
       - name: Deterministic fuzz regression corpus
         run: cargo test -p aon-fuzz-harness --locked
 
@@ -98,3 +102,7 @@ jobs:
       - name: Native S1-M2 technical gate
         shell: pwsh
         run: ./scripts/s1-m2-technical-gate.ps1
+
+      - name: Native S1-M3 technical gate
+        shell: pwsh
+        run: ./scripts/s1-m3-technical-gate.ps1

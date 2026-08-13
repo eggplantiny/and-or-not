@@ -1,0 +1,105 @@
+{
+  "scenarioPath": "../scenarios/s1-m3-c22-capacity-support-v1.json",
+  "header": {
+    "formatVersion": 2,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "a0a8974aebc87e30d602ffa019340e59c908912c0b36e0e0634e51214afc45ef",
+    "stateHashVersion": "aon-state-v6",
+    "worldGeneratorVersion": "aon-main-core-power-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "47cddc7a4a1a1371d6600953bb7c0acc7c7e5e465741869375026e7efcab9369",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "position": {
+          "x": 4587520,
+          "y": 0
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 4587520,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        },
+        "endpointB": {
+          "kind": "junction",
+          "junction": 3
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "open-world"
+        },
+        "points": [
+          {
+            "x": 4587520,
+            "y": 0
+          },
+          {
+            "x": 7864320,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "junction",
+          "junction": 3
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "47cddc7a4a1a1371d6600953bb7c0acc7c7e5e465741869375026e7efcab9369"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "7afbe6ca8604ce9a850c241fec64b50b853add900d6ce48d3c2416641b307324"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "0a35569c2aaee0d39c190e82ad02bbb9d34e312adc7a236b2f00e0a93acb555e"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "7f687d752df7146141be826dbb74668866494c1a024ec6f157bb3eb264c3445c"
+    }
+  ]
+}

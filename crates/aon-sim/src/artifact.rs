@@ -2,7 +2,8 @@ use crate::contract::{
     HASH_ALGORITHM_ID_BLAKE3_V1, HashAlgorithmId, SEMANTICS_VERSION_V1, SemanticsVersion,
 };
 use crate::profile::{
-    BalanceProfile, NumericProfile, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
+    BALANCE_SCHEMA_VERSION_V4, BalanceProfile, NumericProfile, PROFILE_SCHEMA_VERSION_V2,
+    PROFILE_SCHEMA_VERSION_V3, PhysicalScaleProfile, ProfileBundle, ProfileValidationError,
 };
 use crate::{
     ArtifactHash, Energy, Fixed, FixedVec2, HeatEnergy, Integrity, JsonErrorCategory, ProfileHash,
@@ -355,6 +356,12 @@ struct ScenarioSchemaEnvelope {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BalanceSchemaEnvelope {
+    schema_version: u32,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum InitialWorldWire {
     Empty,
@@ -554,8 +561,7 @@ pub fn decode_package(
         decode_typed_profile(bytes.numeric_profile, ProfileKind::Numeric)?;
     let physical_scale: PhysicalScaleProfile =
         decode_typed_profile(bytes.physical_scale_profile, ProfileKind::PhysicalScale)?;
-    let balance: BalanceProfile =
-        decode_typed_profile(bytes.balance_profile, ProfileKind::Balance)?;
+    let balance = decode_balance_profile(bytes.balance_profile)?;
 
     validate_profile_reference(
         scenario.profiles().numeric(),
@@ -597,6 +603,21 @@ pub fn decode_numeric_profile(bytes: &[u8]) -> Result<NumericProfile, crate::Pac
 
 /// Strictly decodes and validates one standalone Balance Profile artifact.
 pub fn decode_balance_profile(bytes: &[u8]) -> Result<BalanceProfile, crate::PackageError> {
+    // Schema selection is an envelope decision. It precedes the supported version's strict
+    // unknown/duplicate-field and typed-body decode while still requiring the complete input to
+    // be syntactically valid JSON.
+    let envelope: BalanceSchemaEnvelope =
+        decode_json(bytes, ArtifactKind::Profile(ProfileKind::Balance))?;
+    if !matches!(
+        envelope.schema_version,
+        PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4
+    ) {
+        return Err(crate::PackageError::UnsupportedSchema {
+            artifact: ArtifactKind::Profile(ProfileKind::Balance),
+            expected: BALANCE_SCHEMA_VERSION_V4,
+            actual: envelope.schema_version,
+        });
+    }
     decode_typed_profile(bytes, ProfileKind::Balance)
 }
 

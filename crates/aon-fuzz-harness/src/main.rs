@@ -1,11 +1,12 @@
 use aon_fuzz_harness::{
-    CommandExecutionObservation, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
+    CapacitySupportExecutionObservation, CommandExecutionObservation,
+    MAX_CAPACITY_SUPPORT_INPUT_BYTES, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
     MAX_EXPERIMENT_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES,
     MAX_MODULE_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
     MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, MobilityRuntimeExecutionObservation,
     SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
-    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder,
-    exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
+    TopologyRuntimeExecutionObservation, exercise_capacity_support, exercise_commands,
+    exercise_decoder, exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
     exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
     exercise_stateful_commands, exercise_topology_runtime,
 };
@@ -23,7 +24,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max(MAX_COMMAND_INPUT_BYTES)
         .max(MAX_SIGNAL_RUNTIME_INPUT_BYTES)
         .max(MAX_MOBILITY_RUNTIME_INPUT_BYTES)
-        .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES);
+        .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES)
+        .max(MAX_CAPACITY_SUPPORT_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
         .take(u64::try_from(input_limit)?)
@@ -39,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "signal" => print_signal_runtime(&input)?,
         "topology" => print_topology_runtime(&input)?,
         "mobility" => print_mobility_runtime(&input)?,
+        "capacity" => print_capacity_support(&input)?,
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -54,10 +57,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_signal_runtime(&input)?;
             print_topology_runtime(&input)?;
             print_mobility_runtime(&input)?;
+            print_capacity_support(&input)?;
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, capacity, both, or all"
             )
             .into());
         }
@@ -94,6 +98,28 @@ fn print_mobility_runtime(input: &[u8]) -> Result<(), Box<dyn std::error::Error>
     );
     if let Some(failure) = observation.invariant_failure() {
         return Err(format!("mobility-runtime harness invariant failed: {failure}").into());
+    }
+    Ok(())
+}
+
+fn print_capacity_support(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let observation = exercise_capacity_support(input);
+    let coverage = observation.coverage;
+    println!(
+        "capacity-support input_bytes={} cases={} result={} zero={} active={} fractional={} multi_wire={} remainder={} permutations={} monotonicity={}",
+        observation.consumed_len,
+        observation.generated_cases,
+        capacity_support_result(observation.execution),
+        coverage.zero_excess_cases,
+        coverage.active_curve_cases,
+        coverage.fractional_final_ceil_cases,
+        coverage.multi_wire_cases,
+        coverage.nonzero_remainder_cases,
+        coverage.permutation_checks,
+        coverage.monotonicity_checks,
+    );
+    if let Some(failure) = observation.invariant_failure() {
+        return Err(format!("capacity-support harness invariant failed: {failure}").into());
     }
     Ok(())
 }
@@ -328,5 +354,13 @@ const fn mobility_runtime_result(execution: &MobilityRuntimeExecutionObservation
         MobilityRuntimeExecutionObservation::DeterminismMismatch { .. } => "determinism-mismatch",
         MobilityRuntimeExecutionObservation::ExpectationMismatch { .. } => "expectation-mismatch",
         MobilityRuntimeExecutionObservation::Completed => "completed",
+    }
+}
+
+const fn capacity_support_result(execution: CapacitySupportExecutionObservation) -> &'static str {
+    match execution {
+        CapacitySupportExecutionObservation::KernelError { .. } => "kernel-error",
+        CapacitySupportExecutionObservation::InvariantViolation { .. } => "invariant-violation",
+        CapacitySupportExecutionObservation::Completed => "completed",
     }
 }

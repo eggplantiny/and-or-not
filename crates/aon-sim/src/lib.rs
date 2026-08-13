@@ -3,6 +3,7 @@
 mod artifact;
 mod canonical;
 mod capacity;
+mod capacity_support;
 mod command;
 mod contract;
 mod error;
@@ -43,6 +44,10 @@ pub use artifact::{
 };
 pub use capacity::{
     MainCoreCapacityContribution, NetworkAccounting, NetworkAnalyzerSnapshot, WireCapacityUsage,
+};
+pub use capacity_support::{
+    CapacitySupportError, WireCapacitySupportShare, calculate_capacity_support_demand,
+    capacity_excess, distribute_capacity_support_demand,
 };
 pub use command::{
     BindPortCommand, Command, CommandAcceptance, CommandEncodingError, CommandEnvelope,
@@ -116,7 +121,8 @@ pub use power_runtime::{
     PowerRegionReport, PowerRuntimeError, PowerSenseAnalyzerSnapshot, PowerSenseReport,
     PowerStepReport, WirePowerDemandInput, bind_nominal_power_demands, build_gate_nominal_demands,
     build_movement_nominal_demand, build_wire_nominal_demands, collect_nominal_power_demands,
-    power_loss_coefficient, solve_power_step,
+    collect_nominal_power_demands_with_capacity_support, power_loss_coefficient, solve_power_step,
+    solve_power_step_with_capacity_support_heat,
 };
 pub use power_source::{PowerSourceStore, PowerSourceStoreError};
 pub use power_topology::{
@@ -125,14 +131,15 @@ pub use power_topology::{
     PowerTopologyInput,
 };
 pub use profile::{
-    BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile, DivisionProfile, GateFootprint,
-    GateFootprintTable, GatePortTable, GeometryLengthProfile,
-    MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile, OrientationBoundaryMultipliers,
-    OrientationWeightTable, OverflowPolicy, PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2,
-    PROFILE_SCHEMA_VERSION_V3, PhysicalScaleProfile, PortAnchor, PowerProbeProfile, ProfileBundle,
-    ProfileHashes, ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH,
-    REFERENCE_GATE_MINIMUM_EXTENT, REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM,
-    REFERENCE_WORLD_ROUTING_PITCH, RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
+    BALANCE_SCHEMA_VERSION_V4, BalanceProfile, BinaryGatePortAnchors, CapacityProbeProfile,
+    CapacitySupportProbeProfile, DivisionProfile, GateFootprint, GateFootprintTable, GatePortTable,
+    GeometryLengthProfile, MAX_STAGE0_WORLD_PITCH_GEOMETRY_QUANTA, NumericProfile,
+    OrientationBoundaryMultipliers, OrientationWeightTable, OverflowPolicy,
+    PROFILE_SCHEMA_VERSION_V1, PROFILE_SCHEMA_VERSION_V2, PROFILE_SCHEMA_VERSION_V3,
+    PhysicalScaleProfile, PortAnchor, PowerProbeProfile, ProfileBundle, ProfileHashes,
+    ProfileValidationError, REFERENCE_CIRCUIT_ROUTING_PITCH, REFERENCE_GATE_MINIMUM_EXTENT,
+    REFERENCE_WIRE_BODY_RADIUS, REFERENCE_WIRE_GEOMETRY_QUANTUM, REFERENCE_WORLD_ROUTING_PITCH,
+    RadiationReferenceProfile, Rational, UnaryGatePortAnchors,
 };
 pub use replay::{
     HashCheckpoint, REPLAY_FORMAT_VERSION_V1, REPLAY_FORMAT_VERSION_V2, Replay, ReplayArtifact,

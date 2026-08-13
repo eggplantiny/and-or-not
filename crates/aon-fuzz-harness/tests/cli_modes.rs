@@ -24,7 +24,13 @@ fn all_mode_invokes_every_decoder_target_including_replay() {
     );
 
     let stdout = String::from_utf8(output.stdout).expect("CLI output is UTF-8");
-    for prefix in ["decoder ", "replay ", "experiment ", "module "] {
+    for prefix in [
+        "decoder ",
+        "replay ",
+        "experiment ",
+        "module ",
+        "capacity-support ",
+    ] {
         assert!(
             stdout.lines().any(|line| line.starts_with(prefix)),
             "all mode omitted `{prefix}` output:\n{stdout}"

@@ -4,10 +4,10 @@ use crate::power::{
 };
 use crate::power_source::PowerSourceStore;
 use crate::power_topology::{CompiledPowerTopology, PowerLoadAttachment, PowerNodeKey};
-use crate::profile::{PowerProbeProfile, Rational};
+use crate::profile::{CapacityProbeProfile, PowerProbeProfile, Rational};
 use crate::{
     DriveStrength, DriverSample, Energy, EntityId, FIXED_ONE, Fixed, GateId, HeatEnergy,
-    LogicLevel, MobileId, PowerSourceId, Tick, WireEnd, WireId,
+    LogicLevel, MobileId, PowerSourceId, Tick, WireCapacitySupportShare, WireEnd, WireId,
 };
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -161,10 +161,11 @@ pub struct PowerLoadReport {
 pub enum PowerHeatKind {
     LeakageDissipation = 0,
     TransmissionLoss = 1,
+    OvercapacitySupport = 2,
 }
 
-/// Positive Phase-8 heat contribution. It is report scratch and must not mutate canonical thermal
-/// state in S1-M2.
+/// Positive Phase-8 heat contribution. It is report scratch and does not mutate canonical thermal
+/// state before S1-M4.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PowerHeatReport {
     pub owner: WireId,
@@ -400,7 +401,36 @@ pub fn collect_nominal_power_demands(
     wires: &[WirePowerDemandInput],
     movements: &[MovementPowerDemandInput],
 ) -> Result<NominalPowerDemandSet, PowerRuntimeError> {
+    collect_nominal_power_demands_with_capacity_support(probe, gates, wires, movements, &[])
+}
+
+/// Collects every nominal category, including positive per-Wire capacity-support shares, before
+/// any region is solved. Zero shares remain analyzer/accounting observations and are not loads.
+pub fn collect_nominal_power_demands_with_capacity_support(
+    probe: PowerProbeProfile,
+    gates: &[GatePowerDemandInput],
+    wires: &[WirePowerDemandInput],
+    movements: &[MovementPowerDemandInput],
+    capacity_support: &[WireCapacitySupportShare],
+) -> Result<NominalPowerDemandSet, PowerRuntimeError> {
     validate_power_probe(probe)?;
+    if !capacity_support.is_empty() {
+        if capacity_support.len() != wires.len() {
+            return Err(PowerRuntimeError::CapacitySupportWireSetMismatch);
+        }
+        for share in capacity_support {
+            let matching_wire = wires
+                .iter()
+                .find(|wire| wire.wire == share.wire())
+                .ok_or(PowerRuntimeError::CapacitySupportWireMismatch { wire: share.wire() })?;
+            let input_length = u64::try_from(matching_wire.length.0).map_err(|_| {
+                PowerRuntimeError::CapacitySupportWireMismatch { wire: share.wire() }
+            })?;
+            if input_length != share.length().0 {
+                return Err(PowerRuntimeError::CapacitySupportWireMismatch { wire: share.wire() });
+            }
+        }
+    }
     let mut demands = Vec::new();
     for gate in gates {
         demands.extend(build_gate_nominal_demands(probe, *gate)?);
@@ -411,6 +441,16 @@ pub fn collect_nominal_power_demands(
     for movement in movements {
         if let Some(demand) = build_movement_nominal_demand(probe, *movement)? {
             demands.push(demand);
+        }
+    }
+    for share in capacity_support {
+        if share.demand().0 > 0 {
+            demands.push(NominalPowerDemand::new(
+                share.wire().entity_id(),
+                DemandKind::OvercapacitySupport,
+                share.demand(),
+                PowerNodeKey::WireBody(share.wire()),
+            ));
         }
     }
     NominalPowerDemandSet::from_unsorted(demands)
@@ -469,7 +509,31 @@ pub fn solve_power_step(
     nominal: &NominalPowerDemandSet,
     probe: PowerProbeProfile,
 ) -> Result<PowerStepReport, PowerRuntimeError> {
+    solve_power_step_with_capacity_support_heat(topology, sources, nominal, probe, None)
+}
+
+/// Solves a complete nominal set and, when the v4 Capacity probe is supplied, converts actually
+/// granted support Energy into per-Wire report-only Heat using nearest-ties-even rounding.
+pub fn solve_power_step_with_capacity_support_heat(
+    topology: &CompiledPowerTopology,
+    sources: &PowerSourceStore,
+    nominal: &NominalPowerDemandSet,
+    probe: PowerProbeProfile,
+    capacity_probe: Option<CapacityProbeProfile>,
+) -> Result<PowerStepReport, PowerRuntimeError> {
     validate_power_probe(probe)?;
+    let contains_capacity_support = nominal
+        .iter()
+        .any(|demand| demand.kind() == DemandKind::OvercapacitySupport);
+    if contains_capacity_support && capacity_probe.is_none() {
+        return Err(PowerRuntimeError::MissingCapacityProbeForSupport);
+    }
+    if let Some(capacity_probe) = capacity_probe {
+        validate_positive_unit_rational(
+            capacity_probe.support_heat_fraction,
+            "capacityProbe.supportHeatFraction",
+        )?;
+    }
     validate_source_topology(topology, sources)?;
     let coefficient = power_loss_coefficient(probe)?;
     let bound = bind_nominal_power_demands(topology, nominal)?;
@@ -549,6 +613,24 @@ pub fn solve_power_step(
                     energy: HeatEnergy(grant.granted().0),
                 });
             }
+            if demand.kind() == DemandKind::OvercapacitySupport && grant.granted().0 > 0 {
+                let wire = capacity_support_owner(demand)?;
+                let heat = round_scaled_energy_nearest_even(
+                    capacity_probe
+                        .ok_or(PowerRuntimeError::MissingCapacityProbeForSupport)?
+                        .support_heat_fraction,
+                    grant.granted(),
+                    "capacityProbe.supportHeatFraction",
+                )?;
+                if heat.0 > 0 {
+                    report.heat_contributions.push(PowerHeatReport {
+                        owner: wire,
+                        kind: PowerHeatKind::OvercapacitySupport,
+                        demand: demand.id,
+                        energy: heat,
+                    });
+                }
+            }
         }
         report.heat_contributions.extend(
             solution
@@ -570,6 +652,13 @@ pub fn solve_power_step(
         .heat_contributions
         .sort_unstable_by_key(|heat| (heat.owner, heat.kind, heat.demand));
     Ok(report)
+}
+
+fn capacity_support_owner(demand: &NominalPowerDemand) -> Result<WireId, PowerRuntimeError> {
+    match demand.node {
+        PowerNodeKey::WireBody(wire) if wire.entity_id() == demand.owner() => Ok(wire),
+        _ => Err(PowerRuntimeError::InvalidCapacitySupportAttachment { demand: demand.id }),
+    }
 }
 
 fn leakage_owner(demand: &NominalPowerDemand) -> Result<WireId, PowerRuntimeError> {
@@ -674,6 +763,17 @@ fn validate_nonnegative_rational(
     rational_parts(value, field)
 }
 
+fn validate_positive_unit_rational(
+    value: Rational,
+    field: &'static str,
+) -> Result<(u64, u64), PowerRuntimeError> {
+    let (numerator, denominator) = validate_positive_rational(value, field)?;
+    if numerator > denominator {
+        return Err(PowerRuntimeError::InvalidPowerProbe { field });
+    }
+    Ok((numerator, denominator))
+}
+
 fn rational_parts(value: Rational, field: &'static str) -> Result<(u64, u64), PowerRuntimeError> {
     if value.numerator() < 0 || value.denominator() <= 0 {
         return Err(PowerRuntimeError::InvalidPowerProbe { field });
@@ -718,6 +818,35 @@ fn ceil_scaled_world_distance(
     ceil_product(numerator, distance_raw, scaled_denominator).map(Energy)
 }
 
+fn round_scaled_energy_nearest_even(
+    coefficient: Rational,
+    value: Energy,
+    field: &'static str,
+) -> Result<HeatEnergy, PowerRuntimeError> {
+    let (numerator, denominator) = validate_nonnegative_rational(coefficient, field)?;
+    let product = u128::from(numerator)
+        .checked_mul(u128::from(value.0))
+        .ok_or(PowerRuntimeError::NumericOverflow)?;
+    let denominator = u128::from(denominator);
+    let quotient = product / denominator;
+    let remainder = product % denominator;
+    let twice_remainder = remainder
+        .checked_mul(2)
+        .ok_or(PowerRuntimeError::NumericOverflow)?;
+    let rounds_up = twice_remainder > denominator
+        || (twice_remainder == denominator && !quotient.is_multiple_of(2));
+    let rounded = if rounds_up {
+        quotient
+            .checked_add(1)
+            .ok_or(PowerRuntimeError::NumericOverflow)?
+    } else {
+        quotient
+    };
+    u64::try_from(rounded)
+        .map(HeatEnergy)
+        .map_err(|_| PowerRuntimeError::NumericOverflow)
+}
+
 fn ceil_product(left: u64, right: u64, denominator: u64) -> Result<u64, PowerRuntimeError> {
     if denominator == 0 {
         return Err(PowerRuntimeError::NumericOverflow);
@@ -753,6 +882,12 @@ pub enum PowerRuntimeError {
     #[error("duplicate derived Power DemandId {demand:?}")]
     DuplicateDemand { demand: DemandId },
 
+    #[error("capacity-support rows do not cover exactly the collected Wire set")]
+    CapacitySupportWireSetMismatch,
+
+    #[error("capacity-support row for {wire:?} does not match the collected Wire length")]
+    CapacitySupportWireMismatch { wire: WireId },
+
     #[error("compiled Power topology is missing load {demand:?}")]
     MissingCompiledLoad { demand: DemandId },
 
@@ -779,6 +914,12 @@ pub enum PowerRuntimeError {
     #[error("WireLeakage demand {demand:?} is not attached to its owner WireBody")]
     InvalidLeakageAttachment { demand: DemandId },
 
+    #[error("OvercapacitySupport demand {demand:?} is not attached to its owner WireBody")]
+    InvalidCapacitySupportAttachment { demand: DemandId },
+
+    #[error("OvercapacitySupport demand requires the Balance Capacity probe")]
+    MissingCapacityProbeForSupport,
+
     #[error("Power runtime numeric overflow")]
     NumericOverflow,
 
@@ -794,7 +935,7 @@ mod tests {
         CompiledPowerTopology, PowerBodyEdge, PowerSourceAttachment, PowerTopologyInput,
     };
     use crate::profile::BalanceProfile;
-    use crate::{FixedVec2, WireEnd};
+    use crate::{Capacity, FixedVec2, WireEnd, distribute_capacity_support_demand};
 
     fn probe() -> PowerProbeProfile {
         BalanceProfile::power_probe_alpha("runtime-test")
@@ -820,6 +961,132 @@ mod tests {
             FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
             Energy(generation),
         )
+    }
+
+    #[test]
+    fn capacity_support_heat_boundary_is_positive_unit_interval_and_legacy_none_is_identical() {
+        let topology = CompiledPowerTopology::compile(&PowerTopologyInput::default())
+            .expect("empty topology compiles");
+        let sources = PowerSourceStore::default();
+        let nominal = NominalPowerDemandSet::default();
+        let legacy = solve_power_step(&topology, &sources, &nominal, probe())
+            .expect("legacy empty solve succeeds");
+        assert_eq!(
+            solve_power_step_with_capacity_support_heat(
+                &topology,
+                &sources,
+                &nominal,
+                probe(),
+                None,
+            ),
+            Ok(legacy)
+        );
+
+        let mut capacity = BalanceProfile::capacity_support_probe_alpha("runtime-v4")
+            .capacity_probe
+            .expect("v4 has Capacity probe");
+        for fraction in [Rational::new(0, 1).unwrap(), Rational::new(5, 4).unwrap()] {
+            capacity.support_heat_fraction = fraction;
+            assert_eq!(
+                solve_power_step_with_capacity_support_heat(
+                    &topology,
+                    &sources,
+                    &nominal,
+                    probe(),
+                    Some(capacity),
+                ),
+                Err(PowerRuntimeError::InvalidPowerProbe {
+                    field: "capacityProbe.supportHeatFraction"
+                })
+            );
+        }
+
+        assert_eq!(
+            round_scaled_energy_nearest_even(Rational::new(1, 4).unwrap(), Energy(2), "test",),
+            Ok(HeatEnergy(0)),
+            "one half rounds to the even zero"
+        );
+        assert_eq!(
+            round_scaled_energy_nearest_even(Rational::new(1, 4).unwrap(), Energy(6), "test",),
+            Ok(HeatEnergy(2)),
+            "one and one half rounds to the even two"
+        );
+
+        let support_wire = wire(10);
+        let support = distribute_capacity_support_demand(
+            Capacity(FIXED_ONE as u64),
+            Energy(1),
+            &[(support_wire, Capacity(FIXED_ONE as u64))],
+        )
+        .expect("one-Wire support distribution succeeds");
+        let matching_wire = [WirePowerDemandInput {
+            wire: support_wire,
+            length: Fixed(FIXED_ONE),
+        }];
+        let extra_wire = [
+            matching_wire[0],
+            WirePowerDemandInput {
+                wire: wire(11),
+                length: Fixed(FIXED_ONE),
+            },
+        ];
+        assert_eq!(
+            collect_nominal_power_demands_with_capacity_support(
+                probe(),
+                &[],
+                &extra_wire,
+                &[],
+                &support,
+            ),
+            Err(PowerRuntimeError::CapacitySupportWireSetMismatch)
+        );
+
+        let wrong_length = [WirePowerDemandInput {
+            wire: support_wire,
+            length: Fixed(FIXED_ONE + 1),
+        }];
+        assert_eq!(
+            collect_nominal_power_demands_with_capacity_support(
+                probe(),
+                &[],
+                &wrong_length,
+                &[],
+                &support,
+            ),
+            Err(PowerRuntimeError::CapacitySupportWireMismatch { wire: support_wire })
+        );
+
+        let support_nominal = collect_nominal_power_demands_with_capacity_support(
+            probe(),
+            &[],
+            &matching_wire,
+            &[],
+            &support,
+        )
+        .expect("matching support rows collect");
+        assert_eq!(
+            solve_power_step_with_capacity_support_heat(
+                &topology,
+                &sources,
+                &support_nominal,
+                probe(),
+                None,
+            ),
+            Err(PowerRuntimeError::MissingCapacityProbeForSupport)
+        );
+
+        let malformed = NominalPowerDemand::new(
+            support_wire.entity_id(),
+            DemandKind::OvercapacitySupport,
+            Energy(1),
+            PowerNodeKey::WireBody(wire(11)),
+        );
+        assert_eq!(
+            capacity_support_owner(&malformed),
+            Err(PowerRuntimeError::InvalidCapacitySupportAttachment {
+                demand: DemandId::new(support_wire.entity_id(), DemandKind::OvercapacitySupport,),
+            })
+        );
     }
 
     #[test]

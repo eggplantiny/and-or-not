@@ -617,7 +617,7 @@ $requiredTests = @(
         Package = "aon-sim"
         TargetArguments = @("--test", "artifact_stage_features")
         TestName = "s1m2_features_require_the_power_world_and_later_features_remain_unsupported"
-        Evidence = "S1-M3 and S1-M4 features and behaviors remain explicitly unsupported"
+        Evidence = "Relay and later Stage features remain explicitly unsupported"
     }
 )
 

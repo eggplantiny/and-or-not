@@ -6,6 +6,7 @@ use thiserror::Error;
 pub const PROFILE_SCHEMA_VERSION_V1: u32 = 1;
 pub const PROFILE_SCHEMA_VERSION_V2: u32 = 2;
 pub const PROFILE_SCHEMA_VERSION_V3: u32 = 3;
+pub const BALANCE_SCHEMA_VERSION_V4: u32 = 4;
 
 pub const REFERENCE_WIRE_GEOMETRY_QUANTUM: Fixed = Fixed(FIXED_ONE / 64);
 pub const REFERENCE_CIRCUIT_ROUTING_PITCH: Fixed = Fixed(FIXED_ONE / 4);
@@ -408,6 +409,14 @@ pub struct CapacityProbeProfile {
     pub support_heat_fraction: Rational,
 }
 
+/// S1-M3 conformance coefficient for deterministic capacity-support power demand.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CapacitySupportProbeProfile {
+    #[serde(rename = "supportPowerPerNCU")]
+    pub support_power_per_ncu: Rational,
+}
+
 /// S1-M2 conformance coefficients for the first deterministic Power solver.
 ///
 /// These values are semantic inputs, not inferred tuning values. Generation remains part of the
@@ -484,6 +493,8 @@ pub struct BalanceProfile {
     pub radiation_reference: Option<RadiationReferenceProfile>,
     #[serde(default)]
     pub power_probe: Option<PowerProbeProfile>,
+    #[serde(default)]
+    pub capacity_support_probe: Option<CapacitySupportProbeProfile>,
 }
 
 impl BalanceProfile {
@@ -512,6 +523,7 @@ impl BalanceProfile {
             capacity_probe: None,
             radiation_reference: None,
             power_probe: None,
+            capacity_support_probe: None,
         }
     }
 
@@ -568,13 +580,28 @@ impl BalanceProfile {
         profile
     }
 
+    /// Reference S1-M3 capacity-support conformance profile.
+    pub fn capacity_support_probe_alpha(profile_id: impl Into<String>) -> Self {
+        let mut profile = Self::power_probe_alpha(profile_id);
+        profile.schema_version = BALANCE_SCHEMA_VERSION_V4;
+        profile
+            .capacity_probe
+            .as_mut()
+            .expect("power-probe alpha has a capacity probe")
+            .main_core_capacity = 100;
+        profile.capacity_support_probe = Some(CapacitySupportProbeProfile {
+            support_power_per_ncu: ratio(1, 1),
+        });
+        profile
+    }
+
     pub fn validate(&self) -> Result<(), ProfileValidationError> {
         if !matches!(
             self.schema_version,
-            PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3
+            PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4
         ) {
             return Err(ProfileValidationError::UnsupportedSchema {
-                expected: PROFILE_SCHEMA_VERSION_V3,
+                expected: BALANCE_SCHEMA_VERSION_V4,
                 actual: self.schema_version,
             });
         }
@@ -616,6 +643,12 @@ impl BalanceProfile {
         )?;
         if let Some(capacity_probe) = self.capacity_probe {
             validate_capacity_probe(capacity_probe)?;
+            if self.schema_version == BALANCE_SCHEMA_VERSION_V4 {
+                require_positive_rational(
+                    "capacityProbe.overcapQuadraticK",
+                    capacity_probe.overcap_quadratic_k,
+                )?;
+            }
         }
         if let Some(radiation_reference) = self.radiation_reference {
             validate_radiation_reference(radiation_reference)?;
@@ -628,13 +661,38 @@ impl BalanceProfile {
                     schema_version: PROFILE_SCHEMA_VERSION_V2,
                 });
             }
-            (PROFILE_SCHEMA_VERSION_V3, Some(power_probe)) => {
+            (PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4, Some(power_probe)) => {
                 validate_power_probe(power_probe)?;
             }
-            (PROFILE_SCHEMA_VERSION_V3, None) => {
+            (PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4, None) => {
                 return Err(ProfileValidationError::FieldRequiredForSchema {
                     field: "powerProbe",
-                    schema_version: PROFILE_SCHEMA_VERSION_V3,
+                    schema_version: self.schema_version,
+                });
+            }
+            _ => unreachable!("supported Balance schemas were checked above"),
+        }
+        match (self.schema_version, self.capacity_support_probe) {
+            (PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3, None) => {}
+            (PROFILE_SCHEMA_VERSION_V2 | PROFILE_SCHEMA_VERSION_V3, Some(_)) => {
+                return Err(ProfileValidationError::FieldForbiddenForSchema {
+                    field: "capacitySupportProbe",
+                    schema_version: self.schema_version,
+                });
+            }
+            (BALANCE_SCHEMA_VERSION_V4, Some(capacity_support_probe)) => {
+                if self.capacity_probe.is_none() {
+                    return Err(ProfileValidationError::FieldRequiredForSchema {
+                        field: "capacityProbe",
+                        schema_version: BALANCE_SCHEMA_VERSION_V4,
+                    });
+                }
+                validate_capacity_support_probe(capacity_support_probe)?;
+            }
+            (BALANCE_SCHEMA_VERSION_V4, None) => {
+                return Err(ProfileValidationError::FieldRequiredForSchema {
+                    field: "capacitySupportProbe",
+                    schema_version: BALANCE_SCHEMA_VERSION_V4,
                 });
             }
             _ => unreachable!("supported Balance schemas were checked above"),
@@ -686,11 +744,20 @@ impl BalanceProfile {
         }
         // Schema v2 bytes are retained exactly. The v3 suffix is selected by the schema tag that
         // is already part of the canonical header.
-        if self.schema_version == PROFILE_SCHEMA_VERSION_V3 {
+        if matches!(
+            self.schema_version,
+            PROFILE_SCHEMA_VERSION_V3 | BALANCE_SCHEMA_VERSION_V4
+        ) {
             let power_probe = self
                 .power_probe
-                .expect("validated Balance v3 has a Power probe");
+                .expect("validated Balance v3/v4 has a Power probe");
             encode_power_probe(power_probe, write);
+        }
+        if self.schema_version == BALANCE_SCHEMA_VERSION_V4 {
+            let capacity_support_probe = self
+                .capacity_support_probe
+                .expect("validated Balance v4 has a capacity-support probe");
+            encode_rational(capacity_support_probe.support_power_per_ncu, write);
         }
     }
 }
@@ -1031,6 +1098,15 @@ fn validate_capacity_probe(profile: CapacityProbeProfile) -> Result<(), ProfileV
     require_unit_interval(
         "capacityProbe.supportHeatFraction",
         profile.support_heat_fraction,
+    )
+}
+
+fn validate_capacity_support_probe(
+    profile: CapacitySupportProbeProfile,
+) -> Result<(), ProfileValidationError> {
+    require_positive_rational(
+        "capacitySupportProbe.supportPowerPerNCU",
+        profile.support_power_per_ncu,
     )
 }
 
@@ -1433,7 +1509,7 @@ mod tests {
         assert_eq!(
             old_balance.validate(),
             Err(ProfileValidationError::UnsupportedSchema {
-                expected: PROFILE_SCHEMA_VERSION_V3,
+                expected: BALANCE_SCHEMA_VERSION_V4,
                 actual: PROFILE_SCHEMA_VERSION_V1,
             })
         );
@@ -1561,6 +1637,28 @@ mod tests {
                 field: "powerProbe",
                 schema_version: PROFILE_SCHEMA_VERSION_V2,
             })
+        );
+    }
+
+    #[test]
+    fn balance_v4_encoder_is_the_schema_tagged_v3_encoding_plus_one_exact_rational() {
+        let v4 = BalanceProfile::capacity_support_probe_alpha("metadata-only-v4");
+        let mut v3 = v4.clone();
+        v3.schema_version = PROFILE_SCHEMA_VERSION_V3;
+        v3.capacity_support_probe = None;
+        let mut v3_bytes = Vec::new();
+        v3.encode_canonical(&mut |bytes| v3_bytes.extend_from_slice(bytes));
+        let mut v4_bytes = Vec::new();
+        v4.encode_canonical(&mut |bytes| v4_bytes.extend_from_slice(bytes));
+
+        let schema_offset = PROFILE_HASH_DOMAIN.len() + size_of::<u16>() + size_of::<u8>();
+        v4_bytes[schema_offset..schema_offset + size_of::<u32>()]
+            .copy_from_slice(&PROFILE_SCHEMA_VERSION_V3.to_le_bytes());
+        assert_eq!(v4_bytes.len(), v3_bytes.len() + 2 * size_of::<i64>());
+        assert_eq!(&v4_bytes[..v3_bytes.len()], v3_bytes);
+        assert_eq!(
+            &v4_bytes[v3_bytes.len()..],
+            [1_i64.to_le_bytes(), 1_i64.to_le_bytes()].concat()
         );
     }
 

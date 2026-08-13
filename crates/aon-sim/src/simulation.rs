@@ -1,4 +1,4 @@
-use crate::capacity::{account_network, analyzer_snapshot};
+use crate::capacity::{account_network_with_support, analyzer_snapshot};
 use crate::contract::{ContractValidationError, SimulationContract};
 use crate::event::{
     DRIVER_TRANSITION_KIND_ORDER, DriverTransition, DriverTransitionCause, EventCalendar,
@@ -18,8 +18,9 @@ use crate::power_adapter::{PowerAdapterError, compile_power_topology_with_loads}
 use crate::power_runtime::{
     GatePowerDemandInput, MovementPowerDemandInput, NominalPowerDemandSet, PowerGateReport,
     PowerHeatReport, PowerMobileReport, PowerRuntimeError, PowerSenseAnalyzerSnapshot,
-    PowerSenseReport, PowerStepReport, WirePowerDemandInput, collect_nominal_power_demands,
-    solve_power_step,
+    PowerSenseReport, PowerStepReport, WirePowerDemandInput,
+    collect_nominal_power_demands_with_capacity_support,
+    solve_power_step_with_capacity_support_heat,
 };
 use crate::power_source::PowerSourceStore;
 use crate::profile::{
@@ -46,7 +47,7 @@ use crate::{
     CommandAcceptance, CommandEnvelope, CommandRejection, DriveStrength, DriverId, DriverSample,
     Energy, Fixed, FixedVec2, GateId, GateType, InitialWorld, LogicLevel, MobileId,
     MobileSubstrateIndex, RenderSnapshot, Revision, ScenarioManifest, SimulationError, SinkId,
-    StageFeatureSet, StateHash, Tick, WireEnd, WireId, canonical, polyline_length,
+    StageFeatureSet, StateHash, Tick, WireEnd, WireId, canonical,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -670,7 +671,13 @@ impl Simulation {
             .main_core
             .as_ref()
             .map(|core| {
-                analyzer_snapshot(self.canonical.next_tick, &self.canonical.structural, core)
+                analyzer_snapshot(
+                    self.canonical.next_tick,
+                    &self.canonical.structural,
+                    core,
+                    self.profiles.balance.capacity_probe,
+                    self.profiles.balance.capacity_support_probe,
+                )
             })
             .transpose()
     }
@@ -694,14 +701,37 @@ impl Simulation {
             balance,
         )?;
         let gates = collect_gate_power_inputs(&self.canonical, &signal_topology, balance)?;
-        let wires = collect_wire_power_inputs(&self.canonical)?;
-        let nominal = collect_nominal_power_demands(probe, &gates, &wires, &[])?;
+        let core = self
+            .canonical
+            .main_core
+            .as_ref()
+            .ok_or(SimulationError::InvalidCanonicalState)?;
+        let accounted = account_network_with_support(
+            &self.canonical.structural,
+            Some(core),
+            balance.capacity_probe,
+            balance.capacity_support_probe,
+        )?;
+        let wires = collect_wire_power_inputs(accounted.wires())?;
+        let nominal = collect_nominal_power_demands_with_capacity_support(
+            probe,
+            &gates,
+            &wires,
+            &[],
+            accounted.support_shares(),
+        )?;
         let topology = compile_power_topology_with_loads(
             &self.canonical.structural,
             &self.canonical.power_sources,
             nominal.load_attachments(),
         )?;
-        let solved = solve_power_step(&topology, &self.canonical.power_sources, &nominal, probe)?;
+        let solved = solve_power_step_with_capacity_support_heat(
+            &topology,
+            &self.canonical.power_sources,
+            &nominal,
+            probe,
+            active_capacity_probe(balance)?,
+        )?;
         let mut senses = collect_power_sense_reports(&self.canonical, &solved, probe)?;
         let mut gates =
             collect_power_gate_reports(&self.canonical, &signal_topology, &solved, balance)?;
@@ -2033,11 +2063,21 @@ fn run_phase4_global_accounting_and_nominal_demand(
     balance: &BalanceProfile,
     movement_budget: Fixed,
 ) -> Result<Phase4Output, SimulationError> {
-    let network_accounting = world
+    let accounted_network = world
         .main_core
         .as_ref()
-        .map(|core| account_network(&world.structural, Some(core)))
+        .map(|core| {
+            account_network_with_support(
+                &world.structural,
+                Some(core),
+                balance.capacity_probe,
+                balance.capacity_support_probe,
+            )
+        })
         .transpose()?;
+    let network_accounting = accounted_network
+        .as_ref()
+        .map(crate::capacity::AccountedNetwork::accounting);
     let Some(probe) = balance.power_probe else {
         return Ok(Phase4Output {
             network_accounting,
@@ -2046,7 +2086,10 @@ fn run_phase4_global_accounting_and_nominal_demand(
     };
 
     let gates = collect_gate_power_inputs(world, topology, balance)?;
-    let wires = collect_wire_power_inputs(world)?;
+    let accounted_network = accounted_network
+        .as_ref()
+        .ok_or(SimulationError::InvalidCanonicalState)?;
+    let wires = collect_wire_power_inputs(accounted_network.wires())?;
     let movements = mobile_intents
         .iter()
         .map(|intent| {
@@ -2062,8 +2105,14 @@ fn run_phase4_global_accounting_and_nominal_demand(
             })
         })
         .collect::<Result<Vec<_>, SimulationError>>()?;
-    let nominal_power = collect_nominal_power_demands(probe, &gates, &wires, &movements)
-        .map_err(SimulationError::from)?;
+    let nominal_power = collect_nominal_power_demands_with_capacity_support(
+        probe,
+        &gates,
+        &wires,
+        &movements,
+        accounted_network.support_shares(),
+    )
+    .map_err(SimulationError::from)?;
     Ok(Phase4Output {
         network_accounting,
         nominal_power: Some(nominal_power),
@@ -2108,16 +2157,16 @@ fn collect_gate_power_inputs(
 }
 
 fn collect_wire_power_inputs(
-    world: &CanonicalWorld,
+    wires: &[crate::WireCapacityUsage],
 ) -> Result<Vec<WirePowerDemandInput>, SimulationError> {
-    world
-        .structural
-        .wires()
-        .iter_alive()
-        .map(|(_, wire)| {
+    wires
+        .iter()
+        .map(|wire| {
+            let raw =
+                i64::try_from(wire.length().0).map_err(|_| SimulationError::NumericOverflow)?;
             Ok(WirePowerDemandInput {
-                wire: wire.id,
-                length: polyline_length(wire.points)?,
+                wire: wire.wire(),
+                length: Fixed(raw),
             })
         })
         .collect()
@@ -2139,12 +2188,30 @@ fn run_phase5_power_solve_and_brownout(
         &world.power_sources,
         nominal.load_attachments(),
     )?;
-    let mut report = solve_power_step(&topology, &world.power_sources, nominal, probe)?;
+    let mut report = solve_power_step_with_capacity_support_heat(
+        &topology,
+        &world.power_sources,
+        nominal,
+        probe,
+        active_capacity_probe(balance)?,
+    )?;
     let private_heat = std::mem::take(&mut report.heat_contributions);
     Ok(Phase5Output {
         report: Some(report),
         private_heat,
     })
+}
+
+fn active_capacity_probe(
+    balance: &BalanceProfile,
+) -> Result<Option<crate::CapacityProbeProfile>, SimulationError> {
+    match balance.capacity_support_probe {
+        Some(_) => balance
+            .capacity_probe
+            .map(Some)
+            .ok_or(SimulationError::InvalidCanonicalState),
+        None => Ok(None),
+    }
 }
 
 fn grant_stage0_mobile_budgets(intents: &mut [MobileIntent], budget: Fixed) {
@@ -2584,7 +2651,7 @@ fn run_phase8_interaction(
         report.mobiles[index].granted_budget = staged.observation.granted_budget;
     }
 
-    // Heat is not public report data until Phase 8. M2 emits it without mutating thermal state.
+    // Heat is not public report data until Phase 8 and does not mutate thermal state before S1-M4.
     phase5
         .private_heat
         .sort_unstable_by_key(|heat| (heat.owner, heat.kind, heat.demand));

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 4,
+  "profileId": "balance-s1-m3-capacity-support-alpha",
+  "kind": "balance",
+  "simulationHz": 20,
+  "gateBaseDelay": 1,
+  "gateSwitchBaseEnergy": 1,
+  "senseDelay": 1,
+  "logicThreshold": 100,
+  "nominalGateDrive": 400,
+  "inputLoad": 1,
+  "wireLoadPerWU": { "numerator": 1, "denominator": 1 },
+  "fanoutFreeLoad": 4,
+  "fanoutStep": 4,
+  "wireLinearK": { "numerator": 1, "denominator": 10 },
+  "wireQuadraticK": { "numerator": 1, "denominator": 40 },
+  "logicOperateThreshold": { "numerator": 1, "denominator": 5 },
+  "brownoutDelayFloor": { "numerator": 1, "denominator": 5 },
+  "senseRadius": 81920,
+  "quartzPeriod": 8,
+  "radiationCellSize": 65536,
+  "capacityProbe": {
+    "mainCoreCapacity": 100,
+    "relayCapacity": 500,
+    "overcapLinearK": { "numerator": 1, "denominator": 1 },
+    "overcapQuadraticK": { "numerator": 2, "denominator": 1 },
+    "capacityDenominatorFloor": 1,
+    "relayOfflineGraceTicks": 1,
+    "supportHeatFraction": { "numerator": 1, "denominator": 4 }
+  },
+  "powerProbe": {
+    "gateIdleDemand": 1,
+    "gateDriveDemand": 1,
+    "gateSwitchDemandPerEnergy": { "numerator": 1, "denominator": 1 },
+    "wireLeakagePerWU": { "numerator": 1, "denominator": 1 },
+    "wireSenseDemandPerWU": { "numerator": 1, "denominator": 1 },
+    "movementDemandPerWU": { "numerator": 1, "denominator": 1 },
+    "powerLossK": { "numerator": 0, "denominator": 1 },
+    "senseNominalDrive": 400,
+    "gateStateRetentionTicks": 3
+  },
+  "capacitySupportProbe": {
+    "supportPowerPerNCU": { "numerator": 1, "denominator": 1 }
+  }
+}

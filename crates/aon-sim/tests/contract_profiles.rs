@@ -59,7 +59,7 @@ fn reference_contract_and_profiles_create_a_simulation() {
 }
 
 #[test]
-fn balance_schema_v3_is_latest_and_v2_still_requires_switch_energy() {
+fn balance_schema_v4_is_latest_and_v2_still_requires_switch_energy() {
     let mut old_schema: serde_json::Value =
         serde_json::from_slice(BALANCE).expect("reference balance JSON");
     old_schema["schemaVersion"] = 1.into();
@@ -71,16 +71,14 @@ fn balance_schema_v3_is_latest_and_v2_still_requires_switch_energy() {
         balance_profile: &old_schema,
     })
     .expect_err("Balance schema v1 must be rejected");
-    assert!(matches!(
+    assert_eq!(
         error,
-        PackageError::InvalidProfile {
-            profile: ProfileKind::Balance,
-            error: ProfileValidationError::UnsupportedSchema {
-                expected: 3,
-                actual: 1
-            }
+        PackageError::UnsupportedSchema {
+            artifact: ArtifactKind::Profile(ProfileKind::Balance),
+            expected: 4,
+            actual: 1,
         }
-    ));
+    );
 
     let mut missing_energy: serde_json::Value =
         serde_json::from_slice(BALANCE).expect("reference balance JSON");

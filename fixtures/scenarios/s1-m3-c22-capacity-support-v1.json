@@ -1,0 +1,53 @@
+{
+  "hashAlgorithm": "blake3-v1",
+  "initialWorld": {
+    "kind": "main-core-power-v1",
+    "mainCore": {
+      "heatEnergy": 0,
+      "integrity": 1000,
+      "position": {
+        "x": -524288,
+        "y": -524288
+      }
+    },
+    "powerSources": [
+      {
+        "generationPerTick": 268,
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ]
+  },
+  "profiles": {
+    "balance": {
+      "path": "../../profiles/balance/s1-m3-capacity-support-alpha.json",
+      "profileHash": "a0a8974aebc87e30d602ffa019340e59c908912c0b36e0e0634e51214afc45ef",
+      "profileId": "balance-s1-m3-capacity-support-alpha"
+    },
+    "numeric": {
+      "path": "../../profiles/numeric/v1.json",
+      "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+      "profileId": "numeric-v1"
+    },
+    "physicalScale": {
+      "path": "../../profiles/physical-scale/stage0-alpha.json",
+      "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+      "profileId": "physical-scale-stage0-alpha"
+    }
+  },
+  "requiredFeatures": {
+    "capacity": true,
+    "mobility": false,
+    "payload": false,
+    "power": true,
+    "radiation": false,
+    "relay": false,
+    "sensing": true,
+    "signal": true
+  },
+  "scenarioId": "s1-m3-c22-capacity-support-v1",
+  "schemaVersion": 3,
+  "semanticsVersion": "aon-semantics-v1"
+}

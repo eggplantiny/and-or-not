@@ -1,8 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod capacity_support;
 mod mobility_runtime;
 mod topology_runtime;
 
+pub use capacity_support::{
+    CapacitySupportCaseObservation, CapacitySupportCoverage, CapacitySupportExecutionObservation,
+    CapacitySupportInvariant, CapacitySupportObservation, CapacitySupportStage,
+    MAX_CAPACITY_SUPPORT_INPUT_BYTES, exercise_capacity_support,
+};
 pub use mobility_runtime::{
     MAX_MOBILITY_RUNTIME_INPUT_BYTES, MobilityRuntimeCoverage, MobilityRuntimeExecutionObservation,
     MobilityRuntimeObservation, MobilityRuntimeScenario, exercise_mobility_runtime,
@@ -19,7 +25,7 @@ use aon_sim::{
     JunctionId, LogicLevel, ModuleError, NumericError, PackageError, PlaceFixedSubstrateCommand,
     PlaceGateCommand, PlaceJunctionCommand, PlaceMobileSubstrateCommand, PlaceWireCommand,
     RemoveEntityCommand, RoutingDomain, SetExternalDriverCommand, Simulation, SimulationError,
-    StateHash, StepReport, Tick, WireEnd, WireId, WireSignalSnapshot,
+    StateHash, StepReport, Tick, WireEnd, WireId, WireSignalSnapshot, decode_balance_profile,
     decode_experiment_plan_artifact, decode_module_artifact, decode_package,
     decode_replay_artifact, decode_scenario_manifest, polyline_length, validate_quantized,
 };
@@ -169,8 +175,9 @@ pub fn exercise_module_decoder(input: &[u8]) -> ModuleDecoderObservation {
 /// Interprets an arbitrary byte stream as one of the four public artifact decode paths.
 ///
 /// The low two bits of the first byte select the target. The remaining, bounded bytes are
-/// supplied to that decoder. Profile targets use the checked-in reference artifacts for the
-/// other package members so the selected profile decoder is always reached.
+/// supplied to that decoder. Numeric and Physical targets use checked-in reference artifacts for
+/// the other package members. Balance uses its standalone strict multi-version decoder so valid
+/// v2, v3, and v4 artifacts can all reach an accepted result without Scenario hash coupling.
 pub fn exercise_decoder(input: &[u8]) -> DecoderObservation {
     let bounded = &input[..input.len().min(MAX_DECODER_INPUT_BYTES)];
     let selector = bounded.first().copied().unwrap_or(0);
@@ -198,13 +205,7 @@ pub fn exercise_decoder(input: &[u8]) -> DecoderObservation {
             balance_profile: REFERENCE_BALANCE_PROFILE,
         })
         .map(|_| ()),
-        DecoderTarget::BalanceProfile => decode_package(ArtifactBytes {
-            scenario: REFERENCE_SCENARIO,
-            numeric_profile: REFERENCE_NUMERIC_PROFILE,
-            physical_scale_profile: REFERENCE_PHYSICAL_SCALE_PROFILE,
-            balance_profile: payload,
-        })
-        .map(|_| ()),
+        DecoderTarget::BalanceProfile => decode_balance_profile(payload).map(|_| ()),
     };
 
     DecoderObservation {

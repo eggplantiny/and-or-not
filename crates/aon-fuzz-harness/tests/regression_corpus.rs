@@ -1,9 +1,9 @@
 use aon_fuzz_harness::{
-    MobilityRuntimeExecutionObservation, SignalRuntimeExecutionObservation,
-    TopologyRuntimeExecutionObservation, exercise_commands, exercise_decoder,
-    exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
-    exercise_module_decoder, exercise_replay_decoder, exercise_signal_runtime,
-    exercise_stateful_commands, exercise_topology_runtime,
+    CapacitySupportExecutionObservation, DecoderTarget, MobilityRuntimeExecutionObservation,
+    SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation,
+    exercise_capacity_support, exercise_commands, exercise_decoder, exercise_experiment_decoder,
+    exercise_geometry, exercise_mobility_runtime, exercise_module_decoder, exercise_replay_decoder,
+    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
 };
 use aon_sim::decode_balance_profile;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -65,6 +65,11 @@ const REPLAY_CORPUS: &[(&str, &[u8], bool)] = &[
     (
         "valid-s1-m2-c08-brownout-half",
         include_bytes!("../../../fixtures/replays/s1-m2-c08-brownout-half-v1.json"),
+        true,
+    ),
+    (
+        "valid-s1-m3-c22-capacity-support",
+        include_bytes!("../../../fixtures/replays/s1-m3-c22-capacity-support-v1.json"),
         true,
     ),
     (
@@ -158,6 +163,8 @@ const MOBILITY_RUNTIME_COVERAGE: &[u8] =
 
 const MOBILITY_RUNTIME_CORPUS: &[(&str, &[u8])] = &[("s0-m7-coverage", MOBILITY_RUNTIME_COVERAGE)];
 
+const CAPACITY_SUPPORT_COVERAGE: &[u8] = include_bytes!("../corpus/capacity-support/coverage.case");
+
 #[test]
 fn decoder_regression_corpus_never_panics() {
     for &(name, bytes) in DECODER_CORPUS {
@@ -188,6 +195,90 @@ fn s1m2_scenario_and_balance_artifacts_reach_the_bounded_decoder_without_panics(
         "S1-M2 Balance fixture must remain accepted: {:?}",
         balance
     );
+}
+
+#[test]
+fn s1m3_scenario_balance_and_replay_artifacts_reach_bounded_strict_decoders() {
+    let mut scenario = vec![0];
+    scenario.extend_from_slice(include_bytes!(
+        "../../../fixtures/scenarios/s1-m3-c22-capacity-support-v1.json"
+    ));
+    let scenario = catch_unwind(AssertUnwindSafe(|| exercise_decoder(&scenario)))
+        .expect("S1-M3 Scenario decoder input must not panic");
+    assert_eq!(scenario.target, DecoderTarget::Scenario);
+    assert!(
+        scenario.result.is_ok(),
+        "retained C-22 Scenario must remain accepted: {:?}",
+        scenario.result
+    );
+
+    let balance_bytes =
+        include_bytes!("../../../profiles/balance/s1-m3-capacity-support-alpha.json");
+    let mut bounded_balance = vec![3];
+    bounded_balance.extend_from_slice(balance_bytes);
+    let bounded_balance = catch_unwind(AssertUnwindSafe(|| exercise_decoder(&bounded_balance)))
+        .expect("S1-M3 Balance decoder input must not panic");
+    assert_eq!(bounded_balance.target, DecoderTarget::BalanceProfile);
+    assert_eq!(bounded_balance.payload_len, balance_bytes.len());
+    assert!(
+        bounded_balance.result.is_ok(),
+        "retained Balance v4 must reach an accepted bounded result: {:?}",
+        bounded_balance.result
+    );
+    assert!(
+        decode_balance_profile(balance_bytes).is_ok(),
+        "retained Balance v4 must remain strictly accepted"
+    );
+
+    let replay = include_bytes!("../../../fixtures/replays/s1-m3-c22-capacity-support-v1.json");
+    let replay = catch_unwind(AssertUnwindSafe(|| exercise_replay_decoder(replay)))
+        .expect("S1-M3 Replay decoder input must not panic");
+    assert!(
+        replay.result.is_ok(),
+        "retained C-22 Replay must remain strictly accepted: {:?}",
+        replay.result
+    );
+}
+
+#[test]
+fn s1m3_capacity_support_corpus_is_bounded_exact_and_property_complete() {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        exercise_capacity_support(CAPACITY_SUPPORT_COVERAGE)
+    }));
+    let Ok(observation) = result else {
+        panic!("capacity-support regression corpus panicked");
+    };
+    assert_eq!(
+        observation.execution,
+        CapacitySupportExecutionObservation::Completed
+    );
+    assert_eq!(observation.invariant_failure(), None);
+    assert_eq!(observation.consumed_len, CAPACITY_SUPPORT_COVERAGE.len());
+    assert_eq!(observation.generated_cases, CAPACITY_SUPPORT_COVERAGE.len());
+    assert_eq!(observation.cases.len(), CAPACITY_SUPPORT_COVERAGE.len());
+    assert_eq!(
+        exercise_capacity_support(CAPACITY_SUPPORT_COVERAGE),
+        observation,
+        "identical bounded input must reproduce every exact outcome"
+    );
+
+    let coverage = observation.coverage;
+    assert!(coverage.zero_excess_cases > 0);
+    assert!(coverage.active_curve_cases > 0);
+    assert!(coverage.fractional_final_ceil_cases > 0);
+    assert!(coverage.multi_wire_cases > 0);
+    assert!(coverage.nonzero_remainder_cases > 0);
+    assert_eq!(
+        coverage.permutation_checks,
+        u64::try_from(observation.generated_cases).expect("bounded count fits u64")
+    );
+    assert_eq!(coverage.monotonicity_checks, coverage.permutation_checks);
+
+    let oversized = vec![0xff; 256];
+    let truncated = exercise_capacity_support(&oversized);
+    assert_eq!(truncated.consumed_len, 128);
+    assert_eq!(truncated.generated_cases, 128);
+    assert_eq!(truncated.invariant_failure(), None);
 }
 
 #[test]
