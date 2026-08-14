@@ -1,0 +1,121 @@
+{
+  "formatVersion": 1,
+  "hashAlgorithmId": "blake3-v1",
+  "pairId": "s1-m5-reference-pair-v1",
+  "scenarioId": "s1-m5-reference-architectures-v1",
+  "scenario": {
+    "path": "../scenarios/s1-m5-reference-architectures-v1.json",
+    "artifactHash": "5670fb1cc24bd28fc56ccbd370030a9637a333afa82cf55a46c8ecd8e385aaa6"
+  },
+  "contract": {
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a"
+  },
+  "numericProfile": {
+    "path": "../../profiles/numeric/v1.json",
+    "profileId": "numeric-v1",
+    "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469"
+  },
+  "physicalScaleProfile": {
+    "path": "../../profiles/physical-scale/stage0-alpha.json",
+    "profileId": "physical-scale-stage0-alpha",
+    "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490"
+  },
+  "balanceProfile": {
+    "path": "../../profiles/balance/s1-m4-construction-contact-damage-alpha.json",
+    "profileId": "balance-s1-m4-construction-contact-damage-alpha",
+    "profileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a"
+  },
+  "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+  "buildEndTick": 18,
+  "measurementStartTick": 18,
+  "maxTicks": 20,
+  "mainCoreCapacity": 100,
+  "territory": {
+    "min": {
+      "x": -4194304,
+      "y": -4194304
+    },
+    "max": {
+      "x": 4194304,
+      "y": 4194304
+    }
+  },
+  "territoryAnchors": [
+    {
+      "name": "east",
+      "position": {
+        "x": 4194304,
+        "y": 0
+      }
+    },
+    {
+      "name": "north",
+      "position": {
+        "x": 0,
+        "y": 4194304
+      }
+    },
+    {
+      "name": "south",
+      "position": {
+        "x": 0,
+        "y": -4194304
+      }
+    },
+    {
+      "name": "west",
+      "position": {
+        "x": -4194304,
+        "y": 0
+      }
+    }
+  ],
+  "powerSourceSequenceHash": "21341ef0960479a42451867161951ef64467af4f32c0aafb5d861a39996000b5",
+  "enemySequenceHash": "3756561eb204ee87d0e177cb3e0e55108e82693612543aa75fe471dc13b9ff64",
+  "sharedCommandLogHash": "0853870a18c75c8fc716045a52770dba3371053538a93bab34505547dfe1bf53",
+  "metricSetId": "s1-m5-reference-baseline-v1",
+  "metricSetHash": "94c9377d27a4e8d0ddf7b184c723c264387a319b3169d242dea999da3cc94f04",
+  "designs": [
+    {
+      "role": "brute",
+      "design": {
+        "path": "../designs/s1-m5-brute-v2.json",
+        "artifactHash": "52401f698a4508c774f046188c4cb878179595f41e9a1a1f50996d9ca03b7558"
+      },
+      "commandLogHash": "59757b665ad723401d51c85c0312cadb7dd4505e1417d2606c86c2568332fa77"
+    },
+    {
+      "role": "computed",
+      "design": {
+        "path": "../designs/s1-m5-computed-v2.json",
+        "artifactHash": "9c86dd33405a260b52cfb8d0b567c29faf9d6cdfdefed220702a3a9745eb98d0"
+      },
+      "commandLogHash": "3ba662b394ee1624d4e1a64b381186d7423688210097f0590e81f44d63b667ff"
+    }
+  ],
+  "responseBindings": [
+    {
+      "name": "east.0",
+      "hostileEntryBinding": "sensor.east.0",
+      "defenseContactBinding": "defense.east.0"
+    },
+    {
+      "name": "north.0",
+      "hostileEntryBinding": "sensor.north.0",
+      "defenseContactBinding": "defense.north.0"
+    },
+    {
+      "name": "south.0",
+      "hostileEntryBinding": "sensor.south.0",
+      "defenseContactBinding": "defense.south.0"
+    },
+    {
+      "name": "west.0",
+      "hostileEntryBinding": "sensor.west.0",
+      "defenseContactBinding": "defense.west.0"
+    }
+  ]
+}

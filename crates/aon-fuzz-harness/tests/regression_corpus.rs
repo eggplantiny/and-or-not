@@ -1,14 +1,88 @@
 use aon_fuzz_harness::{
     CapacitySupportExecutionObservation, DecoderTarget, MobilityRuntimeExecutionObservation,
-    S1m4KernelExecutionObservation, S1m4RuntimeExecutionObservation,
+    S1m4KernelExecutionObservation, S1m4RuntimeExecutionObservation, S1m5ReferenceTarget,
     SignalRuntimeExecutionObservation, TopologyRuntimeExecutionObservation,
     exercise_capacity_support, exercise_commands, exercise_decoder, exercise_experiment_decoder,
     exercise_geometry, exercise_mobility_runtime, exercise_module_decoder, exercise_replay_decoder,
-    exercise_s1m4_kernels, exercise_s1m4_runtime, exercise_signal_runtime,
-    exercise_stateful_commands, exercise_topology_runtime,
+    exercise_s1m4_kernels, exercise_s1m4_runtime, exercise_s1m5_reference_artifacts,
+    exercise_signal_runtime, exercise_stateful_commands, exercise_topology_runtime,
 };
-use aon_sim::decode_balance_profile;
+use aon_sim::{
+    Fixed, FixedVec2, HashAlgorithmId, ProfileHash, ReferenceArchitectureArtifact,
+    ReferenceArchitectureBindingEndpoint, ReferenceArchitectureEndpoint,
+    ReferenceArchitectureFormatVersion, ReferenceArchitectureLocalId,
+    ReferenceArchitectureMaterializationSchedule, ReferenceArchitectureOperation,
+    ReferenceArchitectureRoutingDomain, ReferenceJunction, ReferenceMetricSetArtifact,
+    ReferenceResponseObservationSpec, ReferenceWire, SemanticsVersion, SimulationContract, WireEnd,
+    decode_balance_profile, encode_reference_architecture_artifact,
+    encode_reference_metric_set_artifact,
+};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+
+fn reference_architecture_id(value: u32) -> ReferenceArchitectureLocalId {
+    ReferenceArchitectureLocalId::new(value).expect("the fuzz fixture local ID is nonzero")
+}
+
+fn reference_architecture_fixture(
+    format_version: ReferenceArchitectureFormatVersion,
+) -> ReferenceArchitectureArtifact {
+    let profile_hash =
+        ProfileHash::from_hex(&"00".repeat(32)).expect("the zero fuzz profile hash is canonical");
+    let wire = reference_architecture_id(2);
+    let materialization_schedule =
+        (format_version == ReferenceArchitectureFormatVersion::V2).then(|| {
+            ReferenceArchitectureMaterializationSchedule {
+                binding_batches: vec![vec![
+                    ReferenceArchitectureBindingEndpoint {
+                        wire,
+                        end: WireEnd::A,
+                    },
+                    ReferenceArchitectureBindingEndpoint {
+                        wire,
+                        end: WireEnd::B,
+                    },
+                ]],
+            }
+        });
+    ReferenceArchitectureArtifact {
+        format_version,
+        hash_algorithm_id: HashAlgorithmId::Blake3V1,
+        display_name: "S1-M5 fuzz schedule fixture".to_owned(),
+        contract: SimulationContract {
+            semantics_version: SemanticsVersion::AonV1,
+            numeric_profile_hash: profile_hash,
+            physical_scale_profile_hash: profile_hash,
+            balance_profile_hash: profile_hash,
+        },
+        operations: vec![
+            ReferenceArchitectureOperation::PlaceJunction(ReferenceJunction {
+                id: reference_architecture_id(1),
+                routing_domain: ReferenceArchitectureRoutingDomain::OpenWorld,
+                position: FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+            }),
+            ReferenceArchitectureOperation::PlaceWire(ReferenceWire {
+                id: wire,
+                routing_domain: ReferenceArchitectureRoutingDomain::OpenWorld,
+                points: vec![
+                    FixedVec2::new(Fixed::ZERO, Fixed::ZERO),
+                    FixedVec2::new(Fixed(1), Fixed::ZERO),
+                ],
+                endpoint_a: ReferenceArchitectureEndpoint::MainCore,
+                endpoint_b: ReferenceArchitectureEndpoint::Junction(reference_architecture_id(1)),
+            }),
+        ],
+        role_bindings: Vec::new(),
+        observation_bindings: Vec::new(),
+        materialization_schedule,
+    }
+}
+
+fn s1m5_architecture_input(source: &str) -> Vec<u8> {
+    let mut input = Vec::with_capacity(source.len() + 1);
+    input.push(0);
+    input.extend_from_slice(source.as_bytes());
+    input
+}
 
 const DECODER_CORPUS: &[(&str, &[u8])] = &[
     (
@@ -187,6 +261,28 @@ const S1M4_KERNEL_COVERAGE: &[u8] = include_bytes!("../corpus/s1m4/kernel-covera
 const S1M4_RUNTIME_COVERAGE: &[u8] = include_bytes!("../corpus/s1m4/runtime-coverage.case");
 const S1M4_THERMAL_TWO_TICK_COVERAGE: &[u8] =
     include_bytes!("../corpus/s1m4/thermal-two-tick.case");
+const S1M5_REFERENCE_CORPUS: &[(&str, &[u8])] = &[
+    (
+        "architecture-unknown-field",
+        include_bytes!("../corpus/s1m5-reference/architecture-unknown-field.case"),
+    ),
+    (
+        "pair-truncated",
+        include_bytes!("../corpus/s1m5-reference/pair-truncated.case"),
+    ),
+    (
+        "experiment-unknown-field",
+        include_bytes!("../corpus/s1m5-reference/experiment-unknown-field.case"),
+    ),
+    (
+        "metric-set-duplicate",
+        include_bytes!("../corpus/s1m5-reference/metric-set-duplicate.case"),
+    ),
+    (
+        "metric-artifact-trailing",
+        include_bytes!("../corpus/s1m5-reference/metric-artifact-trailing.case"),
+    ),
+];
 const S1M4_REPLAY_ARTIFACTS: &[(&str, &[u8])] = &[
     (
         "construction-partial-multibuilder-v1",
@@ -216,6 +312,186 @@ fn decoder_regression_corpus_never_panics() {
         let result = catch_unwind(AssertUnwindSafe(|| exercise_decoder(bytes)));
         assert!(result.is_ok(), "decoder regression case `{name}` panicked");
     }
+}
+
+#[test]
+fn s1m5_reference_artifact_corpus_is_bounded_deterministic_and_panic_free() {
+    let expected_targets = [
+        S1m5ReferenceTarget::Architecture,
+        S1m5ReferenceTarget::Pair,
+        S1m5ReferenceTarget::ExperimentPlan,
+        S1m5ReferenceTarget::MetricSet,
+        S1m5ReferenceTarget::MetricArtifact,
+    ];
+    for ((name, bytes), expected_target) in
+        S1M5_REFERENCE_CORPUS.iter().copied().zip(expected_targets)
+    {
+        let observation = catch_unwind(AssertUnwindSafe(|| {
+            exercise_s1m5_reference_artifacts(bytes)
+        }))
+        .unwrap_or_else(|_| panic!("S1-M5 reference corpus case `{name}` panicked"));
+        assert_eq!(
+            observation.target, expected_target,
+            "S1-M5 reference corpus case `{name}` changed its selector boundary"
+        );
+        assert_eq!(
+            exercise_s1m5_reference_artifacts(bytes),
+            observation,
+            "S1-M5 reference corpus case `{name}` changed strict outcome"
+        );
+        assert!(
+            observation.result.is_err(),
+            "malformed S1-M5 corpus case `{name}` was accepted"
+        );
+    }
+
+    let oversized = vec![0xa5; 32 * 1024];
+    let observation = exercise_s1m5_reference_artifacts(&oversized);
+    assert_eq!(observation.payload_len, 16 * 1024 - 1);
+    assert_eq!(
+        observation,
+        exercise_s1m5_reference_artifacts(&oversized[..16 * 1024]),
+        "bytes beyond the documented S1-M5 bound must be ignored"
+    );
+}
+
+#[test]
+fn s1m5_architecture_v1_v2_schedules_reach_plan_and_malformed_cases_fail_closed() {
+    let v1 = reference_architecture_fixture(ReferenceArchitectureFormatVersion::V1);
+    let v2 = reference_architecture_fixture(ReferenceArchitectureFormatVersion::V2);
+    let v1_bytes = encode_reference_architecture_artifact(&v1)
+        .expect("the valid v1 architecture fuzz seed encodes");
+    let v2_bytes = encode_reference_architecture_artifact(&v2)
+        .expect("the valid v2 architecture fuzz seed encodes");
+
+    for (name, artifact, source) in [("v1", &v1, &v1_bytes), ("v2", &v2, &v2_bytes)] {
+        let input = s1m5_architecture_input(source);
+        let observation = catch_unwind(AssertUnwindSafe(|| {
+            exercise_s1m5_reference_artifacts(&input)
+        }))
+        .unwrap_or_else(|_| panic!("valid S1-M5 Architecture {name} seed panicked"));
+        assert_eq!(observation.target, S1m5ReferenceTarget::Architecture);
+        let canonical = observation
+            .result
+            .unwrap_or_else(|error| panic!("valid Architecture {name} was rejected: {error}"));
+        assert_eq!(canonical.canonical_len, source.len());
+        assert_eq!(
+            canonical.semantic_hash,
+            Some(artifact.semantic_hash().expect("the valid seed hashes"))
+        );
+    }
+
+    let missing_schedule = v1_bytes.replacen("\"formatVersion\": 1", "\"formatVersion\": 2", 1);
+    let unexpected_schedule = v2_bytes.replacen("\"formatVersion\": 2", "\"formatVersion\": 1", 1);
+    let v2_prefix = missing_schedule
+        .strip_suffix("}\n")
+        .expect("canonical Architecture JSON has one final object delimiter");
+    let empty_schedule = format!(
+        "{v2_prefix},\n  \"materializationSchedule\": {{\n    \"bindingBatches\": []\n  }}\n}}\n"
+    );
+    let noncanonical_schedule = format!(
+        "{v2_prefix},\n  \"materializationSchedule\": {{\n    \"bindingBatches\": [[{{\"wire\": 2, \"end\": \"a\"}}, {{\"wire\": 2, \"end\": \"a\"}}, {{\"wire\": 2, \"end\": \"b\"}}]]\n  }}\n}}\n"
+    );
+
+    for (name, source, expected) in [
+        (
+            "missing-v2-schedule",
+            missing_schedule,
+            "v2 requires materializationSchedule",
+        ),
+        (
+            "unexpected-v1-schedule",
+            unexpected_schedule,
+            "v1 forbids materializationSchedule",
+        ),
+        (
+            "empty-v2-schedule",
+            empty_schedule,
+            "binding batch count must be in 1..=16",
+        ),
+        (
+            "noncanonical-v2-schedule",
+            noncanonical_schedule,
+            "not in canonical endpoint order",
+        ),
+    ] {
+        let input = s1m5_architecture_input(&source);
+        let observation = catch_unwind(AssertUnwindSafe(|| {
+            exercise_s1m5_reference_artifacts(&input)
+        }))
+        .unwrap_or_else(|_| panic!("malformed S1-M5 schedule case `{name}` panicked"));
+        let error = observation
+            .result
+            .expect_err("a malformed S1-M5 schedule must fail closed");
+        assert!(
+            error.contains(expected),
+            "malformed schedule case `{name}` returned `{error}`"
+        );
+    }
+}
+
+#[test]
+fn s1m5_metric_set_accepted_path_reaches_a_canonical_hash_stable_fixed_point() {
+    let definition = ReferenceMetricSetArtifact::v1(vec![ReferenceResponseObservationSpec {
+        name: "fuzz.response".to_owned(),
+        hostile_entry_binding: "sensor.fuzz.0".to_owned(),
+        defense_contact_binding: "defense.fuzz.0".to_owned(),
+        enemy_ordinal: 0,
+    }])
+    .expect("the retained fuzz Metric Set is valid");
+    let bytes = encode_reference_metric_set_artifact(&definition)
+        .expect("the retained fuzz Metric Set encodes");
+    let mut input = Vec::with_capacity(bytes.len() + 1);
+    input.push(b'D');
+    input.extend_from_slice(&bytes);
+
+    let first = exercise_s1m5_reference_artifacts(&input);
+    let second = exercise_s1m5_reference_artifacts(&input);
+    assert_eq!(first, second);
+    let canonical = first
+        .result
+        .expect("the retained Metric Set reaches the accepted strict path");
+    assert_eq!(canonical.canonical_len, bytes.len());
+    assert_eq!(
+        canonical.semantic_hash,
+        Some(definition.semantic_hash().unwrap())
+    );
+}
+
+#[test]
+fn s1m5_generated_byte_streams_are_bounded_deterministic_and_panic_free() {
+    let mut state = 0x51a5_1f5e_d12a_7005_u64;
+    let mut reached_targets = [false; 5];
+    for case_index in 0..2_048_usize {
+        let length = case_index % 257;
+        let mut bytes = vec![0_u8; length];
+        for byte in &mut bytes {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = state.to_le_bytes()[0];
+        }
+        let first = catch_unwind(AssertUnwindSafe(|| {
+            exercise_s1m5_reference_artifacts(&bytes)
+        }))
+        .unwrap_or_else(|_| panic!("S1-M5 decoder lane panicked for case {case_index}"));
+        reached_targets[match first.target {
+            S1m5ReferenceTarget::Architecture => 0,
+            S1m5ReferenceTarget::Pair => 1,
+            S1m5ReferenceTarget::ExperimentPlan => 2,
+            S1m5ReferenceTarget::MetricSet => 3,
+            S1m5ReferenceTarget::MetricArtifact => 4,
+        }] = true;
+        assert_eq!(
+            first,
+            exercise_s1m5_reference_artifacts(&bytes),
+            "S1-M5 decoder lane changed outcome for case {case_index}"
+        );
+    }
+    assert!(
+        reached_targets.into_iter().all(|reached| reached),
+        "the generated S1-M5 stream set must reach all five strict decoder boundaries"
+    );
 }
 
 #[test]

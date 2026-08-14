@@ -240,6 +240,10 @@ $fuzzRegressionTests = @(
     "s1m4_scenario_balance_and_all_replays_reach_bounded_strict_decoders",
     "s1m4_command_tag8_corpus_reaches_all_target_kinds_and_both_encoders",
     "s1m4_stateful_runtime_corpus_reaches_construction_c09_and_run_end",
+    "s1m5_architecture_v1_v2_schedules_reach_plan_and_malformed_cases_fail_closed",
+    "s1m5_metric_set_accepted_path_reaches_a_canonical_hash_stable_fixed_point",
+    "s1m5_generated_byte_streams_are_bounded_deterministic_and_panic_free",
+    "s1m5_reference_artifact_corpus_is_bounded_deterministic_and_panic_free",
     "signal_runtime_regression_corpus_replays_without_panics_or_silent_run_errors",
     "topology_runtime_regression_corpus_replays_without_panics_or_silent_run_errors"
 )

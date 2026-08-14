@@ -1,0 +1,70 @@
+{
+  "formatVersion": 1,
+  "hashAlgorithmId": "blake3-v1",
+  "metricSetId": "s1-m5-reference-baseline-v1",
+  "metrics": [
+    "totalWireLengthRaw",
+    "totalWireNcu",
+    "sharedWireLengthRaw",
+    "sensorWireLengthRaw",
+    "trunkWireLengthRaw",
+    "defenseWireLengthRaw",
+    "otherWireLengthRaw",
+    "gateCount",
+    "andCount",
+    "orCount",
+    "notCount",
+    "plannedConstructionWork",
+    "buildCommandCount",
+    "commandLogHash",
+    "survivedBoundary",
+    "completedTicks",
+    "terminalStatus",
+    "measurementStartCoreIntegrity",
+    "finalCoreIntegrity",
+    "coreDamage",
+    "powerGeneration",
+    "powerNominalDemand",
+    "powerGranted",
+    "powerSourceCost",
+    "powerTransmissionLoss",
+    "brownoutTicks",
+    "constructionRequested",
+    "constructionNominalPower",
+    "constructionGrantedWork",
+    "constructionAppliedWork",
+    "heatGenerated",
+    "networkPeakUsedNcu",
+    "networkFinalUsedNcu",
+    "networkIntegralUsedNcu",
+    "supportDemandIntegral",
+    "enemyKills",
+    "responseLatencyTicks"
+  ],
+  "responseObservations": [
+    {
+      "name": "east.0",
+      "hostileEntryBinding": "sensor.east.0",
+      "defenseContactBinding": "defense.east.0",
+      "enemyOrdinal": 3
+    },
+    {
+      "name": "north.0",
+      "hostileEntryBinding": "sensor.north.0",
+      "defenseContactBinding": "defense.north.0",
+      "enemyOrdinal": 2
+    },
+    {
+      "name": "south.0",
+      "hostileEntryBinding": "sensor.south.0",
+      "defenseContactBinding": "defense.south.0",
+      "enemyOrdinal": 1
+    },
+    {
+      "name": "west.0",
+      "hostileEntryBinding": "sensor.west.0",
+      "defenseContactBinding": "defense.west.0",
+      "enemyOrdinal": 0
+    }
+  ]
+}

@@ -1,0 +1,2948 @@
+{
+  "scenarioPath": "../../scenarios/s1-m5-reference-architectures-v1.json",
+  "header": {
+    "formatVersion": 2,
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a",
+    "stateHashVersion": "aon-state-v7",
+    "worldGeneratorVersion": "aon-main-core-power-enemy-v1",
+    "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+    "initialStateHash": "19ed45e50382456315fb2e948ce4ebb9d582c4884b23081323b348210dffaec1",
+    "hashAlgorithmId": "blake3-v1"
+  },
+  "commands": [
+    {
+      "targetTick": 0,
+      "ordinal": 0,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": -4194304,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 1,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": -4194304
+        },
+        "routingArea": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 2,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 0,
+          "y": 4194304
+        },
+        "routingArea": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 0,
+      "ordinal": 3,
+      "command": {
+        "type": "place-fixed-substrate",
+        "origin": {
+          "x": 4194304,
+          "y": 0
+        },
+        "routingArea": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        },
+        "footprint": {
+          "min": {
+            "x": -1835008,
+            "y": -1835008
+          },
+          "max": {
+            "x": 1835008,
+            "y": 1835008
+          }
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 0,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "position": {
+          "x": -4063232,
+          "y": 131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 1,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "position": {
+          "x": -4325376,
+          "y": 131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 2,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "position": {
+          "x": -4325376,
+          "y": -131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 3,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "position": {
+          "x": -4063232,
+          "y": -131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 4,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "position": {
+          "x": 131072,
+          "y": -4063232
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 5,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "position": {
+          "x": -131072,
+          "y": -4063232
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 6,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "position": {
+          "x": -131072,
+          "y": -4325376
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 7,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "position": {
+          "x": 131072,
+          "y": -4325376
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 8,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "position": {
+          "x": 131072,
+          "y": 4325376
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 9,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "position": {
+          "x": -131072,
+          "y": 4325376
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 10,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "position": {
+          "x": -131072,
+          "y": 4063232
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 11,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "position": {
+          "x": 131072,
+          "y": 4063232
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 12,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "position": {
+          "x": 4325376,
+          "y": 131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 13,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "position": {
+          "x": 4063232,
+          "y": 131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 14,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "position": {
+          "x": 4063232,
+          "y": -131072
+        }
+      }
+    },
+    {
+      "targetTick": 1,
+      "ordinal": 15,
+      "command": {
+        "type": "place-junction",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "position": {
+          "x": 4325376,
+          "y": -131072
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 0,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4128768,
+            "y": 32768
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 1,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4177920,
+            "y": 16384
+          },
+          {
+            "x": -4063232,
+            "y": 131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 2,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4063232,
+            "y": 131072
+          },
+          {
+            "x": -4112384,
+            "y": -49152
+          },
+          {
+            "x": -4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 3,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4210688,
+            "y": -49152
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 4,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4210688,
+            "y": 16384
+          },
+          {
+            "x": -4325376,
+            "y": 131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 5,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4325376,
+            "y": 131072
+          },
+          {
+            "x": -4194304,
+            "y": 131072
+          },
+          {
+            "x": -4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 6,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4259840,
+            "y": -32768
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 7,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4210688,
+            "y": -16384
+          },
+          {
+            "x": -4325376,
+            "y": -131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 8,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4325376,
+            "y": -131072
+          },
+          {
+            "x": -4325376,
+            "y": 0
+          },
+          {
+            "x": -4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 9,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4227072,
+            "y": 16384
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 10,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4194304,
+            "y": 0
+          },
+          {
+            "x": -4243456,
+            "y": -163840
+          },
+          {
+            "x": -4063232,
+            "y": -131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 11,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 10
+        },
+        "points": [
+          {
+            "x": -4063232,
+            "y": -131072
+          },
+          {
+            "x": -4227072,
+            "y": -131072
+          },
+          {
+            "x": -4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 12,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": 65536,
+            "y": -4161536
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 13,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": 16384,
+            "y": -4177920
+          },
+          {
+            "x": 131072,
+            "y": -4063232
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 14,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 131072,
+            "y": -4063232
+          },
+          {
+            "x": 81920,
+            "y": -4243456
+          },
+          {
+            "x": 0,
+            "y": -4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 15,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -16384,
+            "y": -4243456
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 16,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -16384,
+            "y": -4177920
+          },
+          {
+            "x": -131072,
+            "y": -4063232
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 17,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": -131072,
+            "y": -4063232
+          },
+          {
+            "x": 0,
+            "y": -4063232
+          },
+          {
+            "x": 0,
+            "y": -4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 18,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -65536,
+            "y": -4227072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 19,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -16384,
+            "y": -4210688
+          },
+          {
+            "x": -131072,
+            "y": -4325376
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 20,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": -131072,
+            "y": -4325376
+          },
+          {
+            "x": -131072,
+            "y": -4194304
+          },
+          {
+            "x": 0,
+            "y": -4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 21,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -32768,
+            "y": -4177920
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 22,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": -4194304
+          },
+          {
+            "x": -49152,
+            "y": -4358144
+          },
+          {
+            "x": 131072,
+            "y": -4325376
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 23,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 11
+        },
+        "points": [
+          {
+            "x": 131072,
+            "y": -4325376
+          },
+          {
+            "x": -32768,
+            "y": -4325376
+          },
+          {
+            "x": 0,
+            "y": -4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 24,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": 65536,
+            "y": 4227072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 25,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": 16384,
+            "y": 4210688
+          },
+          {
+            "x": 131072,
+            "y": 4325376
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 26,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 131072,
+            "y": 4325376
+          },
+          {
+            "x": 81920,
+            "y": 4145152
+          },
+          {
+            "x": 0,
+            "y": 4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 27,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -16384,
+            "y": 4145152
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 28,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -16384,
+            "y": 4210688
+          },
+          {
+            "x": -131072,
+            "y": 4325376
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 29,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": -131072,
+            "y": 4325376
+          },
+          {
+            "x": 0,
+            "y": 4325376
+          },
+          {
+            "x": 0,
+            "y": 4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 30,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -65536,
+            "y": 4161536
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 31,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -16384,
+            "y": 4177920
+          },
+          {
+            "x": -131072,
+            "y": 4063232
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 32,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": -131072,
+            "y": 4063232
+          },
+          {
+            "x": -131072,
+            "y": 4194304
+          },
+          {
+            "x": 0,
+            "y": 4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 33,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -32768,
+            "y": 4210688
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 34,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 0,
+            "y": 4194304
+          },
+          {
+            "x": -49152,
+            "y": 4030464
+          },
+          {
+            "x": 131072,
+            "y": 4063232
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 35,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 12
+        },
+        "points": [
+          {
+            "x": 131072,
+            "y": 4063232
+          },
+          {
+            "x": -32768,
+            "y": 4063232
+          },
+          {
+            "x": 0,
+            "y": 4194304
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 36,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4259840,
+            "y": 32768
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 37,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4210688,
+            "y": 16384
+          },
+          {
+            "x": 4325376,
+            "y": 131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 38,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4325376,
+            "y": 131072
+          },
+          {
+            "x": 4276224,
+            "y": -49152
+          },
+          {
+            "x": 4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 39,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4177920,
+            "y": -49152
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 40,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4177920,
+            "y": 16384
+          },
+          {
+            "x": 4063232,
+            "y": 131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 41,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4063232,
+            "y": 131072
+          },
+          {
+            "x": 4194304,
+            "y": 131072
+          },
+          {
+            "x": 4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 42,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4128768,
+            "y": -32768
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 43,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4177920,
+            "y": -16384
+          },
+          {
+            "x": 4063232,
+            "y": -131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 44,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4063232,
+            "y": -131072
+          },
+          {
+            "x": 4063232,
+            "y": 0
+          },
+          {
+            "x": 4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 45,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4161536,
+            "y": 16384
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 46,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4194304,
+            "y": 0
+          },
+          {
+            "x": 4145152,
+            "y": -163840
+          },
+          {
+            "x": 4325376,
+            "y": -131072
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 2,
+      "ordinal": 47,
+      "command": {
+        "type": "place-wire",
+        "routingDomain": {
+          "kind": "fixed-substrate",
+          "substrate": 13
+        },
+        "points": [
+          {
+            "x": 4325376,
+            "y": -131072
+          },
+          {
+            "x": 4161536,
+            "y": -131072
+          },
+          {
+            "x": 4194304,
+            "y": 0
+          }
+        ],
+        "endpointA": {
+          "kind": "free"
+        },
+        "endpointB": {
+          "kind": "free"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 0,
+      "command": {
+        "type": "bind-port",
+        "wire": 31,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 30,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 1,
+      "command": {
+        "type": "bind-port",
+        "wire": 31,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 14
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 2,
+      "command": {
+        "type": "bind-port",
+        "wire": 32,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 14
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 3,
+      "command": {
+        "type": "bind-port",
+        "wire": 34,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 33,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 4,
+      "command": {
+        "type": "bind-port",
+        "wire": 34,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 15
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 5,
+      "command": {
+        "type": "bind-port",
+        "wire": 35,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 15
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 6,
+      "command": {
+        "type": "bind-port",
+        "wire": 37,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 36,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 7,
+      "command": {
+        "type": "bind-port",
+        "wire": 37,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 16
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 8,
+      "command": {
+        "type": "bind-port",
+        "wire": 38,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 16
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 9,
+      "command": {
+        "type": "bind-port",
+        "wire": 40,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 39,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 10,
+      "command": {
+        "type": "bind-port",
+        "wire": 40,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 17
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 11,
+      "command": {
+        "type": "bind-port",
+        "wire": 41,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 17
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 12,
+      "command": {
+        "type": "bind-port",
+        "wire": 43,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 42,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 13,
+      "command": {
+        "type": "bind-port",
+        "wire": 43,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 18
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 14,
+      "command": {
+        "type": "bind-port",
+        "wire": 44,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 18
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 15,
+      "command": {
+        "type": "bind-port",
+        "wire": 46,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 45,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 16,
+      "command": {
+        "type": "bind-port",
+        "wire": 46,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 19
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 17,
+      "command": {
+        "type": "bind-port",
+        "wire": 47,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 19
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 18,
+      "command": {
+        "type": "bind-port",
+        "wire": 49,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 48,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 19,
+      "command": {
+        "type": "bind-port",
+        "wire": 49,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 20
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 20,
+      "command": {
+        "type": "bind-port",
+        "wire": 50,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 20
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 21,
+      "command": {
+        "type": "bind-port",
+        "wire": 52,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 51,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 22,
+      "command": {
+        "type": "bind-port",
+        "wire": 52,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 21
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 23,
+      "command": {
+        "type": "bind-port",
+        "wire": 53,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 21
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 24,
+      "command": {
+        "type": "bind-port",
+        "wire": 55,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 54,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 25,
+      "command": {
+        "type": "bind-port",
+        "wire": 55,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 22
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 26,
+      "command": {
+        "type": "bind-port",
+        "wire": 56,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 22
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 27,
+      "command": {
+        "type": "bind-port",
+        "wire": 58,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 57,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 28,
+      "command": {
+        "type": "bind-port",
+        "wire": 58,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 23
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 29,
+      "command": {
+        "type": "bind-port",
+        "wire": 59,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 23
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 30,
+      "command": {
+        "type": "bind-port",
+        "wire": 61,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 60,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 31,
+      "command": {
+        "type": "bind-port",
+        "wire": 61,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 24
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 32,
+      "command": {
+        "type": "bind-port",
+        "wire": 62,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 24
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 33,
+      "command": {
+        "type": "bind-port",
+        "wire": 64,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 63,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 34,
+      "command": {
+        "type": "bind-port",
+        "wire": 64,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 25
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 35,
+      "command": {
+        "type": "bind-port",
+        "wire": 65,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 25
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 36,
+      "command": {
+        "type": "bind-port",
+        "wire": 67,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 66,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 37,
+      "command": {
+        "type": "bind-port",
+        "wire": 67,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 26
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 38,
+      "command": {
+        "type": "bind-port",
+        "wire": 68,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 26
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 39,
+      "command": {
+        "type": "bind-port",
+        "wire": 70,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 69,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 40,
+      "command": {
+        "type": "bind-port",
+        "wire": 70,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 27
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 41,
+      "command": {
+        "type": "bind-port",
+        "wire": 71,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 27
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 42,
+      "command": {
+        "type": "bind-port",
+        "wire": 73,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 72,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 43,
+      "command": {
+        "type": "bind-port",
+        "wire": 73,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 28
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 44,
+      "command": {
+        "type": "bind-port",
+        "wire": 74,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 28
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 45,
+      "command": {
+        "type": "bind-port",
+        "wire": 76,
+        "end": "a",
+        "target": {
+          "kind": "wire-sense-port",
+          "wire": 75,
+          "end": "a"
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 46,
+      "command": {
+        "type": "bind-port",
+        "wire": 76,
+        "end": "b",
+        "target": {
+          "kind": "junction",
+          "junction": 29
+        }
+      }
+    },
+    {
+      "targetTick": 3,
+      "ordinal": 47,
+      "command": {
+        "type": "bind-port",
+        "wire": 77,
+        "end": "a",
+        "target": {
+          "kind": "junction",
+          "junction": 29
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 0,
+      "command": {
+        "type": "bind-port",
+        "wire": 30,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 1,
+      "command": {
+        "type": "bind-port",
+        "wire": 32,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 2,
+      "command": {
+        "type": "bind-port",
+        "wire": 33,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 3,
+      "command": {
+        "type": "bind-port",
+        "wire": 35,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 4,
+      "command": {
+        "type": "bind-port",
+        "wire": 36,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 5,
+      "command": {
+        "type": "bind-port",
+        "wire": 38,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 6,
+      "command": {
+        "type": "bind-port",
+        "wire": 39,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 7,
+      "command": {
+        "type": "bind-port",
+        "wire": 41,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 2
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 8,
+      "command": {
+        "type": "bind-port",
+        "wire": 42,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 9,
+      "command": {
+        "type": "bind-port",
+        "wire": 44,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 10,
+      "command": {
+        "type": "bind-port",
+        "wire": 45,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 11,
+      "command": {
+        "type": "bind-port",
+        "wire": 47,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 12,
+      "command": {
+        "type": "bind-port",
+        "wire": 48,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 13,
+      "command": {
+        "type": "bind-port",
+        "wire": 50,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 14,
+      "command": {
+        "type": "bind-port",
+        "wire": 51,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 15,
+      "command": {
+        "type": "bind-port",
+        "wire": 53,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 3
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 16,
+      "command": {
+        "type": "bind-port",
+        "wire": 54,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 17,
+      "command": {
+        "type": "bind-port",
+        "wire": 56,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 18,
+      "command": {
+        "type": "bind-port",
+        "wire": 57,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 19,
+      "command": {
+        "type": "bind-port",
+        "wire": 59,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 20,
+      "command": {
+        "type": "bind-port",
+        "wire": 60,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 21,
+      "command": {
+        "type": "bind-port",
+        "wire": 62,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 22,
+      "command": {
+        "type": "bind-port",
+        "wire": 63,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 23,
+      "command": {
+        "type": "bind-port",
+        "wire": 65,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 4
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 24,
+      "command": {
+        "type": "bind-port",
+        "wire": 66,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 25,
+      "command": {
+        "type": "bind-port",
+        "wire": 68,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 26,
+      "command": {
+        "type": "bind-port",
+        "wire": 69,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 27,
+      "command": {
+        "type": "bind-port",
+        "wire": 71,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 28,
+      "command": {
+        "type": "bind-port",
+        "wire": 72,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 29,
+      "command": {
+        "type": "bind-port",
+        "wire": 74,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 30,
+      "command": {
+        "type": "bind-port",
+        "wire": 75,
+        "end": "a",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    },
+    {
+      "targetTick": 14,
+      "ordinal": 31,
+      "command": {
+        "type": "bind-port",
+        "wire": 77,
+        "end": "b",
+        "target": {
+          "kind": "power-source-anchor",
+          "power_source": 5
+        }
+      }
+    }
+  ],
+  "worldInputs": [],
+  "checkpoints": [
+    {
+      "nextTick": 0,
+      "stateHash": "19ed45e50382456315fb2e948ce4ebb9d582c4884b23081323b348210dffaec1"
+    },
+    {
+      "nextTick": 1,
+      "stateHash": "95759a4cb7b97142e82c1211af1d7de88f771d5f7e6d2a5afb18e8147052354a"
+    },
+    {
+      "nextTick": 2,
+      "stateHash": "672f4b3311cd6cabea2c9a3f6e00692fb70a9dffc851f36fce92aaf528226d13"
+    },
+    {
+      "nextTick": 3,
+      "stateHash": "b85c88b22e94d6509c488d8d975fb049058b04376eb00eed6fbbc51fcd33d5b6"
+    },
+    {
+      "nextTick": 4,
+      "stateHash": "22cc81d66e1cd4aaf9803465dbde153a8f323094c6b9508a74a27ceec0f27de7"
+    },
+    {
+      "nextTick": 5,
+      "stateHash": "1c211f6ae305143a11a7fac13f8359eff804cfaeb09d20ad1f6b31f7d0ca97d2"
+    },
+    {
+      "nextTick": 6,
+      "stateHash": "449bf3103bc06aaf06b1aef4e2d9e3de0764662622a5484fe8b9c09bf499bbf0"
+    },
+    {
+      "nextTick": 7,
+      "stateHash": "028b7241b3a587335f44390dd66927f315fc8c7eb341114bb0dcbee9caf570df"
+    },
+    {
+      "nextTick": 8,
+      "stateHash": "31ea069769f02e6c279c29db56acb2dd7d39cd44a8fe899ca3f3daa6cd9d120d"
+    },
+    {
+      "nextTick": 9,
+      "stateHash": "e5e58f8853dea7683416a59c4b7fa6cfa9aa5ea14cefbfe8036e18ea0b2bd378"
+    },
+    {
+      "nextTick": 10,
+      "stateHash": "1d83712cb9f3b743e691537e33f8325e0e9e8ba9be14b8810e7b81fdd15902e7"
+    },
+    {
+      "nextTick": 11,
+      "stateHash": "0f70bdb50ca854b913401a20826268294e3fa03ae91aaf93cb0ed2e08f07d836"
+    },
+    {
+      "nextTick": 12,
+      "stateHash": "95d3d22f0f90daa7a8d72286d873a9eb904de7368b308d6c9e07a2cf92174856"
+    },
+    {
+      "nextTick": 13,
+      "stateHash": "683224a93d30d06b62df1ae82c73cf728ae6f4e16008e0a97158319b1b2b3e49"
+    },
+    {
+      "nextTick": 14,
+      "stateHash": "09f131134aeda5c4bc28a5458b8859b25535f1401f77e8eeea183ccd7eb0195b"
+    },
+    {
+      "nextTick": 15,
+      "stateHash": "94e690a9699ca8a3b9d48ec6400168ebdbd861346bd14a63e5078aa447a757eb"
+    },
+    {
+      "nextTick": 16,
+      "stateHash": "2685943247ab1f991f66d6549c94336e65f87f953a85465c28b241fd7a962195"
+    },
+    {
+      "nextTick": 17,
+      "stateHash": "42f5f0ec429e29d2e9bff82f291f89e2ef0b35bfe249785ab82d3b7f3ed89b10"
+    },
+    {
+      "nextTick": 18,
+      "stateHash": "23bc9c62b77d5b49a50dbf03b2a41a83764bdbfeef3391fc12e2a71036efd3c7"
+    },
+    {
+      "nextTick": 19,
+      "stateHash": "1279b2266be6041fede48f279f47bf0d0d34eedf5356848986d368f97845cede"
+    },
+    {
+      "nextTick": 20,
+      "stateHash": "21edcee94c030e79f8deff0a6c06d894a13cf90cffcc47047addd99205900581"
+    }
+  ]
+}

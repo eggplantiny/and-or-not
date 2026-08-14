@@ -1,0 +1,2491 @@
+{
+  "formatVersion": 2,
+  "hashAlgorithmId": "blake3-v1",
+  "displayName": "S1-M5 Brute reference architecture",
+  "contract": {
+    "semanticsVersion": "aon-semantics-v1",
+    "numericProfileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469",
+    "physicalScaleProfileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490",
+    "balanceProfileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a"
+  },
+  "operations": [
+    {
+      "kind": "placeFixedSubstrate",
+      "id": 1,
+      "origin": {
+        "x": -4194304,
+        "y": 0
+      },
+      "routing_area": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      },
+      "footprint": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      }
+    },
+    {
+      "kind": "placeFixedSubstrate",
+      "id": 2,
+      "origin": {
+        "x": 0,
+        "y": -4194304
+      },
+      "routing_area": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      },
+      "footprint": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      }
+    },
+    {
+      "kind": "placeFixedSubstrate",
+      "id": 3,
+      "origin": {
+        "x": 0,
+        "y": 4194304
+      },
+      "routing_area": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      },
+      "footprint": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      }
+    },
+    {
+      "kind": "placeFixedSubstrate",
+      "id": 4,
+      "origin": {
+        "x": 4194304,
+        "y": 0
+      },
+      "routing_area": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      },
+      "footprint": {
+        "min": {
+          "x": -1835008,
+          "y": -1835008
+        },
+        "max": {
+          "x": 1835008,
+          "y": 1835008
+        }
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 100,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4128768,
+          "y": 32768
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 0
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 101,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4177920,
+          "y": 16384
+        },
+        {
+          "x": -4063232,
+          "y": 131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 100,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 102
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 102,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "position": {
+        "x": -4063232,
+        "y": 131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 103,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4063232,
+          "y": 131072
+        },
+        {
+          "x": -4112384,
+          "y": -49152
+        },
+        {
+          "x": -4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 102
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 0
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 110,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4210688,
+          "y": -49152
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 0
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 111,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4210688,
+          "y": 16384
+        },
+        {
+          "x": -4325376,
+          "y": 131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 110,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 112
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 112,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "position": {
+        "x": -4325376,
+        "y": 131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 113,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4325376,
+          "y": 131072
+        },
+        {
+          "x": -4194304,
+          "y": 131072
+        },
+        {
+          "x": -4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 112
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 0
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 120,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4259840,
+          "y": -32768
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 0
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 121,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4210688,
+          "y": -16384
+        },
+        {
+          "x": -4325376,
+          "y": -131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 120,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 122
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 122,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "position": {
+        "x": -4325376,
+        "y": -131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 123,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4325376,
+          "y": -131072
+        },
+        {
+          "x": -4325376,
+          "y": 0
+        },
+        {
+          "x": -4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 122
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 0
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 130,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4227072,
+          "y": 16384
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 0
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 131,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4194304,
+          "y": 0
+        },
+        {
+          "x": -4243456,
+          "y": -163840
+        },
+        {
+          "x": -4063232,
+          "y": -131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 130,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 132
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 132,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "position": {
+        "x": -4063232,
+        "y": -131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 133,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 1
+      },
+      "points": [
+        {
+          "x": -4063232,
+          "y": -131072
+        },
+        {
+          "x": -4227072,
+          "y": -131072
+        },
+        {
+          "x": -4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 132
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 0
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 200,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": 65536,
+          "y": -4161536
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 1
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 201,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": 16384,
+          "y": -4177920
+        },
+        {
+          "x": 131072,
+          "y": -4063232
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 200,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 202
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 202,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "position": {
+        "x": 131072,
+        "y": -4063232
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 203,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 131072,
+          "y": -4063232
+        },
+        {
+          "x": 81920,
+          "y": -4243456
+        },
+        {
+          "x": 0,
+          "y": -4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 202
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 1
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 210,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -16384,
+          "y": -4243456
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 1
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 211,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -16384,
+          "y": -4177920
+        },
+        {
+          "x": -131072,
+          "y": -4063232
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 210,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 212
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 212,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "position": {
+        "x": -131072,
+        "y": -4063232
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 213,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": -131072,
+          "y": -4063232
+        },
+        {
+          "x": 0,
+          "y": -4063232
+        },
+        {
+          "x": 0,
+          "y": -4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 212
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 1
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 220,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -65536,
+          "y": -4227072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 1
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 221,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -16384,
+          "y": -4210688
+        },
+        {
+          "x": -131072,
+          "y": -4325376
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 220,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 222
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 222,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "position": {
+        "x": -131072,
+        "y": -4325376
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 223,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": -131072,
+          "y": -4325376
+        },
+        {
+          "x": -131072,
+          "y": -4194304
+        },
+        {
+          "x": 0,
+          "y": -4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 222
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 1
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 230,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -32768,
+          "y": -4177920
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 1
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 231,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": -4194304
+        },
+        {
+          "x": -49152,
+          "y": -4358144
+        },
+        {
+          "x": 131072,
+          "y": -4325376
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 230,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 232
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 232,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "position": {
+        "x": 131072,
+        "y": -4325376
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 233,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 2
+      },
+      "points": [
+        {
+          "x": 131072,
+          "y": -4325376
+        },
+        {
+          "x": -32768,
+          "y": -4325376
+        },
+        {
+          "x": 0,
+          "y": -4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 232
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 1
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 300,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": 65536,
+          "y": 4227072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 2
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 301,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": 16384,
+          "y": 4210688
+        },
+        {
+          "x": 131072,
+          "y": 4325376
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 300,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 302
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 302,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "position": {
+        "x": 131072,
+        "y": 4325376
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 303,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 131072,
+          "y": 4325376
+        },
+        {
+          "x": 81920,
+          "y": 4145152
+        },
+        {
+          "x": 0,
+          "y": 4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 302
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 2
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 310,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -16384,
+          "y": 4145152
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 2
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 311,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -16384,
+          "y": 4210688
+        },
+        {
+          "x": -131072,
+          "y": 4325376
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 310,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 312
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 312,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "position": {
+        "x": -131072,
+        "y": 4325376
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 313,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": -131072,
+          "y": 4325376
+        },
+        {
+          "x": 0,
+          "y": 4325376
+        },
+        {
+          "x": 0,
+          "y": 4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 312
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 2
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 320,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -65536,
+          "y": 4161536
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 2
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 321,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -16384,
+          "y": 4177920
+        },
+        {
+          "x": -131072,
+          "y": 4063232
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 320,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 322
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 322,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "position": {
+        "x": -131072,
+        "y": 4063232
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 323,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": -131072,
+          "y": 4063232
+        },
+        {
+          "x": -131072,
+          "y": 4194304
+        },
+        {
+          "x": 0,
+          "y": 4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 322
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 2
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 330,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -32768,
+          "y": 4210688
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 2
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 331,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 0,
+          "y": 4194304
+        },
+        {
+          "x": -49152,
+          "y": 4030464
+        },
+        {
+          "x": 131072,
+          "y": 4063232
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 330,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 332
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 332,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "position": {
+        "x": 131072,
+        "y": 4063232
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 333,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 3
+      },
+      "points": [
+        {
+          "x": 131072,
+          "y": 4063232
+        },
+        {
+          "x": -32768,
+          "y": 4063232
+        },
+        {
+          "x": 0,
+          "y": 4194304
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 332
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 2
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 400,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4259840,
+          "y": 32768
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 3
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 401,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4210688,
+          "y": 16384
+        },
+        {
+          "x": 4325376,
+          "y": 131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 400,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 402
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 402,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "position": {
+        "x": 4325376,
+        "y": 131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 403,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4325376,
+          "y": 131072
+        },
+        {
+          "x": 4276224,
+          "y": -49152
+        },
+        {
+          "x": 4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 402
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 3
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 410,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4177920,
+          "y": -49152
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 3
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 411,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4177920,
+          "y": 16384
+        },
+        {
+          "x": 4063232,
+          "y": 131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 410,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 412
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 412,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "position": {
+        "x": 4063232,
+        "y": 131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 413,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4063232,
+          "y": 131072
+        },
+        {
+          "x": 4194304,
+          "y": 131072
+        },
+        {
+          "x": 4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 412
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 3
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 420,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4128768,
+          "y": -32768
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 3
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 421,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4177920,
+          "y": -16384
+        },
+        {
+          "x": 4063232,
+          "y": -131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 420,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 422
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 422,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "position": {
+        "x": 4063232,
+        "y": -131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 423,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4063232,
+          "y": -131072
+        },
+        {
+          "x": 4063232,
+          "y": 0
+        },
+        {
+          "x": 4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 422
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 3
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 430,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4161536,
+          "y": 16384
+        }
+      ],
+      "endpoint_a": {
+        "kind": "powerSource",
+        "ordinal": 3
+      },
+      "endpoint_b": {
+        "kind": "free"
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 431,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4194304,
+          "y": 0
+        },
+        {
+          "x": 4145152,
+          "y": -163840
+        },
+        {
+          "x": 4325376,
+          "y": -131072
+        }
+      ],
+      "endpoint_a": {
+        "kind": "wireSensePort",
+        "wire": 430,
+        "end": "a"
+      },
+      "endpoint_b": {
+        "kind": "junction",
+        "junction": 432
+      }
+    },
+    {
+      "kind": "placeJunction",
+      "id": 432,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "position": {
+        "x": 4325376,
+        "y": -131072
+      }
+    },
+    {
+      "kind": "placeWire",
+      "id": 433,
+      "routing_domain": {
+        "kind": "fixedSubstrate",
+        "substrate": 4
+      },
+      "points": [
+        {
+          "x": 4325376,
+          "y": -131072
+        },
+        {
+          "x": 4161536,
+          "y": -131072
+        },
+        {
+          "x": 4194304,
+          "y": 0
+        }
+      ],
+      "endpoint_a": {
+        "kind": "junction",
+        "junction": 432
+      },
+      "endpoint_b": {
+        "kind": "powerSource",
+        "ordinal": 3
+      }
+    }
+  ],
+  "roleBindings": [
+    {
+      "name": "defense.east.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 403
+      }
+    },
+    {
+      "name": "defense.east.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 413
+      }
+    },
+    {
+      "name": "defense.east.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 423
+      }
+    },
+    {
+      "name": "defense.east.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 433
+      }
+    },
+    {
+      "name": "defense.north.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 303
+      }
+    },
+    {
+      "name": "defense.north.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 313
+      }
+    },
+    {
+      "name": "defense.north.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 323
+      }
+    },
+    {
+      "name": "defense.north.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 333
+      }
+    },
+    {
+      "name": "defense.south.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 203
+      }
+    },
+    {
+      "name": "defense.south.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 213
+      }
+    },
+    {
+      "name": "defense.south.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 223
+      }
+    },
+    {
+      "name": "defense.south.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 233
+      }
+    },
+    {
+      "name": "defense.west.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 103
+      }
+    },
+    {
+      "name": "defense.west.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 113
+      }
+    },
+    {
+      "name": "defense.west.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 123
+      }
+    },
+    {
+      "name": "defense.west.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 133
+      }
+    },
+    {
+      "name": "sensor.east.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 400
+      }
+    },
+    {
+      "name": "sensor.east.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 410
+      }
+    },
+    {
+      "name": "sensor.east.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 420
+      }
+    },
+    {
+      "name": "sensor.east.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 430
+      }
+    },
+    {
+      "name": "sensor.north.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 300
+      }
+    },
+    {
+      "name": "sensor.north.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 310
+      }
+    },
+    {
+      "name": "sensor.north.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 320
+      }
+    },
+    {
+      "name": "sensor.north.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 330
+      }
+    },
+    {
+      "name": "sensor.south.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 200
+      }
+    },
+    {
+      "name": "sensor.south.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 210
+      }
+    },
+    {
+      "name": "sensor.south.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 220
+      }
+    },
+    {
+      "name": "sensor.south.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 230
+      }
+    },
+    {
+      "name": "sensor.west.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 100
+      }
+    },
+    {
+      "name": "sensor.west.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 110
+      }
+    },
+    {
+      "name": "sensor.west.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 120
+      }
+    },
+    {
+      "name": "sensor.west.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 130
+      }
+    },
+    {
+      "name": "trunk.east.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 401
+      }
+    },
+    {
+      "name": "trunk.east.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 411
+      }
+    },
+    {
+      "name": "trunk.east.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 421
+      }
+    },
+    {
+      "name": "trunk.east.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 431
+      }
+    },
+    {
+      "name": "trunk.north.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 301
+      }
+    },
+    {
+      "name": "trunk.north.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 311
+      }
+    },
+    {
+      "name": "trunk.north.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 321
+      }
+    },
+    {
+      "name": "trunk.north.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 331
+      }
+    },
+    {
+      "name": "trunk.south.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 201
+      }
+    },
+    {
+      "name": "trunk.south.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 211
+      }
+    },
+    {
+      "name": "trunk.south.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 221
+      }
+    },
+    {
+      "name": "trunk.south.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 231
+      }
+    },
+    {
+      "name": "trunk.west.0",
+      "target": {
+        "kind": "localEntity",
+        "entity": 101
+      }
+    },
+    {
+      "name": "trunk.west.1",
+      "target": {
+        "kind": "localEntity",
+        "entity": 111
+      }
+    },
+    {
+      "name": "trunk.west.2",
+      "target": {
+        "kind": "localEntity",
+        "entity": 121
+      }
+    },
+    {
+      "name": "trunk.west.3",
+      "target": {
+        "kind": "localEntity",
+        "entity": 131
+      }
+    }
+  ],
+  "observationBindings": [
+    {
+      "name": "sensor.east.0",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 400,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.east.1",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 410,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.east.2",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 420,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.east.3",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 430,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.north.0",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 300,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.north.1",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 310,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.north.2",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 320,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.north.3",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 330,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.south.0",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 200,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.south.1",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 210,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.south.2",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 220,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.south.3",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 230,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.west.0",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 100,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.west.1",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 110,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.west.2",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 120,
+        "end": "a"
+      }
+    },
+    {
+      "name": "sensor.west.3",
+      "target": {
+        "kind": "wireSensePort",
+        "wire": 130,
+        "end": "a"
+      }
+    }
+  ],
+  "materializationSchedule": {
+    "bindingBatches": [
+      [
+        {
+          "wire": 101,
+          "end": "a"
+        },
+        {
+          "wire": 101,
+          "end": "b"
+        },
+        {
+          "wire": 103,
+          "end": "a"
+        },
+        {
+          "wire": 111,
+          "end": "a"
+        },
+        {
+          "wire": 111,
+          "end": "b"
+        },
+        {
+          "wire": 113,
+          "end": "a"
+        },
+        {
+          "wire": 121,
+          "end": "a"
+        },
+        {
+          "wire": 121,
+          "end": "b"
+        },
+        {
+          "wire": 123,
+          "end": "a"
+        },
+        {
+          "wire": 131,
+          "end": "a"
+        },
+        {
+          "wire": 131,
+          "end": "b"
+        },
+        {
+          "wire": 133,
+          "end": "a"
+        },
+        {
+          "wire": 201,
+          "end": "a"
+        },
+        {
+          "wire": 201,
+          "end": "b"
+        },
+        {
+          "wire": 203,
+          "end": "a"
+        },
+        {
+          "wire": 211,
+          "end": "a"
+        },
+        {
+          "wire": 211,
+          "end": "b"
+        },
+        {
+          "wire": 213,
+          "end": "a"
+        },
+        {
+          "wire": 221,
+          "end": "a"
+        },
+        {
+          "wire": 221,
+          "end": "b"
+        },
+        {
+          "wire": 223,
+          "end": "a"
+        },
+        {
+          "wire": 231,
+          "end": "a"
+        },
+        {
+          "wire": 231,
+          "end": "b"
+        },
+        {
+          "wire": 233,
+          "end": "a"
+        },
+        {
+          "wire": 301,
+          "end": "a"
+        },
+        {
+          "wire": 301,
+          "end": "b"
+        },
+        {
+          "wire": 303,
+          "end": "a"
+        },
+        {
+          "wire": 311,
+          "end": "a"
+        },
+        {
+          "wire": 311,
+          "end": "b"
+        },
+        {
+          "wire": 313,
+          "end": "a"
+        },
+        {
+          "wire": 321,
+          "end": "a"
+        },
+        {
+          "wire": 321,
+          "end": "b"
+        },
+        {
+          "wire": 323,
+          "end": "a"
+        },
+        {
+          "wire": 331,
+          "end": "a"
+        },
+        {
+          "wire": 331,
+          "end": "b"
+        },
+        {
+          "wire": 333,
+          "end": "a"
+        },
+        {
+          "wire": 401,
+          "end": "a"
+        },
+        {
+          "wire": 401,
+          "end": "b"
+        },
+        {
+          "wire": 403,
+          "end": "a"
+        },
+        {
+          "wire": 411,
+          "end": "a"
+        },
+        {
+          "wire": 411,
+          "end": "b"
+        },
+        {
+          "wire": 413,
+          "end": "a"
+        },
+        {
+          "wire": 421,
+          "end": "a"
+        },
+        {
+          "wire": 421,
+          "end": "b"
+        },
+        {
+          "wire": 423,
+          "end": "a"
+        },
+        {
+          "wire": 431,
+          "end": "a"
+        },
+        {
+          "wire": 431,
+          "end": "b"
+        },
+        {
+          "wire": 433,
+          "end": "a"
+        }
+      ],
+      [],
+      [],
+      [
+        {
+          "wire": 100,
+          "end": "a"
+        },
+        {
+          "wire": 103,
+          "end": "b"
+        },
+        {
+          "wire": 110,
+          "end": "a"
+        },
+        {
+          "wire": 113,
+          "end": "b"
+        },
+        {
+          "wire": 120,
+          "end": "a"
+        },
+        {
+          "wire": 123,
+          "end": "b"
+        },
+        {
+          "wire": 130,
+          "end": "a"
+        },
+        {
+          "wire": 133,
+          "end": "b"
+        },
+        {
+          "wire": 200,
+          "end": "a"
+        },
+        {
+          "wire": 203,
+          "end": "b"
+        },
+        {
+          "wire": 210,
+          "end": "a"
+        },
+        {
+          "wire": 213,
+          "end": "b"
+        },
+        {
+          "wire": 220,
+          "end": "a"
+        },
+        {
+          "wire": 223,
+          "end": "b"
+        },
+        {
+          "wire": 230,
+          "end": "a"
+        },
+        {
+          "wire": 233,
+          "end": "b"
+        },
+        {
+          "wire": 300,
+          "end": "a"
+        },
+        {
+          "wire": 303,
+          "end": "b"
+        },
+        {
+          "wire": 310,
+          "end": "a"
+        },
+        {
+          "wire": 313,
+          "end": "b"
+        },
+        {
+          "wire": 320,
+          "end": "a"
+        },
+        {
+          "wire": 323,
+          "end": "b"
+        },
+        {
+          "wire": 330,
+          "end": "a"
+        },
+        {
+          "wire": 333,
+          "end": "b"
+        },
+        {
+          "wire": 400,
+          "end": "a"
+        },
+        {
+          "wire": 403,
+          "end": "b"
+        },
+        {
+          "wire": 410,
+          "end": "a"
+        },
+        {
+          "wire": 413,
+          "end": "b"
+        },
+        {
+          "wire": 420,
+          "end": "a"
+        },
+        {
+          "wire": 423,
+          "end": "b"
+        },
+        {
+          "wire": 430,
+          "end": "a"
+        },
+        {
+          "wire": 433,
+          "end": "b"
+        }
+      ]
+    ]
+  }
+}

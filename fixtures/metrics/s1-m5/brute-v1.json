@@ -1,0 +1,81 @@
+{
+  "formatVersion": 1,
+  "hashAlgorithmId": "blake3-v1",
+  "metricSetId": "s1-m5-reference-baseline-v1",
+  "metricSetHash": "94c9377d27a4e8d0ddf7b184c723c264387a319b3169d242dea999da3cc94f04",
+  "runId": "97615b0e962d3869c956acdcd391591efcdc125ef2f311cf820bc6f3c4477ed0",
+  "boundaries": {
+    "buildEndTick": 18,
+    "measurementStartTick": 18,
+    "finalNextTick": 20,
+    "maxTicks": 20
+  },
+  "staticInventory": {
+    "totalWireLengthRaw": 9003568,
+    "totalWireNcu": 9003568,
+    "sharedWireLengthRaw": 0,
+    "sensorWireLengthRaw": 939964,
+    "trunkWireLengthRaw": 3641300,
+    "defenseWireLengthRaw": 4422304,
+    "otherWireLengthRaw": 0,
+    "gateCount": 0,
+    "andCount": 0,
+    "orCount": 0,
+    "notCount": 0,
+    "plannedConstructionWork": "12860",
+    "buildCommandCount": 148,
+    "commandLogHash": "59757b665ad723401d51c85c0312cadb7dd4505e1417d2606c86c2568332fa77"
+  },
+  "runtimeMetrics": {
+    "survivedBoundary": true,
+    "completedTicks": 20,
+    "terminalStatus": {
+      "kind": "running"
+    },
+    "measurementStartCoreIntegrity": 100,
+    "finalCoreIntegrity": 100,
+    "coreDamage": 0,
+    "powerGeneration": "800000",
+    "powerNominalDemand": "1020",
+    "powerGranted": "1020",
+    "powerSourceCost": "1020",
+    "powerTransmissionLoss": "0",
+    "brownoutTicks": 0,
+    "constructionRequested": "0",
+    "constructionNominalPower": "0",
+    "constructionGrantedWork": "0",
+    "constructionAppliedWork": "0",
+    "heatGenerated": "580",
+    "networkPeakUsedNcu": 9003568,
+    "networkFinalUsedNcu": 9003568,
+    "networkIntegralUsedNcu": "18007136",
+    "supportDemandIntegral": "132",
+    "enemyKills": 0
+  },
+  "responseLatencyTicks": [
+    {
+      "name": "east.0",
+      "stimulusTick": 18,
+      "responseTick": 19,
+      "latencyTicks": 1
+    },
+    {
+      "name": "north.0",
+      "stimulusTick": 18,
+      "responseTick": 19,
+      "latencyTicks": 1
+    },
+    {
+      "name": "south.0",
+      "stimulusTick": 18,
+      "responseTick": 19,
+      "latencyTicks": 1
+    },
+    {
+      "name": "west.0",
+      "stimulusTick": 18,
+      "responseTick": 19,
+      "latencyTicks": 1
+    }
+  ]
+}

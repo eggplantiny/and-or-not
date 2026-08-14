@@ -113,6 +113,19 @@ Certificate discard; mutually lethal Wire/Enemy completion and next-Phase-0 remo
 followed by exact next-Tick Thermal damage and pending destruction; and terminal-Tick commit
 followed by mutation-free `RunEnded` rejection.
 
+The `s1m5` target supplies at most 16 KiB to the five new strict, versioned Reference Architecture,
+Reference Pair, Experiment Plan v2, Reference Metric Set, and Reference Metric Artifact decoders.
+The first byte selects the boundary and is not included in the payload. Invalid UTF-8 and ordinary
+typed decoder errors are retained outcomes. Every accepted value must encode to a canonical
+fixed point on a second strict decode/encode pass; every hash-bearing artifact must also retain its
+semantic hash. Accepted Architecture v1 and v2 seeds must additionally produce the same typed
+`ReferenceArchitectureMaterializationPlan` before and after canonicalization. The deterministic
+suite covers unknown fields, truncation, duplicate keys, trailing input, all five selectors, valid v1/v2
+Architecture schedules, missing/unexpected/empty/noncanonical schedules, an accepted Metric Set,
+bounded suffix elision, deterministic outcomes, and panic freedom. Runtime materialization and
+metric-reducer arithmetic properties remain covered by their typed `aon-sim` tests because
+arbitrary bytes cannot safely invent a coherent Scenario package or runtime trace.
+
 Run the deterministic generated cases and retained regression corpus with:
 
 ```sh
@@ -133,6 +146,7 @@ cargo run -p aon-fuzz-harness --locked -- topology < input.bin
 cargo run -p aon-fuzz-harness --locked -- mobility < input.bin
 cargo run -p aon-fuzz-harness --locked -- capacity < input.bin
 cargo run -p aon-fuzz-harness --locked -- s1m4 < input.bin
+cargo run -p aon-fuzz-harness --locked -- s1m5 < input.bin
 cargo run -p aon-fuzz-harness --locked -- all < input.bin
 ```
 
@@ -143,6 +157,7 @@ failure. A panic, reference package/prefix failure, unexpected simulation invari
 disagreement between the two command encoders fails CI and CLI replay. Add every minimized
 reproducer under `corpus/decoder`, `corpus/replay`, `corpus/geometry`, `corpus/command`,
 `corpus/experiment`, `corpus/module`, `corpus/signal-runtime`, `corpus/topology-runtime`,
-`corpus/mobility-runtime`, `corpus/capacity-support`, or `corpus/s1m4` and register it in
+`corpus/mobility-runtime`, `corpus/capacity-support`, `corpus/s1m4`, or
+`corpus/s1m5-reference` and register it in
 `tests/regression_corpus.rs` so CI replays it
 permanently.

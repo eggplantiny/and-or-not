@@ -4,6 +4,9 @@ fixtures/scenarios/*.json text eol=lf
 fixtures/scenarios/**/*.json text eol=lf
 fixtures/experiments/*.json text eol=lf
 fixtures/experiments/*.txt text eol=lf
+fixtures/designs/*.json text eol=lf
+fixtures/metrics/*.json text eol=lf
+fixtures/metrics/**/*.json text eol=lf
 fixtures/modules/*.json text eol=lf
 profiles/**/*.json text eol=lf
 docs/AON_*_Canonical_Decisions_v*.md text eol=lf
@@ -11,3 +14,4 @@ crates/aon-sim/tests/fixtures/replay-*.json text eol=lf
 crates/aon-fuzz-harness/corpus/mobility-runtime/*.case binary
 crates/aon-fuzz-harness/corpus/experiment/*.case binary
 crates/aon-fuzz-harness/corpus/module/*.case binary
+crates/aon-fuzz-harness/corpus/s1m5-reference/*.case binary

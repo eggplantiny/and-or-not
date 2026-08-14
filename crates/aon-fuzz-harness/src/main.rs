@@ -3,14 +3,15 @@ use aon_fuzz_harness::{
     MAX_CAPACITY_SUPPORT_INPUT_BYTES, MAX_COMMAND_INPUT_BYTES, MAX_DECODER_INPUT_BYTES,
     MAX_EXPERIMENT_INPUT_BYTES, MAX_GEOMETRY_INPUT_BYTES, MAX_MOBILITY_RUNTIME_INPUT_BYTES,
     MAX_MODULE_INPUT_BYTES, MAX_REPLAY_INPUT_BYTES, MAX_S1M4_KERNEL_INPUT_BYTES,
-    MAX_S1M4_RUNTIME_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES, MAX_TOPOLOGY_RUNTIME_INPUT_BYTES,
-    MobilityRuntimeExecutionObservation, S1m4KernelExecutionObservation,
-    S1m4RuntimeExecutionObservation, SignalRuntimeExecutionObservation,
-    StatefulCommandExecutionObservation, TopologyRuntimeExecutionObservation,
-    exercise_capacity_support, exercise_commands, exercise_decoder, exercise_experiment_decoder,
-    exercise_geometry, exercise_mobility_runtime, exercise_module_decoder, exercise_replay_decoder,
-    exercise_s1m4_kernels, exercise_s1m4_runtime, exercise_signal_runtime,
-    exercise_stateful_commands, exercise_topology_runtime,
+    MAX_S1M4_RUNTIME_INPUT_BYTES, MAX_S1M5_REFERENCE_INPUT_BYTES, MAX_SIGNAL_RUNTIME_INPUT_BYTES,
+    MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, MobilityRuntimeExecutionObservation,
+    S1m4KernelExecutionObservation, S1m4RuntimeExecutionObservation,
+    SignalRuntimeExecutionObservation, StatefulCommandExecutionObservation,
+    TopologyRuntimeExecutionObservation, exercise_capacity_support, exercise_commands,
+    exercise_decoder, exercise_experiment_decoder, exercise_geometry, exercise_mobility_runtime,
+    exercise_module_decoder, exercise_replay_decoder, exercise_s1m4_kernels, exercise_s1m4_runtime,
+    exercise_s1m5_reference_artifacts, exercise_signal_runtime, exercise_stateful_commands,
+    exercise_topology_runtime,
 };
 use std::io::Read;
 
@@ -29,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max(MAX_TOPOLOGY_RUNTIME_INPUT_BYTES)
         .max(MAX_CAPACITY_SUPPORT_INPUT_BYTES)
         .max(MAX_S1M4_KERNEL_INPUT_BYTES)
-        .max(MAX_S1M4_RUNTIME_INPUT_BYTES);
+        .max(MAX_S1M4_RUNTIME_INPUT_BYTES)
+        .max(MAX_S1M5_REFERENCE_INPUT_BYTES);
     let mut input = Vec::new();
     std::io::stdin()
         .take(u64::try_from(input_limit)?)
@@ -47,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "mobility" => print_mobility_runtime(&input)?,
         "capacity" => print_capacity_support(&input)?,
         "s1m4" => print_s1m4(&input)?,
+        "s1m5" => print_s1m5(&input),
         "both" => {
             print_decoder(&input);
             print_geometry(&input);
@@ -64,15 +67,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_mobility_runtime(&input)?;
             print_capacity_support(&input)?;
             print_s1m4(&input)?;
+            print_s1m5(&input);
         }
         _ => {
             return Err(format!(
-                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, capacity, s1m4, both, or all"
+                "unknown mode `{mode}`; expected decoder, replay, experiment, module, geometry, commands, signal, topology, mobility, capacity, s1m4, s1m5, both, or all"
             )
             .into());
         }
     }
     Ok(())
+}
+
+fn print_s1m5(input: &[u8]) {
+    let observation = exercise_s1m5_reference_artifacts(input);
+    match observation.result {
+        Ok(canonical) => println!(
+            "s1m5-reference target={:?} payload_bytes={} result=accepted canonical_bytes={} semantic_hash={}",
+            observation.target,
+            observation.payload_len,
+            canonical.canonical_len,
+            canonical
+                .semantic_hash
+                .map_or_else(|| "none".to_owned(), |hash| hash.to_string())
+        ),
+        Err(error) => println!(
+            "s1m5-reference target={:?} payload_bytes={} result=rejected error={error}",
+            observation.target, observation.payload_len
+        ),
+    }
 }
 
 fn print_s1m4(input: &[u8]) -> Result<(), Box<dyn std::error::Error>> {

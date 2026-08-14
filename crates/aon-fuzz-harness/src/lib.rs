@@ -3,6 +3,7 @@
 mod capacity_support;
 mod mobility_runtime;
 mod s1m4_runtime;
+mod s1m5_reference;
 mod topology_runtime;
 
 pub use capacity_support::{
@@ -19,6 +20,10 @@ pub use s1m4_runtime::{
     S1m4KernelExecutionObservation, S1m4KernelInvariant, S1m4KernelObservation, S1m4KernelStage,
     S1m4RuntimeCoverage, S1m4RuntimeExecutionObservation, S1m4RuntimeObservation,
     S1m4RuntimeScenario, S1m4RuntimeStage, exercise_s1m4_kernels, exercise_s1m4_runtime,
+};
+pub use s1m5_reference::{
+    MAX_S1M5_REFERENCE_INPUT_BYTES, S1m5ReferenceCanonicalObservation, S1m5ReferenceObservation,
+    S1m5ReferenceTarget, exercise_s1m5_reference_artifacts,
 };
 pub use topology_runtime::{
     MAX_TOPOLOGY_RUNTIME_INPUT_BYTES, TopologyRuntimeCoverage, TopologyRuntimeExecutionObservation,

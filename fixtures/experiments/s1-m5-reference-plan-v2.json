@@ -1,0 +1,53 @@
+{
+  "formatVersion": 2,
+  "hashAlgorithmId": "blake3-v1",
+  "experimentId": "s1-m5-reference-experiment-v2",
+  "stage": "s1-m5",
+  "pair": {
+    "path": "s1-m5-reference-pair-v1.json",
+    "artifactHash": "06862662b409a22576dcf876184bcc84c03f67a39c687b2f4cd0172ab2913705"
+  },
+  "scenario": {
+    "path": "../scenarios/s1-m5-reference-architectures-v1.json",
+    "artifactHash": "5670fb1cc24bd28fc56ccbd370030a9637a333afa82cf55a46c8ecd8e385aaa6"
+  },
+  "numericProfile": {
+    "path": "../../profiles/numeric/v1.json",
+    "profileId": "numeric-v1",
+    "profileHash": "fe92f0c723660040a3200254890c8a34ec3ed9e65fc242de1c0951e4ecd00469"
+  },
+  "physicalScaleProfile": {
+    "path": "../../profiles/physical-scale/stage0-alpha.json",
+    "profileId": "physical-scale-stage0-alpha",
+    "profileHash": "0e0f7fe8c9ccbf0b159d44e4e53d05417cf558c37e796e5f8bccd8221aec6490"
+  },
+  "balanceProfile": {
+    "path": "../../profiles/balance/s1-m4-construction-contact-damage-alpha.json",
+    "profileId": "balance-s1-m4-construction-contact-damage-alpha",
+    "profileHash": "88b8fdc40dae59563699a0f611adae21c40d770d3d1c9076f8262a756107311a"
+  },
+  "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+  "buildEndTick": 18,
+  "measurementStartTick": 18,
+  "maxTicks": 20,
+  "metricSetId": "s1-m5-reference-baseline-v1",
+  "metricSetHash": "94c9377d27a4e8d0ddf7b184c723c264387a319b3169d242dea999da3cc94f04",
+  "designs": [
+    {
+      "role": "brute",
+      "design": {
+        "path": "../designs/s1-m5-brute-v2.json",
+        "artifactHash": "52401f698a4508c774f046188c4cb878179595f41e9a1a1f50996d9ca03b7558"
+      },
+      "commandLogHash": "59757b665ad723401d51c85c0312cadb7dd4505e1417d2606c86c2568332fa77"
+    },
+    {
+      "role": "computed",
+      "design": {
+        "path": "../designs/s1-m5-computed-v2.json",
+        "artifactHash": "9c86dd33405a260b52cfb8d0b567c29faf9d6cdfdefed220702a3a9745eb98d0"
+      },
+      "commandLogHash": "3ba662b394ee1624d4e1a64b381186d7423688210097f0590e81f44d63b667ff"
+    }
+  ]
+}
